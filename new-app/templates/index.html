@@ -1343,6 +1343,13 @@
         .replaceAll("<", "&lt;")
         .replaceAll(">", "&gt;");
     }
+
+    const apiDown = "Cannot reach the API. Keep python main.py running and open http://127.0.0.1:8002.";
+    fetch(apiBase() + "/health").then((response) => {
+      if (!response.ok) errorEl.textContent = apiDown;
+    }).catch(() => {
+      errorEl.textContent = apiDown;
+    });
   </script>
 </body>
 </html>

@@ -1,5 +1,19 @@
 from __future__ import annotations
 
+import sys
+
+# Windows resets the browser connection when a PDF upload rolls past Starlette's
+# 1 MB temp-file limit. The selector loop and a larger in-memory spool keep
+# POST /api/inspect and POST /api/jobs reachable after the files are chosen.
+if sys.platform == "win32":
+    import asyncio
+
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+from starlette.formparsers import MultiPartParser
+
+MultiPartParser.spool_max_size = 200 * 1024 * 1024
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -42,6 +56,31 @@ def ui() -> FileResponse:
 
 
 if __name__ == "__main__":
+    import threading
+    import time
+    import urllib.request
+    import webbrowser
+
     import uvicorn
 
-    uvicorn.run("main:app", host=HOST, port=PORT, reload=False)
+    def _open_browser() -> None:
+        health = f"http://127.0.0.1:{PORT}/health"
+        page = f"http://127.0.0.1:{PORT}"
+        for _ in range(50):
+            try:
+                with urllib.request.urlopen(health, timeout=0.4) as response:
+                    if response.status == 200:
+                        webbrowser.open(page)
+                        return
+            except Exception:
+                time.sleep(0.2)
+
+    print(f"Keep this window open. App: http://127.0.0.1:{PORT}", flush=True)
+    threading.Thread(target=_open_browser, daemon=True).start()
+    uvicorn.run(
+        "main:app",
+        host=HOST,
+        port=PORT,
+        reload=False,
+        http="h11" if sys.platform == "win32" else "auto",
+    )

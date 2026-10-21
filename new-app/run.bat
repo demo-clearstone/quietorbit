@@ -20,7 +20,7 @@ if errorlevel 1 (
   exit /b 1
 )
 echo.
-echo Open http://127.0.0.1:8002
+echo Keep this window open. The browser will open http://127.0.0.1:8002
 echo.
 python main.py
 pause
