@@ -801,51 +801,66 @@
     async function inspectAndAdd(incoming) {
       errorEl.textContent = "";
       setStatus("Adding " + incoming.length + " file(s)…");
+      const fresh = [];
       incoming.forEach((file) => {
         if (files.some((item) => item.name === file.name && item.file)) return;
         files.push({ name: file.name, size: file.size, file: file, label: file.name, rank: 1000 });
+        fresh.push(file);
       });
       renderFiles();
-      const form = new FormData();
-      incoming.forEach((file) => form.append("files", file, file.name));
+      if (!fresh.length) {
+        setStatus("Listed " + files.length + " file(s).");
+        return;
+      }
+      const metas = [];
       try {
-        const response = await postForm("/api/inspect", form);
-        const text = await response.text();
-        let payload = {};
-        try {
-          payload = text ? JSON.parse(text) : {};
-        } catch {
-          throw new Error(text || response.statusText);
+        for (const file of fresh) {
+          const sent = await sendFileParts(file);
+          metas.push(sent.meta);
+          files = files.filter((item) => !(item.file && item.name === file.name && !item.uploadId));
+          expandListed(sent.meta, { file: file, uploadId: sent.uploadId }).forEach((row) => files.push(row));
+          sortFilesIfAutoOrder();
+          retitleCoverRows();
+          renderFiles();
         }
-        if (!response.ok) {
-          throw new Error(formatDetail(payload.detail) || response.statusText);
-        }
-        const metas = payload.files || [];
-        const names = new Set(incoming.map((file) => file.name));
-        files = files.filter((item) => !(item.file && names.has(item.name)));
-        incoming.forEach((file) => {
-          const meta = metas.find((item) => item.name === file.name) || {
-            name: file.name,
-            size: file.size,
-            pages: 1,
-            split: false,
-          };
-          expandListed(meta, { file: file }).forEach((row) => files.push(row));
-        });
-        sortFilesIfAutoOrder();
-        retitleCoverRows();
-        renderFiles();
-        const extraPages = (metas || []).filter((item) => item.split);
+        const extraPages = metas.filter((item) => item.split);
         setStatus(extraPages.length
           ? extraPages.map((item) => (item.label || item.name) + " listed as " + item.pages + " page(s).").join(" ")
           : "Listed " + files.length + " file(s).");
       } catch (err) {
+        const failedNames = new Set(fresh.map((file) => file.name));
+        files = files.filter((item) => !(item.file && failedNames.has(item.name) && !item.uploadId));
+        renderFiles();
         const raw = err.message || String(err);
         errorEl.textContent = raw === "Failed to fetch"
           ? "The file did not reach the API. Keep the python main.py window open and use http://127.0.0.1:8002."
           : raw;
         setStatus("Listed " + files.length + " file(s).");
       }
+    }
+
+    async function sendFileParts(file) {
+      const uploadId = (window.crypto && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : ("up" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10));
+      const chunkSize = 24 * 1024;
+      const total = Math.max(1, Math.ceil((file.size || 0) / chunkSize));
+      let meta = null;
+      for (let index = 0; index < total; index += 1) {
+        const start = index * chunkSize;
+        const piece = file.slice(start, Math.min(file.size || 0, start + chunkSize));
+        setStatus("Uploading " + file.name + "… " + (index + 1) + " of " + total);
+        const form = new FormData();
+        form.append("upload_id", uploadId);
+        form.append("name", file.name);
+        form.append("index", String(index));
+        form.append("total", String(total));
+        form.append("chunk", piece, file.name);
+        const payload = await postJson("/api/upload-part", form);
+        if (payload.complete && payload.file) meta = payload.file;
+      }
+      if (!meta) throw new Error("Upload did not finish for " + file.name);
+      return { uploadId: uploadId, meta: meta };
     }
 
     function fileLabel(file) {
@@ -968,17 +983,27 @@
       return "";
     }
 
-    async function postForm(path, form) {
-      const url = apiBase() + path;
+    async function postJson(path, form) {
       let lastError = null;
       for (let attempt = 0; attempt < 2; attempt += 1) {
         try {
-          return await fetch(url, { method: "POST", body: form, cache: "no-store" });
+          const response = await fetch(apiBase() + path, { method: "POST", body: form });
+          const text = await response.text();
+          let payload = {};
+          try {
+            payload = text ? JSON.parse(text) : {};
+          } catch {
+            throw new Error(text || response.statusText);
+          }
+          if (!response.ok) {
+            throw new Error(formatDetail(payload.detail) || response.statusText);
+          }
+          return payload;
         } catch (err) {
           lastError = err;
           const message = err && err.message ? err.message : String(err);
           if (attempt === 0 && message === "Failed to fetch") {
-            await new Promise((resolve) => setTimeout(resolve, 400));
+            await new Promise((resolve) => setTimeout(resolve, 300));
             continue;
           }
           throw err;
@@ -1026,9 +1051,9 @@
       });
       const seenUpload = {};
       files.forEach((item) => {
-        if (item.file && !seenUpload[item.name]) {
-          seenUpload[item.name] = true;
-          form.append("files", item.file, item.name);
+        if (item.uploadId && !seenUpload[item.uploadId]) {
+          seenUpload[item.uploadId] = true;
+          form.append("upload_id", item.uploadId);
         }
       });
       runBtn.disabled = true;
@@ -1040,17 +1065,7 @@
       hidePreview();
       results.classList.remove("open");
       try {
-        const response = await postForm("/api/jobs", form);
-        const text = await response.text();
-        let payload = {};
-        try {
-          payload = text ? JSON.parse(text) : {};
-        } catch {
-          throw new Error(text || response.statusText);
-        }
-        if (!response.ok) {
-          throw new Error(formatDetail(payload.detail) || response.statusText);
-        }
+        const payload = await postJson("/api/jobs", form);
         showResults(payload);
         showElapsed("Done. Time to process: ", payload.elapsed_seconds == null ? (Date.now() - processStarted) / 1000 : payload.elapsed_seconds);
       } catch (err) {
