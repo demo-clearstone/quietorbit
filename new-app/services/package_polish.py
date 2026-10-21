@@ -211,38 +211,69 @@ def remove_disallowed_wording(doc: fitz.Document, keep_soc: bool = False) -> lis
     return ["Removed " + ", ".join(removed) + "."]
 
 
+_ADP_PHRASES = ("ADP/ACP", "ADP / ACP", "ADP and/or ACP", "ADP and ACP")
+
+
+def _is_recap_page(text: str) -> bool:
+    return bool(re.search(r"year[- ]end recap|important information", text or "", re.I))
+
+
 def rewrite_403b_adp_mentions(doc: fitz.Document) -> list[str]:
-    """403(b) packages mention ACP only. ADP/ACP becomes ACP, and leftover ADP lines are removed."""
+    """403(b) packages mention ACP only.
+
+    ADP/ACP becomes ACP. A Year End Recap page stays, including the bullet that
+    says the plan is not subject to ADP/ACP testing. Other leftover ADP lines are removed.
+    """
     changed = False
     for page in doc:
-        hits = []
-        for phrase in ("ADP/ACP", "ADP / ACP", "ADP and/or ACP", "ADP and ACP"):
+        recap = _is_recap_page(page.get_text("text") or "")
+        hits: list[fitz.Rect] = []
+        for phrase in _ADP_PHRASES:
             hits.extend(page.search_for(phrase))
         if hits:
             for rect in hits:
-                page.add_redact_annot(rect, text="ACP", fontsize=8, fill=(1, 1, 1))
-            page.apply_redactions()
+                page.add_redact_annot(rect + (-1, -2, 1, 1), fill=(1, 1, 1))
+            page.apply_redactions(images=0)
+            for rect in hits:
+                page.insert_text(
+                    (rect.x0, rect.y1 - 1),
+                    "ACP",
+                    fontsize=max(8.0, min(11.0, rect.height * 0.85)),
+                    fontname="helv",
+                    color=(0, 0, 0),
+                )
             changed = True
+        if recap:
+            continue
         words = page.get_text("words") or []
         lines: dict[int, list] = {}
         for word in words:
-            lines.setdefault(round(word[1]), []).append(word)
-        dropped = False
+            lines.setdefault(round(float(word[1])), []).append(word)
+        boxes: list[fitz.Rect] = []
         for group in lines.values():
             text = " ".join(str(word[4]) for word in group)
             if not re.search(r"\bADP\b", text):
                 continue
-            rect = fitz.Rect(
-                min(word[0] for word in group),
-                min(word[1] for word in group),
-                max(word[2] for word in group),
-                max(word[3] for word in group),
+            boxes.append(
+                fitz.Rect(
+                    min(word[0] for word in group) - 2,
+                    min(word[1] for word in group) - 3,
+                    max(word[2] for word in group) + 2,
+                    max(word[3] for word in group) + 2,
+                )
             )
-            page.add_redact_annot(rect, fill=(1, 1, 1))
-            dropped = True
-        if dropped:
-            page.apply_redactions()
-            changed = True
+        if not boxes:
+            continue
+        for rect in boxes:
+            page.add_redact_annot(rect & page.rect, fill=(1, 1, 1))
+        page.apply_redactions(images=0)
+        for rect in boxes:
+            page.draw_rect(rect & page.rect, color=(1, 1, 1), fill=(1, 1, 1), width=0, overlay=True)
+        changed = True
+    if changed:
+        from services.pdf_modifier import _drop_empty_pages
+
+        _drop_empty_pages(doc)
     if not changed:
         return []
     return ["403(b) package uses ACP only. ADP testing wording was removed."]

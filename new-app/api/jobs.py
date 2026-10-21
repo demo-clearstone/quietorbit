@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+import re
 from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, Response
 
-from config.settings import OUTPUT_DIR
+from config.settings import MAX_FILE_BYTES, MAX_FILES, OUTPUT_DIR
 from models.job import JobResult
 from services.change_marks import apply_highlights, load_marks
 from services.file_order import list_file_meta
@@ -15,6 +17,11 @@ from services.orchestrator import process_uploads
 
 router = APIRouter()
 JOBS: dict[str, JobResult] = {}
+# Windows closes one large POST (Chrome: net::ERR_FAILED). Pieces stay in memory until Process.
+_PARTS: dict[str, dict] = {}
+_BLOBS: dict[str, tuple[str, bytes]] = {}
+_UPLOAD_ID = re.compile(r"[A-Za-z0-9_-]{8,80}")
+_CHUNK_LIMIT = 48 * 1024
 
 
 def _saved_pdf(job_id: str) -> tuple[Path, str] | None:
@@ -46,6 +53,7 @@ async def create_job(
     file_order: list[str] | None = Form(default=None),
     item_name: list[str] | None = Form(default=None),
     item_page: list[int] | None = Form(default=None),
+    upload_id: list[str] | None = Form(default=None),
 ) -> JobResult:
     uploads: list[tuple[str, bytes]] = []
     warnings: list[str] = []
@@ -60,6 +68,19 @@ async def create_job(
             warnings.extend(order_warnings)
             warnings.append("Using the file order shown in the list.")
         uploads.extend(folder_uploads)
+
+    seen_ids: set[str] = set()
+    for token in upload_id or []:
+        if not token or token in seen_ids:
+            continue
+        kept = _stored_upload(token)
+        if kept is None:
+            raise HTTPException(
+                status_code=400,
+                detail="That file is no longer on the server. Add it again, then click Process package.",
+            )
+        seen_ids.add(token)
+        uploads.append(kept)
 
     for upload in files or []:
         name = upload.filename or ""
@@ -112,6 +133,87 @@ def list_source_folder(path: str = "") -> dict:
     return list_folder_files(folder)
 
 
+def _stored_upload(token: str) -> tuple[str, bytes] | None:
+    if not _UPLOAD_ID.fullmatch(token or ""):
+        return None
+    return _BLOBS.get(token)
+
+
+def _remember_blob(upload_id: str, name: str, data: bytes) -> None:
+    _BLOBS[upload_id] = (name, data)
+    while len(_BLOBS) > MAX_FILES:
+        _BLOBS.pop(next(iter(_BLOBS)))
+
+
+async def _describe_file(name: str, data: bytes) -> dict:
+    pages = 1
+    page_texts: list[str] = []
+    if name.lower().endswith(".pdf") and data:
+        pages, page_texts = await asyncio.to_thread(_pdf_pages, data)
+    try:
+        return list_file_meta(name, len(data), pages, page_texts)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Could not read {name}: {exc}") from exc
+
+
+@router.post("/upload-part")
+async def upload_part(
+    upload_id: str = Form(default=""),
+    name: str = Form(default=""),
+    index: int = Form(default=0),
+    total: int = Form(default=1),
+    chunk: UploadFile | None = File(default=None),
+) -> dict:
+    """Accept one small slice of a file. The last slice returns page labels."""
+    token = (upload_id or "").strip()
+    if not _UPLOAD_ID.fullmatch(token):
+        raise HTTPException(status_code=400, detail="Upload id is not valid")
+    filename = (name or "").strip()
+    if not filename or filename.startswith("~$"):
+        raise HTTPException(status_code=400, detail="Choose a PDF or Excel file")
+    if not filename.lower().endswith((".pdf", ".xlsx", ".xls")):
+        raise HTTPException(status_code=400, detail=f"{filename} must be a PDF or Excel file")
+    if total < 1 or total > 4000 or index < 0 or index >= total:
+        raise HTTPException(status_code=400, detail="Upload piece is out of range")
+    piece = await chunk.read() if chunk is not None else b""
+    if len(piece) > _CHUNK_LIMIT:
+        raise HTTPException(status_code=400, detail="Upload piece is too large")
+
+    finished = _BLOBS.get(token)
+    if finished and index == total - 1 and not _PARTS.get(token):
+        stored_name, stored = finished
+        return {"complete": True, "upload_id": token, "file": await _describe_file(stored_name, stored)}
+
+    bucket = _PARTS.setdefault(token, {"name": filename, "total": total, "parts": {}})
+    if bucket["name"] != filename or bucket["total"] != total:
+        raise HTTPException(status_code=400, detail="Upload pieces do not match")
+    bucket["parts"][index] = piece
+    if len(bucket["parts"]) < total:
+        return {"complete": False, "upload_id": token}
+
+    missing = [number for number in range(total) if number not in bucket["parts"]]
+    if missing:
+        return {"complete": False, "upload_id": token}
+    data = b"".join(bucket["parts"][number] for number in range(total))
+    _PARTS.pop(token, None)
+    if not data:
+        raise HTTPException(status_code=400, detail=f"{filename} is empty")
+    if len(data) > MAX_FILE_BYTES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{filename} exceeds {MAX_FILE_BYTES // (1024 * 1024)} MB limit",
+        )
+    _remember_blob(token, filename, data)
+    return {"complete": True, "upload_id": token, "file": await _describe_file(filename, data)}
+
+
+def _pdf_pages(data: bytes) -> tuple[int, list[str]]:
+    try:
+        return pdf_page_count(data), pdf_page_texts(data)
+    except Exception:
+        return 1, []
+
+
 @router.post("/inspect")
 async def inspect_uploads(files: list[UploadFile] | None = File(default=None)) -> dict:
     """Return page counts so the UI can list each PDF page for reordering."""
@@ -124,12 +226,12 @@ async def inspect_uploads(files: list[UploadFile] | None = File(default=None)) -
         pages = 1
         page_texts: list[str] = []
         if name.lower().endswith(".pdf") and data:
-            try:
-                pages = pdf_page_count(data)
-                page_texts = pdf_page_texts(data)
-            except Exception:
-                pages = 1
-        listed.append(list_file_meta(name, len(data or b""), pages, page_texts))
+            # Fitz blocks. Keep it off the event loop so Windows can finish the upload.
+            pages, page_texts = await asyncio.to_thread(_pdf_pages, data)
+        try:
+            listed.append(list_file_meta(name, len(data or b""), pages, page_texts))
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Could not read {name}: {exc}") from exc
     return {"files": listed}
 
 

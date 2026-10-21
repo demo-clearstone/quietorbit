@@ -2,14 +2,24 @@ from __future__ import annotations
 
 import sys
 
-# Windows resets the browser connection while a PDF is uploading. Uvicorn's
-# default Proactor loop does this on POST /api/inspect. A selector loop keeps
-# the request open. PDF bytes also stay in memory so Windows does not lock a
-# temp file once the upload passes 1 MB.
-def selector_loop_factory(use_subprocess: bool = False):
-    import asyncio
+def _keep_upload_socket_open() -> None:
+    """Do not pause the socket after 64 KB. That pause resets PDF uploads on Windows."""
+    limit = 256 * 1024 * 1024
+    modules = (
+        "uvicorn.protocols.http.flow_control",
+        "uvicorn.protocols.http.h11_impl",
+        "uvicorn.protocols.http.httptools_impl",
+        "uvicorn.protocols.http.zttp_impl",
+    )
+    import importlib
 
-    return asyncio.SelectorEventLoop
+    for name in modules:
+        try:
+            module = importlib.import_module(name)
+        except Exception:
+            continue
+        if hasattr(module, "HIGH_WATER_LIMIT"):
+            module.HIGH_WATER_LIMIT = limit
 
 
 from starlette.formparsers import MultiPartParser
@@ -38,6 +48,30 @@ app.add_middleware(
 )
 
 app.include_router(jobs_router, prefix="/api")
+
+
+class _CloseAfterResponse:
+    """Tell the browser not to reuse a socket Windows may already have reset."""
+
+    def __init__(self, asgi_app):
+        self.asgi_app = asgi_app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http" or sys.platform != "win32":
+            await self.asgi_app(scope, receive, send)
+            return
+
+        async def send_close(message):
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers") or [])
+                headers.append((b"connection", b"close"))
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self.asgi_app(scope, receive, send_close)
+
+
+app.add_middleware(_CloseAfterResponse)
 
 
 @app.get("/health")
@@ -79,10 +113,14 @@ if __name__ == "__main__":
 
     print(f"Keep this window open. App: http://127.0.0.1:{PORT}", flush=True)
     threading.Thread(target=_open_browser, daemon=True).start()
-    run_kwargs = {"host": HOST, "port": PORT, "reload": False}
+    _keep_upload_socket_open()
+    run_kwargs = {
+        "host": HOST,
+        "port": PORT,
+        "reload": False,
+        "timeout_keep_alive": 120,
+        "http": "h11",
+    }
     if sys.platform == "win32":
-        # Passing loop="asyncio" still builds a ProactorEventLoop on Windows.
-        run_kwargs["loop"] = "main:selector_loop_factory"
-        run_kwargs["http"] = "h11"
-        print("Windows PDF uploads use the selector event loop.", flush=True)
+        print("Windows uploads are sent in small pieces so the connection stays open.", flush=True)
     uvicorn.run("main:app", **run_kwargs)

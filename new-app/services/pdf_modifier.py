@@ -50,10 +50,8 @@ def apply_decisions(
                 boxes.append(fitz.Rect(40, max(36, hit.y0 - 2), page.rect.x1 - 40, end_y))
                 if rule_id not in removed:
                     removed.append(rule_id)
-        for box in boxes:
-            page.add_redact_annot(box, fill=(1, 1, 1), text="")
         if boxes:
-            page.apply_redactions()
+            _apply_redact_boxes(page, boxes)
             touched.add(page.number)
     if touched:
         _restack_pages(doc, touched)
@@ -169,11 +167,11 @@ def _restack_pages(doc: fitz.Document, touched: set[int]) -> None:
         body = [block for block in blocks if not _is_page_number_block(page, block)]
         footer = [block for block in blocks if _is_page_number_block(page, block)]
         header_bottom, footer_top = _image_bands(page)
-        for block in blocks:
-            page.add_redact_annot(block["bbox"] + (-1, -1, 1, 1), fill=(1, 1, 1), text="")
-        for drawing in page.get_drawings():
-            page.add_redact_annot(fitz.Rect(drawing["rect"]) + (0, -1, 0, 1), fill=(1, 1, 1), text="")
-        page.apply_redactions()
+        _apply_redact_boxes(
+            page,
+            [block["bbox"] for block in blocks]
+            + [fitz.Rect(drawing["rect"]) for drawing in page.get_drawings()],
+        )
         cursor = header_bottom
         for block in body:
             height = block["bbox"].height
@@ -290,6 +288,79 @@ _KEPT_ACTION = re.compile(
 )
 
 
+def _is_recap_text(text: str) -> bool:
+    return bool(re.search(r"year[- ]end recap|important information", text or "", re.I))
+
+
+def _is_noise_text(text: str) -> bool:
+    """A page number or a stray letter such as 'i' is not a paragraph."""
+    words = re.findall(r"[A-Za-z0-9]+", text or "")
+    return not any(len(word) >= 2 and re.search(r"[A-Za-z]", word) for word in words)
+
+
+def _pad_rect(rect: fitz.Rect, page: fitz.Page) -> fitz.Rect:
+    """Cover the dot on a narrow glyph. Redaction otherwise leaves the letter i."""
+    # Extend upward to cover the dot on i. Keep the bottom tight so the next line stays.
+    return (fitz.Rect(rect) + (-1, -3, 1, 1)) & page.rect
+
+
+def _apply_redact_boxes(page: fitz.Page, boxes: list[fitz.Rect]) -> None:
+    rects = [rect for box in boxes if (rect := _pad_rect(box, page)) and not rect.is_empty]
+    if not rects:
+        return
+    for rect in rects:
+        page.add_redact_annot(rect, fill=(1, 1, 1))
+    page.apply_redactions(images=0)
+    leftover: list[fitz.Rect] = []
+    for rect in rects:
+        for word in page.get_text("words") or []:
+            word_rect = fitz.Rect(word[:4])
+            if word_rect.intersects(rect):
+                leftover.append(_pad_rect(word_rect, page))
+    if leftover:
+        for rect in leftover:
+            page.add_redact_annot(rect, fill=(1, 1, 1))
+        page.apply_redactions(images=0)
+    for rect in rects:
+        page.draw_rect(rect, color=(1, 1, 1), fill=(1, 1, 1), width=0, overlay=True)
+
+
+def _action_blocks_to_move(page: fitz.Page) -> list[dict]:
+    """The kept action line and its body. Skip the page number and the Year End Recap."""
+    blocks: list[dict] = []
+    started = False
+    for block in _text_blocks(page):
+        if _is_page_number_block(page, block):
+            continue
+        text = " ".join(span["text"] for span in block["spans"]).strip()
+        if not text or _is_noise_text(text):
+            continue
+        if _KEPT_ACTION.search(text):
+            if _is_recap_text(text):
+                break
+            started = True
+            blocks.append(block)
+            continue
+        if not started:
+            continue
+        if _is_recap_text(text) or re.search(r"annual valuation report", text, re.I):
+            break
+        blocks.append(block)
+    return blocks
+
+
+def _write_action_heading(page: fitz.Page, cursor: float) -> float:
+    page.insert_text((54, cursor), "ACTION REQUIRED", fontsize=11, fontname="hebo", color=(0, 0, 0))
+    width = fitz.get_text_length("ACTION REQUIRED", fontname="hebo", fontsize=11)
+    page.draw_line(
+        fitz.Point(54, cursor + 2),
+        fitz.Point(54 + width, cursor + 2),
+        color=(0, 0, 0),
+        width=0.8,
+    )
+    return cursor + 22
+
+
 def _pull_kept_action_forward(doc: fitz.Document) -> None:
     """When every item on the Action Required page is removed, move the green line up under the header."""
     anchor = None
@@ -305,19 +376,25 @@ def _pull_kept_action_forward(doc: fitz.Document) -> None:
             later.append(page)
     if anchor is None or not later or _KEPT_ACTION.search(anchor.get_text("text") or ""):
         return
-    blocks: list[dict] = []
-    for page in later:
-        blocks.extend(_text_blocks(page))
-    if not blocks:
-        return
     anchor_blocks = _text_blocks(anchor)
-    cursor = anchor_blocks[-1]["bbox"].y1 + 18 if anchor_blocks else 72
-    for block in blocks:
-        delta = cursor - block["bbox"].y0
-        for span in block["spans"]:
-            _write_span(anchor, span, delta)
-        cursor += block["bbox"].height + 8
-    for number in reversed([page.number for page in later]):
+    cursor = anchor_blocks[-1]["bbox"].y1 + 18 if anchor_blocks else 90
+    if not re.search(r"action required", anchor.get_text("text") or "", re.I):
+        cursor = _write_action_heading(anchor, cursor)
+    delete_numbers: list[int] = []
+    for page in later:
+        blocks = _action_blocks_to_move(page)
+        if not blocks:
+            continue
+        for block in blocks:
+            delta = cursor - block["bbox"].y0
+            for span in block["spans"]:
+                _write_span(anchor, span, delta)
+            cursor += block["bbox"].height + 8
+        if _is_recap_text(page.get_text("text") or ""):
+            _apply_redact_boxes(page, [block["bbox"] for block in blocks])
+            continue
+        delete_numbers.append(page.number)
+    for number in reversed(delete_numbers):
         doc.delete_page(number)
 
 
@@ -359,9 +436,18 @@ def _drop_empty_pages(doc: fitz.Document) -> None:
     for page in doc:
         if page.number == 0:
             continue
-        if page.get_images():
+        text = page.get_text("text") or ""
+        if _is_recap_text(text):
             continue
-        if _is_header_only_page(page) or _is_empty_text(page.get_text("text") or "") or _footer_only(page):
+        # A scanned report has a logo and no text layer. A cleared page with a leftover "i" does not.
+        if page.get_images() and _is_empty_text(text):
+            continue
+        if (
+            _is_header_only_page(page)
+            or _is_empty_text(text)
+            or _footer_only(page)
+            or _is_noise_text(text)
+        ):
             drop.append(page.number)
     for number in reversed(drop):
         if doc.page_count <= 1:
@@ -375,6 +461,8 @@ _PAGE_NUMBER = re.compile(r"^(?:page\s*)?\d{1,3}$", re.I)
 def _is_header_only_page(page: fitz.Page) -> bool:
     """A heading with no paragraph left is an empty page."""
     text = page.get_text("text") or ""
+    if _is_recap_text(text):
+        return False
     has_heading = bool(
         _REPORT_TITLE.search(text) or re.search(r"(?m)^\s*action required\s*$", text, re.I)
     )
@@ -564,8 +652,7 @@ def apply_recap_bullets(
         updated_text = "\n".join(header_lines + kept)
         if updated_text.strip() == re.sub(r"\s+", " ", original).strip():
             continue
-        page.add_redact_annot(page.rect, fill=(1, 1, 1), text="")
-        page.apply_redactions()
+        _apply_redact_boxes(page, [page.rect])
         from services.package_builder import write_recap_page
 
         number = _recap_page_number(original)
