@@ -2,20 +2,6 @@ from __future__ import annotations
 
 import sys
 
-# Windows resets the browser connection while a PDF is uploading. Uvicorn's
-# default Proactor loop does this on POST /api/inspect. A selector loop keeps
-# the request open. PDF bytes also stay in memory so Windows does not lock a
-# temp file once the upload passes 1 MB.
-def selector_loop_factory(use_subprocess: bool = False):
-    import asyncio
-    import selectors
-
-    # Uvicorn calls this with no arguments and then closes the result.
-    # Returning the class makes close() fail on Python 3.14:
-    # TypeError: BaseSelectorEventLoop.close() missing 1 required positional argument: 'self'
-    return asyncio.SelectorEventLoop(selectors.SelectSelector())
-
-
 def _keep_upload_socket_open() -> None:
     """Do not pause the socket after 64 KB. That pause resets PDF uploads on Windows."""
     limit = 256 * 1024 * 1024
@@ -136,7 +122,5 @@ if __name__ == "__main__":
         "http": "h11",
     }
     if sys.platform == "win32":
-        # Passing loop="asyncio" still builds a ProactorEventLoop on Windows.
-        run_kwargs["loop"] = "main:selector_loop_factory"
-        print("Windows PDF uploads use the selector event loop.", flush=True)
+        print("Windows uploads are sent in small pieces so the connection stays open.", flush=True)
     uvicorn.run("main:app", **run_kwargs)
