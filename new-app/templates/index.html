@@ -809,7 +809,7 @@
       const form = new FormData();
       incoming.forEach((file) => form.append("files", file, file.name));
       try {
-        const response = await fetch(apiBase() + "/api/inspect", { method: "POST", body: form });
+        const response = await postForm("/api/inspect", form);
         const text = await response.text();
         let payload = {};
         try {
@@ -842,7 +842,7 @@
       } catch (err) {
         const raw = err.message || String(err);
         errorEl.textContent = raw === "Failed to fetch"
-          ? "Cannot reach the API. Keep python main.py running and open http://127.0.0.1:8002."
+          ? "The file did not reach the API. Keep the python main.py window open and use http://127.0.0.1:8002."
           : raw;
         setStatus("Listed " + files.length + " file(s).");
       }
@@ -968,6 +968,25 @@
       return "";
     }
 
+    async function postForm(path, form) {
+      const url = apiBase() + path;
+      let lastError = null;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          return await fetch(url, { method: "POST", body: form, cache: "no-store" });
+        } catch (err) {
+          lastError = err;
+          const message = err && err.message ? err.message : String(err);
+          if (attempt === 0 && message === "Failed to fetch") {
+            await new Promise((resolve) => setTimeout(resolve, 400));
+            continue;
+          }
+          throw err;
+        }
+      }
+      throw lastError;
+    }
+
     function formatDetail(detail) {
       if (!detail) return "";
       if (typeof detail === "string") return detail;
@@ -1021,7 +1040,7 @@
       hidePreview();
       results.classList.remove("open");
       try {
-        const response = await fetch(apiBase() + "/api/jobs", { method: "POST", body: form });
+        const response = await postForm("/api/jobs", form);
         const text = await response.text();
         let payload = {};
         try {
