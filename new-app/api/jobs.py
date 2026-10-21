@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
@@ -112,6 +113,13 @@ def list_source_folder(path: str = "") -> dict:
     return list_folder_files(folder)
 
 
+def _pdf_pages(data: bytes) -> tuple[int, list[str]]:
+    try:
+        return pdf_page_count(data), pdf_page_texts(data)
+    except Exception:
+        return 1, []
+
+
 @router.post("/inspect")
 async def inspect_uploads(files: list[UploadFile] | None = File(default=None)) -> dict:
     """Return page counts so the UI can list each PDF page for reordering."""
@@ -124,12 +132,12 @@ async def inspect_uploads(files: list[UploadFile] | None = File(default=None)) -
         pages = 1
         page_texts: list[str] = []
         if name.lower().endswith(".pdf") and data:
-            try:
-                pages = pdf_page_count(data)
-                page_texts = pdf_page_texts(data)
-            except Exception:
-                pages = 1
-        listed.append(list_file_meta(name, len(data or b""), pages, page_texts))
+            # Fitz blocks. Keep it off the event loop so Windows can finish the upload.
+            pages, page_texts = await asyncio.to_thread(_pdf_pages, data)
+        try:
+            listed.append(list_file_meta(name, len(data or b""), pages, page_texts))
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Could not read {name}: {exc}") from exc
     return {"files": listed}
 
 
