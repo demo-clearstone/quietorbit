@@ -53,7 +53,12 @@ def extract_plan_profile(doc: fitz.Document) -> PlanProfile:
     plan_type = _clean_line(_first_match(cover_text, COVER_PATTERNS.get("plan_type") or []))
 
     year_start, year_end = _plan_year(cover_text or full_text)
-    method = _testing_method(cover_text) or _testing_method(full_text) or _current_when_adp_has_no_prior(full_text)
+    method = (
+        _testing_method(cover_text)
+        or _adp_results_method(doc)
+        or _testing_method(full_text)
+        or _current_when_adp_has_no_prior(full_text)
+    )
     top_heavy_percent = _money_or_percent(full_text, TEST_PATTERNS["top_heavy_percent"])
 
     flags = {
@@ -75,7 +80,7 @@ def extract_plan_profile(doc: fitz.Document) -> PlanProfile:
 
     top_heavy = None
     if top_heavy_percent is not None:
-        top_heavy = top_heavy_percent >= 60
+        top_heavy = top_heavy_percent > 60
 
     stamp = inspect_cover_stamp(doc[0]) if doc.page_count else {
         "mentions_moa": False,
@@ -295,8 +300,32 @@ def detect_sections(doc: fitz.Document) -> list[DetectedSection]:
     return _detect_sections(doc)
 
 
+_PRIOR_NHCE_RESULTS = re.compile(
+    r"(?:ADP|ACP)\s+TEST\s+USING\s+PRIOR\s+YEAR\s+NHCE\s+PERCENTAGES",
+    re.I,
+)
+
+
+def _adp_results_method(doc: fitz.Document) -> str | None:
+    """The ADP/ACP results page says prior year when it uses prior-year NHCE percentages.
+
+    A results page without that wording is current-year testing. The recap sentence
+    "prior year data" is not the testing method.
+    """
+    saw_results = False
+    for page in doc:
+        text = page.get_text("text") or ""
+        if _PRIOR_NHCE_RESULTS.search(text):
+            return "PRIOR"
+        if re.search(r"\bTEST\s+RESULTS\b", text, re.I) and re.search(r"\bADP\b|\bACP\b", text, re.I):
+            saw_results = True
+    if saw_results:
+        return "CURRENT"
+    return None
+
+
 def _current_when_adp_has_no_prior(text: str) -> str | None:
-    """No 'Prior Testing' on the ADP/ACP results page means current-year testing."""
+    """No 'Prior Testing' on an ADP/ACP Test Results page means current-year testing."""
     if not re.search(r"ADP\s*/\s*ACP\s+Test\s+Results", text or "", re.I):
         return None
     if re.search(r"prior\s+testing", text or "", re.I):
@@ -305,11 +334,15 @@ def _current_when_adp_has_no_prior(text: str) -> str | None:
 
 
 def _detect_sections(doc: fitz.Document) -> list[DetectedSection]:
+    from services.package_polish import is_compliance_overview
+
     found: list[DetectedSection] = []
     seen: set[str] = set()
     specs = _load_sections()
     for page_index, page in enumerate(doc):
         text = page.get_text("text") or ""
+        if is_compliance_overview(text):
+            continue
         for spec in specs:
             name = str(spec["name"])
             if name in seen:

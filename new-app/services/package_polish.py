@@ -11,7 +11,9 @@ import re
 from datetime import datetime
 
 import fitz
+import yaml
 
+from config.settings import CONFIG_DIR
 from models.plan_profile import PlanProfile
 from models.review import ValidationItem
 from services.file_order import matched_spec
@@ -64,13 +66,26 @@ _SSN = re.compile(r"\b\d{3}-\d{2}-\d{4}\b")
 _BAD_ZERO = re.compile(r"(?<!\d)\$?\s*(0(?:\.0+)?)(?!\d)")
 _NAME_LINE = re.compile(r"^[A-Za-z][A-Za-z' .-]+,\s+[A-Za-z]")
 _PASS_FAIL = (
-    ("401(a)(4)", r"401\s*\(\s*a\s*\)\s*\(\s*4\s*\)"),
-    ("414(s)", r"414\s*\(\s*s\s*\)"),
-    ("402(g)", r"402\s*\(?\s*g\s*\)?"),
-    ("415", r"415(?:\s*\(\s*c\s*\))?|Annual Additions"),
-    ("ADP", r"Average Deferral Percentage|\bADP\b"),
-    ("ACP", r"Average Contribution Percentage|\bACP\b"),
-    ("410(b)", r"410\s*\(?\s*b\s*\)?"),
+    ("401(a)(4)", r"401\s*\(\s*a\s*\)\s*\(\s*4\s*\)", "401a4"),
+    ("414(s)", r"414\s*\(\s*s\s*\)", "414s"),
+    ("402(g)", r"402\s*\(?\s*g\s*\)?", "402g"),
+    ("415", r"415(?:\s*\(\s*c\s*\))?|Annual Additions", "415"),
+    ("ADP", r"Average Deferral Percentage|\bADP\b", "adp"),
+    ("ACP", r"Average Contribution Percentage|\bACP\b", "acp"),
+)
+_410_LINE = re.compile(
+    r"(Standard|401\s*\(\s*k\s*\)|401\s*\(\s*m\s*\))\s*:\s*(Pass|Fail)"
+    r"(?:\s*/\s*Fail)?"
+    r"(?:\s+Ratio\s+percent\s+(\d+(?:\.\d+)?)\s*%)?",
+    re.I,
+)
+_ABPT_PASSED = re.compile(
+    r"average benefits test passed;\s*no action needed for failed\s+410\s*\(?b\)?\s*coverage test",
+    re.I,
+)
+_BRF_RESULT = re.compile(
+    r"benefits,?\s+rights(?:\s+and\s+features)?[\s\S]{0,60}?(Pass\s*/\s*Fail|\bPass\b|\bFail\b)",
+    re.I,
 )
 
 
@@ -360,6 +375,26 @@ def _cover_date_check(doc: fitz.Document) -> ValidationItem:
     )
 
 
+def is_compliance_overview(text: str) -> bool:
+    """One of the three Compliance and Administrative Reports overview pages."""
+    return _overview_kind(text) is not None
+
+
+def _overview_kind(text: str) -> str | None:
+    blob = text or ""
+    if re.search(r"compliance and administrative|overview and descriptions", blob, re.I):
+        return "intro"
+    if re.search(r"410\s*\(\s*b\s*\)\s+coverage", blob, re.I) and re.search(
+        r"compensation testing\s*\(\s*414", blob, re.I
+    ):
+        return "tests"
+    if re.search(r"administrative reports", blob, re.I) and re.search(
+        r"hce/key employee determinations", blob, re.I
+    ):
+        return "admin"
+    return None
+
+
 def _compliance_check(doc: fitz.Document, profile: PlanProfile) -> ValidationItem:
     if profile.midyear or is_457_plan(profile.plan_type):
         return ValidationItem(
@@ -368,7 +403,9 @@ def _compliance_check(doc: fitz.Document, profile: PlanProfile) -> ValidationIte
             passed=True,
             detail="This package does not use the three compliance report pages.",
         )
-    count = sum(1 for page in doc if _COMPLIANCE.search(page.get_text("text") or ""))
+    kinds = {_overview_kind(page.get_text("text") or "") for page in doc}
+    kinds.discard(None)
+    count = len(kinds)
     return ValidationItem(
         code="compliance_three_pages",
         label="Compliance reports (3 pages)",
@@ -418,6 +455,19 @@ def _result_summary_checks(doc: fitz.Document) -> list[ValidationItem]:
     return items
 
 
+def summary_test_record() -> list[dict]:
+    """What each Compliance Testing Summary line means. Later pages are checked against it."""
+    data = yaml.safe_load((CONFIG_DIR / "summary_tests.yaml").read_text(encoding="utf-8")) or {}
+    return [row for row in data.get("tests") or [] if isinstance(row, dict)]
+
+
+def _means(code: str) -> str:
+    for row in summary_test_record():
+        if row.get("code") == code:
+            return " ".join(str(row.get("means") or "").split())
+    return ""
+
+
 def _top_heavy_check(doc: fitz.Document, summary: str) -> ValidationItem:
     shown = re.search(r"top\s*heavy[\s\S]{0,80}?(\d+(?:\.\d+)?)\s*%", summary, re.I)
     if not shown:
@@ -435,52 +485,61 @@ def _top_heavy_check(doc: fitz.Document, summary: str) -> ValidationItem:
     expects_top_heavy = percent > 60
     says_not = bool(re.search(r"plan is not top heavy", summary, re.I))
     says_is = bool(re.search(r"plan is top heavy", summary, re.I)) and not says_not
-    if expects_top_heavy and not says_is:
+    unresolved = re.search(r"plan\s+is\s*/\s*is\s+not\s+top\s+heavy", summary, re.I)
+    required = "Plan is Top Heavy" if expects_top_heavy else "Plan is not Top Heavy"
+    if unresolved:
+        problems.append(f"Plan is/is not Top Heavy should be {required}")
+    elif expects_top_heavy and not says_is:
         problems.append("percent is over 60%, so the line should say Plan is Top Heavy")
-    if not expects_top_heavy and not says_not:
+    elif not expects_top_heavy and not says_not:
         problems.append("percent is 60% or less, so the line should say Plan is not Top Heavy")
     report = _report_percent(doc, r"top\s*heavy")
     if report is not None and abs(report - percent) > 0.01:
         problems.append(f"Result Summary shows {percent:g}% and the Top Heavy report shows {report:g}%")
+    detail = "; ".join(problems) if problems else f"Top heavy {token}% matches the report."
+    meaning = _means("top_heavy")
+    if meaning:
+        detail = f"{detail} {meaning}"
     return ValidationItem(
         code="top_heavy_summary",
         label="Top heavy on Result Summary",
         passed=not problems,
-        detail="; ".join(problems) if problems else f"Top heavy {token}% matches the report.",
+        detail=detail,
     )
 
 
 def _pass_fail_checks(doc: fitz.Document, summary: str) -> list[ValidationItem]:
     items: list[ValidationItem] = []
-    for label, pattern in _PASS_FAIL:
+    for label, pattern, code in _PASS_FAIL:
         summary_result = _result_near(summary, pattern)
-        report_result = None
-        for page in doc:
-            text = page.get_text("text") or ""
-            if _SUMMARY.search(text):
-                continue
-            report_result = _result_near(text, pattern)
-            if report_result:
-                break
+        report_result = _report_result(doc, pattern)
         if summary_result is None and report_result is None:
             continue
         problems: list[str] = []
-        if summary_result and report_result and summary_result != report_result:
+        if summary_result == "unresolved":
+            problems.append(f"{label} still says Pass/Fail")
+        elif summary_result and report_result and summary_result != report_result:
             problems.append(f"Result Summary says {summary_result}, the report says {report_result}")
-        if label == "410(b)" and summary_result == "fail" and not re.search(
-            r"average benefit", summary + "\n".join(page.get_text("text") or "" for page in doc), re.I
-        ):
-            problems.append("410(b) failed and the ABPT wording was not found")
         if not summary_result and report_result:
             problems.append(f"report says {report_result}, Result Summary has no matching line")
+        meaning = _means(code)
+        detail = "; ".join(problems) if problems else f"{label} agrees ({summary_result or report_result})."
+        if meaning:
+            detail = f"{detail} {meaning}"
         items.append(
             ValidationItem(
                 code=f"summary_{label}",
                 label=f"{label} on Result Summary",
                 passed=not problems,
-                detail="; ".join(problems) if problems else f"{label} agrees ({summary_result or report_result}).",
+                detail=detail,
             )
         )
+    coverage = _coverage_item(doc, summary)
+    if coverage is not None:
+        items.append(coverage)
+    brf = _brf_summary_item(summary)
+    if brf is not None:
+        items.append(brf)
     if not items:
         items.append(
             ValidationItem(
@@ -493,17 +552,150 @@ def _pass_fail_checks(doc: fitz.Document, summary: str) -> list[ValidationItem]:
     return items
 
 
+_410_LABELS = (
+    ("standard", "Standard", "410b_standard", r"profit\s+sharing|\bshne\b|safe\s+harbor\s+nonelective"),
+    ("401k", "401(k)", "410b_401k", r"\b(?:deferrals?|roth)\b"),
+    ("401m", "401(m)", "410b_401m", r"safe\s+harbor\s+match|\bmatch\b"),
+)
+
+
+def _coverage_item(doc: fitz.Document, summary: str) -> ValidationItem | None:
+    summary_lines = _410_lines(summary)
+    report_lines = _410_report_lines(doc)
+    report_text = _report_text(doc)
+    required = {
+        key
+        for key, _label, _code, pattern in _410_LABELS
+        if key in report_lines or re.search(pattern, report_text, re.I)
+    }
+    if not summary_lines and not required:
+        return None
+    problems: list[str] = []
+    notes: list[str] = []
+    for key, label, code, _pattern in _410_LABELS:
+        shown = summary_lines.get(key)
+        report = report_lines.get(key)
+        meaning = _means(code)
+        if shown is None:
+            if key in required:
+                problems.append(f"{label} is missing from the Result Summary. {meaning}")
+            continue
+        if shown["result"] == "unresolved":
+            problems.append(f"{label} still says Pass/Fail. {meaning}")
+            continue
+        if report and shown["result"] != report["result"]:
+            problems.append(f"{label} Result Summary says {shown['result']}, the 410(b) report says {report['result']}")
+        if report and report["ratio"] is not None and shown["ratio"] is None:
+            problems.append(f"{label} ratio is {report['ratio_text']}% on the 410(b) report and missing on the Result Summary")
+        elif (
+            shown["ratio"] is not None
+            and report
+            and report["ratio"] is not None
+            and abs(shown["ratio"] - report["ratio"]) > 0.01
+        ):
+            problems.append(
+                f"{label} ratio is {shown['ratio_text']}% on the Result Summary and {report['ratio_text']}% on the 410(b) report"
+            )
+        ratio = f" {shown['ratio_text']}%" if shown["ratio_text"] else ""
+        notes.append(f"{label} {shown['result']}{ratio} ({meaning})")
+    failed = [row for row in summary_lines.values() if row["result"] == "fail"]
+    if failed:
+        if not _ABPT_PASSED.search(summary):
+            problems.append(
+                '410(b) failed. The summary needs "Average Benefits Test Passed; no action needed for Failed 410(b) Coverage Test". '
+                + _means("410b_failed")
+            )
+        abpt = _result_near(summary, r"average benefit")
+        report_abpt = _report_result(doc, r"average benefit")
+        if report_abpt == "fail":
+            problems.append("the Average Benefit Test report says fail, so the summary cannot say no action is needed")
+        elif abpt != "pass":
+            problems.append("410(b) failed and the Average Benefit Test line should say Pass")
+    detail = "; ".join(problems) if problems else "; ".join(notes)
+    return ValidationItem(
+        code="summary_410(b)",
+        label="410(b) on Result Summary",
+        passed=not problems,
+        detail=detail or "410(b) coverage lines agree.",
+    )
+
+
+def _brf_summary_item(summary: str) -> ValidationItem | None:
+    match = _BRF_RESULT.search(summary)
+    if not match:
+        return None
+    meaning = _means("brf")
+    word = match.group(1)
+    if re.search(r"pass\s*/\s*fail", word, re.I):
+        return ValidationItem(
+            code="summary_brf",
+            label="BRF on Result Summary",
+            passed=False,
+            detail=f"BRF still says Pass/Fail. {meaning}".strip(),
+        )
+    return ValidationItem(
+        code="summary_brf",
+        label="BRF on Result Summary",
+        passed=True,
+        detail=f"BRF agrees ({word.lower()}). {meaning}".strip(),
+    )
+
+
+def _410_lines(text: str) -> dict[str, dict]:
+    found: dict[str, dict] = {}
+    for match in _410_LINE.finditer(text):
+        compact = re.sub(r"\s+", "", match.group(1)).lower()
+        key = {"standard": "standard", "401(k)": "401k", "401(m)": "401m"}.get(compact)
+        if key is None:
+            continue
+        tail = text[match.start(2) : match.start(2) + 12]
+        result = "unresolved" if re.match(r"(?:pass\s*/\s*fail|fail\s*/\s*pass)", tail, re.I) else match.group(2).lower()
+        found[key] = {"result": result, "ratio": float(match.group(3)) if match.group(3) else None, "ratio_text": match.group(3)}
+    return found
+
+
+def _410_report_lines(doc: fitz.Document) -> dict[str, dict]:
+    found: dict[str, dict] = {}
+    for page in doc:
+        text = page.get_text("text") or ""
+        if _SUMMARY.search(text) or not re.search(r"410\s*\(?\s*b\s*\)?", text, re.I):
+            continue
+        for key, row in _410_lines(text).items():
+            found.setdefault(key, row)
+    return found
+
+
+def _report_text(doc: fitz.Document) -> str:
+    return "\n".join(
+        page.get_text("text") or "" for page in doc if not _SUMMARY.search(page.get_text("text") or "")
+    )
+
+
+def _report_result(doc: fitz.Document, pattern: str) -> str | None:
+    for page in doc:
+        text = page.get_text("text") or ""
+        if _SUMMARY.search(text) or is_compliance_overview(text):
+            continue
+        result = _result_near(text, pattern)
+        if result:
+            return result
+    return None
+
+
 def _result_near(text: str, pattern: str) -> str | None:
     match = re.search(r"(?:" + pattern + r").{0,80}?\b(Pass|Fail)\b", text, re.I | re.S)
     if not match:
         return None
+    tail = text[match.start(1) : match.start(1) + 12]
+    if re.match(r"(?:pass\s*/\s*fail|fail\s*/\s*pass)", tail, re.I):
+        return "unresolved"
     return match.group(1).lower()
 
 
 def _report_percent(doc: fitz.Document, label: str) -> float | None:
     for page in doc:
         text = page.get_text("text") or ""
-        if _SUMMARY.search(text):
+        if _SUMMARY.search(text) or is_compliance_overview(text):
             continue
         match = re.search(label + r"[\s\S]{0,80}?(\d+(?:\.\d+)?)\s*%", text, re.I)
         if match:
@@ -622,6 +814,10 @@ def _identity_checks(doc: fitz.Document, profile: PlanProfile) -> list[Validatio
             continue
         text = page.get_text("text") or ""
         if len(text.strip()) < 20:
+            continue
+        if re.search(r"sample/draft communication to participant", text, re.I):
+            continue
+        if is_compliance_overview(text):
             continue
         head = _head(text)
         is_excess = bool(_EXCESS.search(text))

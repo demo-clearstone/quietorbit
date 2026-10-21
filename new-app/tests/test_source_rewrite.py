@@ -21,6 +21,7 @@ def test_hce_max_follows_prior_year_table():
 
 def test_402g_year_only_for_off_calendar():
     assert calendar_402g_year("06/30/2025") == 2024
+    assert calendar_402g_year("06/30/2026") == 2025
     assert calendar_402g_year("12/31/2025") is None
     assert calendar_402g_year(None) is None
 

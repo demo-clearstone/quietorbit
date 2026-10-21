@@ -50,25 +50,25 @@ def test_auto_order_matches_the_report_list():
         "Compliance Testing Reports.pdf",
         "Valuation Reports.pdf",
         "Summary of Compliance Test Results.pdf",
-        "Compensation Limit Failure Summary.pdf",
         "Combined Compliance Testing Report.pdf",
         "Excess Return Notice.pdf",
-        "Variance Report.pdf",
-        "PS Variance Report.pdf",
-        "SHNE Variance Report.pdf",
-        "Contribution Analysis.pdf",
         "HCE Key Report.pdf",
         "Future HCE Report.pdf",
         "ADP ACP Test.pdf",
-        "402(g) Test.pdf",
         "410(b) Test.pdf",
+        "Variance Report.pdf",
+        "Compensation Limit Failure Summary.pdf",
+        "PS Variance Report.pdf",
+        "SHNE Variance Report.pdf",
+        "402(g) Test.pdf",
+        "Contribution Analysis.pdf",
+        "Top Heavy Test.pdf",
+        "415 Test.pdf",
+        "Census Report.pdf",
         "401(a)(4) Test.pdf",
         "Average Benefits Test.pdf",
-        "BRF Test.pdf",
         "414(s) Test.pdf",
-        "415 Test.pdf",
-        "Top Heavy Test.pdf",
-        "Census Report.pdf",
+        "BRF Test.pdf",
     ]
 
 
@@ -172,11 +172,14 @@ def test_auto_order_uses_folder_keywords():
     assert matched_spec("2025401a4.pdf")["name"] == "401(a)(4)"
     assert matched_spec("2025ABPT.pdf")["name"] == "Average Benefit Percentage Test"
     assert matched_spec("2025414s.pdf")["name"] == "414(s)"
-    assert sop_rank("2025SHMaVar.pdf") < sop_rank("2025MaVar.pdf")
+    assert sop_rank("2025MaVar.pdf") < sop_rank("2025SHMaVar.pdf")
+    assert sop_rank("2025SHMaVar.pdf") < sop_rank("2025PSVar.pdf")
+    assert sop_rank("2025PSVar.pdf") < sop_rank("2025SHNEVar.pdf")
     assert sop_rank("123456 2025 401k Valuation Pkg.pdf") < sop_rank("2025ResultSumm.pdf")
     names = [
         "2025Census.pdf",
         "2025TH.pdf",
+        "2025Top Heavy.pdf",
         "2025415.pdf",
         "2025ContriAnalysis.pdf",
         "2025402G.pdf",
@@ -191,11 +194,31 @@ def test_auto_order_uses_folder_keywords():
         "2025410B.pdf",
         "2025MaVar.pdf",
         "2025SHMaVar.pdf",
+        "2025PSVar.pdf",
+        "2025SHNEVar.pdf",
     ]
     ordered = [name for name, _ in order_uploads([(name, b"%PDF") for name in names])]
-    assert ordered[0] == "123456 2025 401k Valuation Pkg.pdf"
-    assert ordered[1] == "2025ResultSumm.pdf"
-    assert ordered[-1] == "2025Census.pdf"
+    assert ordered == [
+        "123456 2025 401k Valuation Pkg.pdf",
+        "2025ResultSumm.pdf",
+        "2025HCEKey.pdf",
+        "2026FYHCE.pdf",
+        "2025ADP-ACP.pdf",
+        "2025410B.pdf",
+        "2025MaVar.pdf",
+        "2025SHMaVar.pdf",
+        "2025PSVar.pdf",
+        "2025SHNEVar.pdf",
+        "2025402G.pdf",
+        "2025ContriAnalysis.pdf",
+        "2025TH.pdf",
+        "2025Top Heavy.pdf",
+        "2025415.pdf",
+        "2025Census.pdf",
+        "2025401a4.pdf",
+        "2025ABPT.pdf",
+        "2025414s.pdf",
+    ]
     assert sop_rank("2025ResultSumm.pdf") < sop_rank("Action Required.pdf")
     from services.file_order import list_file_meta
 

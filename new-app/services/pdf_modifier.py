@@ -11,10 +11,10 @@ from services.package_polish import hce_max_percent
 from services.plan_config import package_flags, paragraphs_for
 
 _TITLE_ONLY = re.compile(
-    r"^(action required|annual valuation report(?:/action required)?|"
-    r"sample/draft(?: communication to participant)?)\s*$",
+    r"^sample/draft(?: communication to participant)?\s*$",
     re.I,
 )
+_REPORT_TITLE = re.compile(r"(?m)^\s*annual valuation report\s*$", re.I)
 
 
 def apply_decisions(
@@ -39,7 +39,7 @@ def apply_decisions(
             extra = str(spec.get("extra") or "")
             if not _extra_matches(page_text, extra):
                 continue
-            for hit in page.search_for(heading):
+            for hit in _heading_hits(page, heading):
                 if _covered_by_longer_heading(page, hit, heading, headings):
                     continue
                 end_y = _block_end(page, hit.y0, headings)
@@ -57,7 +57,12 @@ def apply_decisions(
             touched.add(page.number)
     if touched:
         _restack_pages(doc, touched)
+        _pull_kept_action_forward(doc)
         _drop_empty_pages(doc)
+        for page in doc:
+            text = page.get_text("text") or ""
+            if re.search(r"annual valuation report|immediate action required|attention required|no immediate action", text, re.I):
+                _redraw_action_rules(page)
     return removed
 
 
@@ -81,7 +86,7 @@ def _covered_by_longer_heading(page: fitz.Page, hit, heading: str, headings: lis
     for other in headings:
         if not other.startswith(heading) or len(other) <= len(heading):
             continue
-        for rect in page.search_for(other):
+        for rect in _heading_hits(page, other):
             if abs(rect.y0 - hit.y0) <= 2 and abs(rect.x0 - hit.x0) <= 2:
                 return True
     return False
@@ -95,10 +100,23 @@ def _block_end(page: fitz.Page, y0: float, headings: list[str]) -> float:
         if not heading or heading in seen:
             continue
         seen.add(heading)
-        for rect in page.search_for(heading):
+        for rect in _heading_hits(page, heading):
             if rect.y0 > y0 + 8:
                 end_y = min(end_y, rect.y0 - 4)
     return end_y
+
+
+def _heading_hits(page: fitz.Page, heading: str) -> list[fitz.Rect]:
+    """A heading starts the line. The same words inside a sentence are not a heading."""
+    if not heading:
+        return []
+    hits: list[fitz.Rect] = []
+    words = page.get_text("words") or []
+    for rect in page.search_for(heading):
+        if any(abs(word[1] - rect.y0) < 2 and word[0] < rect.x0 - 1 for word in words):
+            continue
+        hits.append(rect)
+    return hits
 
 
 def _kept_by_other_spec(
@@ -148,12 +166,16 @@ def _restack_pages(doc: fitz.Document, touched: set[int]) -> None:
         blocks = _text_blocks(page)
         if not blocks:
             continue
+        body = [block for block in blocks if not _is_page_number_block(page, block)]
+        footer = [block for block in blocks if _is_page_number_block(page, block)]
         header_bottom, footer_top = _image_bands(page)
         for block in blocks:
             page.add_redact_annot(block["bbox"] + (-1, -1, 1, 1), fill=(1, 1, 1), text="")
+        for drawing in page.get_drawings():
+            page.add_redact_annot(fitz.Rect(drawing["rect"]) + (0, -1, 0, 1), fill=(1, 1, 1), text="")
         page.apply_redactions()
         cursor = header_bottom
-        for block in blocks:
+        for block in body:
             height = block["bbox"].height
             if cursor + height > footer_top:
                 break
@@ -161,6 +183,14 @@ def _restack_pages(doc: fitz.Document, touched: set[int]) -> None:
             for span in block["spans"]:
                 _write_span(page, span, delta)
             cursor += height + 8
+        for block in footer:
+            for span in block["spans"]:
+                _write_span(page, span, 0)
+
+
+def _is_page_number_block(page: fitz.Page, block: dict) -> bool:
+    text = " ".join(span["text"] for span in block["spans"]).strip()
+    return bool(re.fullmatch(r"\d{1,3}", text)) and block["bbox"].y0 > page.rect.y1 - 70
 
 
 def _text_blocks(page: fitz.Page) -> list[dict]:
@@ -254,6 +284,76 @@ def _rgb(color: object) -> tuple[float, float, float]:
     return ((value >> 16) & 255) / 255, ((value >> 8) & 255) / 255, (value & 255) / 255
 
 
+_KEPT_ACTION = re.compile(
+    r"immediate action required|attention required|no immediate action is required",
+    re.I,
+)
+
+
+def _pull_kept_action_forward(doc: fitz.Document) -> None:
+    """When every item on the Action Required page is removed, move the green line up under the header."""
+    anchor = None
+    later: list[fitz.Page] = []
+    for page in doc:
+        if page.number == 0:
+            continue
+        text = page.get_text("text") or ""
+        if anchor is None and re.search(r"annual valuation report", text, re.I):
+            anchor = page
+            continue
+        if anchor is not None and _KEPT_ACTION.search(text):
+            later.append(page)
+    if anchor is None or not later or _KEPT_ACTION.search(anchor.get_text("text") or ""):
+        return
+    blocks: list[dict] = []
+    for page in later:
+        blocks.extend(_text_blocks(page))
+    if not blocks:
+        return
+    anchor_blocks = _text_blocks(anchor)
+    cursor = anchor_blocks[-1]["bbox"].y1 + 18 if anchor_blocks else 72
+    for block in blocks:
+        delta = cursor - block["bbox"].y0
+        for span in block["spans"]:
+            _write_span(anchor, span, delta)
+        cursor += block["bbox"].height + 8
+    for number in reversed([page.number for page in later]):
+        doc.delete_page(number)
+
+
+def _redraw_action_rules(page: fitz.Page) -> None:
+    """Put the header rule and heading underlines back after the text is packed."""
+    lines: dict[int, list[tuple]] = {}
+    for word in page.get_text("words") or []:
+        lines.setdefault(round(word[1]), []).append(word)
+    for group in lines.values():
+        group.sort(key=lambda item: item[0])
+        text = " ".join(item[4] for item in group)
+        y = max(item[3] for item in group) + 1.5
+        if re.fullmatch(r"\d{5,7}", text):
+            page.draw_line(
+                fitz.Point(48, y + 4),
+                fitz.Point(page.rect.width - 48, y + 4),
+                color=(0, 0, 0),
+                width=1,
+            )
+            continue
+        if not re.match(
+            r"^(ACTION REQUIRED|IMMEDIATE ACTION REQUIRED|ATTENTION REQUIRED|NO IMMEDIATE ACTION IS REQUIRED)",
+            text,
+        ):
+            continue
+        color = (0, 0.45, 0.15) if text.startswith("NO IMMEDIATE") else (0, 0, 0)
+        if text.startswith("IMMEDIATE ACTION"):
+            color = (0.8, 0, 0)
+        page.draw_line(
+            fitz.Point(group[0][0], y),
+            fitz.Point(group[-1][2], y),
+            color=color,
+            width=0.8,
+        )
+
+
 def _drop_empty_pages(doc: fitz.Document) -> None:
     drop: list[int] = []
     for page in doc:
@@ -261,7 +361,7 @@ def _drop_empty_pages(doc: fitz.Document) -> None:
             continue
         if page.get_images():
             continue
-        if _is_empty_text(page.get_text("text") or ""):
+        if _is_header_only_page(page) or _is_empty_text(page.get_text("text") or "") or _footer_only(page):
             drop.append(page.number)
     for number in reversed(drop):
         if doc.page_count <= 1:
@@ -269,9 +369,38 @@ def _drop_empty_pages(doc: fitz.Document) -> None:
         doc.delete_page(number)
 
 
+_PAGE_NUMBER = re.compile(r"^(?:page\s*)?\d{1,3}$", re.I)
+
+
+def _is_header_only_page(page: fitz.Page) -> bool:
+    """A heading with no paragraph left is an empty page."""
+    text = page.get_text("text") or ""
+    has_heading = bool(
+        _REPORT_TITLE.search(text) or re.search(r"(?m)^\s*action required\s*$", text, re.I)
+    )
+    if not has_heading:
+        return False
+    if re.search(
+        r"immediate action required\s*-|attention required|no immediate action|excess return|failed compliance",
+        text,
+        re.I,
+    ):
+        return False
+    return len(re.findall(r"[A-Za-z0-9$]+", text)) <= 45
+
+
 def _is_empty_text(text: str) -> bool:
     cleaned = re.sub(r"\s+", " ", text).strip()
-    return not cleaned or bool(_TITLE_ONLY.match(cleaned))
+    return not cleaned or bool(_TITLE_ONLY.match(cleaned) or _PAGE_NUMBER.match(cleaned))
+
+
+def _footer_only(page: fitz.Page) -> bool:
+    """A page number at the bottom is not a paragraph. The page is blank."""
+    words = page.get_text("words") or []
+    if not words:
+        return True
+    limit = page.rect.y1 - 48
+    return all(word[1] >= limit for word in words)
 
 
 def fill_qnec_placeholders(
@@ -279,84 +408,107 @@ def fill_qnec_placeholders(
     profile: PlanProfile,
     marks: list[dict] | None = None,
 ) -> list[str]:
-    """TEST23 §C: write QNEC amounts onto the CURRENT Excess Return Notice."""
+    """Write QNEC amounts on the current-year Excess Return Notice.
+
+    The first ADP/ACP amount is the ADP QNEC plus the ACP QNEC. The ADP and ACP lines follow it.
+    """
     filled: list[str] = []
-    total = profile.total_qnec
+    both = [value for value in (profile.adp_qnec, profile.acp_qnec) if value is not None]
+    total = round(sum(both), 2) if both else profile.total_qnec
+    amounts = {
+        "total": total,
+        "adp": profile.adp_qnec,
+        "acp": profile.acp_qnec,
+        "deferral": profile.deferral_refund,
+        "match": profile.match_refund,
+        "acp-notice": profile.acp_qnec if package_flags(profile.plan_type).get("acp_notice_amount") else None,
+    }
     for page in doc:
-        original = page.get_text("text") or ""
-        if "$X,XXX,XXX.XX" not in original:
+        if "$X,XXX,XXX.XX" not in (page.get_text("text") or ""):
             continue
-        placed: list[str] = []
-        updated = re.sub(r"\s+", " ", original)
-        if total is not None:
-            money = _money(total)
-            updated = updated.replace(
-                "The amount of the QNEC that is required to pass the ADP/ACP test is $X,XXX,XXX.XX",
-                f"The amount of the QNEC that is required to pass the ADP/ACP test is {money}",
-            )
-            updated = updated.replace("ADP/ACP test is $X,XXX,XXX.XX", f"ADP/ACP test is {money}")
-            filled.append(f"total={money}")
-            placed.append(money)
-        if package_flags(profile.plan_type).get("acp_notice_amount"):
-            if profile.acp_qnec is not None:
-                acp_money = _money(profile.acp_qnec)
-                updated = updated.replace("ACP test is $X,XXX,XXX.XX", f"ACP test is {acp_money}")
-                filled.append(f"acp-notice={acp_money}")
-                placed.append(acp_money)
-            else:
-                updated = re.sub(
-                    r"(?<!ADP/)ACP test is \$X,XXX,XXX\.XX\.?\s*",
-                    "",
-                    updated,
-                )
-        if profile.adp_qnec is not None:
-            updated = updated.replace(
-                "The ADP QNEC is $X,XXX,XXX.XX",
-                f"The ADP QNEC is {_money(profile.adp_qnec)}",
-            )
-            filled.append(f"adp={_money(profile.adp_qnec)}")
-            placed.append(_money(profile.adp_qnec))
-        else:
-            updated = re.sub(r"The ADP QNEC is \$X,XXX,XXX\.XX\.?\n?", "", updated)
-        if profile.acp_qnec is not None:
-            updated = updated.replace(
-                "The ACP QNEC is $X,XXX,XXX.XX",
-                f"The ACP QNEC is {_money(profile.acp_qnec)}",
-            )
-            filled.append(f"acp={_money(profile.acp_qnec)}")
-            placed.append(_money(profile.acp_qnec))
-        else:
-            updated = re.sub(r"The ACP QNEC is \$X,XXX,XXX\.XX\.?\n?", "", updated)
-        if profile.deferral_refund is not None:
-            updated = updated.replace(
-                "Deferral Contribution of $X,XXX,XXX.XX",
-                f"Deferral Contribution of {_money(profile.deferral_refund)}",
-            )
-            filled.append(f"deferral={_money(profile.deferral_refund)}")
-            placed.append(_money(profile.deferral_refund))
-        else:
-            updated = re.sub(r"Deferral Contribution of \$X,XXX,XXX\.XX\.?\s*", "", updated)
-        if profile.match_refund is not None:
-            updated = updated.replace(
-                "Match Contribution of $X,XXX,XXX.XX",
-                f"Match Contribution of {_money(profile.match_refund)}",
-            )
-            filled.append(f"match={_money(profile.match_refund)}")
-            placed.append(_money(profile.match_refund))
-        else:
-            updated = re.sub(r"Match Contribution of \$X,XXX,XXX\.XX\.?\s*", "", updated)
-        if updated != original:
-            page.add_redact_annot(page.rect, fill=(1, 1, 1), text="")
-            page.apply_redactions()
-            page.insert_textbox(fitz.Rect(54, 54, 558, 738), updated, fontsize=11, fontname="helv")
-            seen: set[str] = set()
-            for phrase in placed:
-                if phrase in seen:
-                    continue
-                seen.add(phrase)
-                for hit in page.search_for(phrase):
+        for kind, value in _fill_notice_amounts(page, amounts):
+            money = _money(value) if value is not None else ""
+            if value is not None:
+                filled.append(f"{kind}={money}")
+                for hit in page.search_for(money):
                     add_mark(marks, page.number, hit, "Filled amount")
     return filled
+
+
+_NOTICE_LABELS = {
+    "total": re.compile(r"adp/acp test is$"),
+    "adp": re.compile(r"(?:the\s+)?adp qnec is$"),
+    "acp": re.compile(r"(?:the\s+)?acp qnec is$"),
+    "match": re.compile(r"(?:and\s+)?match contribution of$"),
+    "deferral": re.compile(r"(?:excess aggregated\s+)?deferral contribution of$"),
+    "acp-notice": re.compile(r"(?<!adp/)(?:the\s+)?acp test is$"),
+}
+
+
+def _fill_notice_amounts(page: fitz.Page, amounts: dict[str, float | None]) -> list[tuple[str, float | None]]:
+    """Replace each $X,XXX,XXX.XX in place. A missing amount takes its label with it."""
+    done: list[tuple[str, float | None]] = []
+    while True:
+        hits = page.search_for("$X,XXX,XXX.XX")
+        if not hits:
+            return done
+        hit = sorted(hits, key=lambda item: (item.y0, item.x0))[0]
+        words = page.get_text("words") or []
+        kind, label_words, token = _notice_placeholder(words, hit)
+        value = amounts.get(kind) if kind else None
+        rects = [fitz.Rect(token[:4])] if token else [hit]
+        if value is None:
+            rects = [fitz.Rect(word[:4]) for word in label_words] or rects
+        for rect in rects:
+            page.add_redact_annot(rect, fill=(1, 1, 1))
+        page.apply_redactions()
+        if value is not None and token:
+            money = _money(value)
+            if str(token[4]).endswith("."):
+                money += "."
+            page.insert_text(
+                (float(token[0]), float(token[3]) - 1),
+                money,
+                fontsize=10,
+                fontname="helv",
+                color=(0, 0, 0),
+            )
+        done.append((kind or "amount", value))
+
+
+def _notice_placeholder(words: list[tuple], hit: fitz.Rect) -> tuple[str, list[tuple], tuple | None]:
+    ordered = sorted(words, key=lambda word: (word[1], word[0]))
+    index = next(
+        (
+            pos
+            for pos, word in enumerate(ordered)
+            if abs(word[0] - hit.x0) < 3 and abs(word[1] - hit.y0) < 3
+        ),
+        None,
+    )
+    if index is None:
+        return "", [], None
+    token = ordered[index]
+    prior = ordered[:index]
+    best: tuple[str, list[tuple]] | None = None
+    for size in range(1, min(6, len(prior)) + 1):
+        chunk = prior[-size:]
+        if size > 1 and str(chunk[0][4]).endswith("."):
+            break
+        tail = " ".join(str(word[4]) for word in chunk).lower()
+        for kind, pattern in _NOTICE_LABELS.items():
+            if pattern.search(tail):
+                best = (kind, chunk)
+                break
+        if best is not None:
+            break
+    if best is None:
+        return "", [token], token
+    kind, chunk = best
+    chosen = list(chunk) + [token]
+    if index + 1 < len(ordered) and str(ordered[index + 1][4]) in {".", ","}:
+        chosen.append(ordered[index + 1])
+    return kind, chosen, token
 
 
 def _money(value: float) -> str:
@@ -406,14 +558,18 @@ def apply_recap_bullets(
             if spec and str(spec["id"]) == "Y2":
                 bullet = _fill_prior_rates(bullet, nhce)
             kept.append(bullet)
-        updated = header.strip()
-        if kept:
-            updated = updated + "\n\n" + "\n\n".join(f"- {item}" for item in kept)
-        if updated.strip() == original.strip():
+        header_lines = [line.strip() for line in header.splitlines() if line.strip()]
+        if not header_lines:
+            header_lines = ["Important Information"]
+        updated_text = "\n".join(header_lines + kept)
+        if updated_text.strip() == re.sub(r"\s+", " ", original).strip():
             continue
         page.add_redact_annot(page.rect, fill=(1, 1, 1), text="")
         page.apply_redactions()
-        page.insert_textbox(fitz.Rect(54, 54, 558, 738), updated.strip(), fontsize=11, fontname="helv")
+        from services.package_builder import write_recap_page
+
+        number = _recap_page_number(original)
+        write_recap_page(page, header_lines, kept, number=number)
     return removed
 
 
@@ -476,6 +632,13 @@ def _percent_label(value: float) -> str:
     return f"{rounded:.2f}".rstrip("0").rstrip(".") + "%"
 
 
+def _recap_page_number(text: str) -> int | None:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if lines and re.fullmatch(r"\d{1,3}", lines[-1]):
+        return int(lines[-1])
+    return None
+
+
 def _split_recap(text: str) -> tuple[str, list[str]]:
     lines = [line.strip() for line in text.splitlines()]
     header: list[str] = []
@@ -483,11 +646,13 @@ def _split_recap(text: str) -> tuple[str, list[str]]:
     current: list[str] = []
     started = False
     for line in lines:
-        if re.match(r"^[\u2022•\-\*\?]\s+", line):
+        if re.fullmatch(r"\d{1,3}", line):
+            continue
+        if re.match(r"^[\u2022•\u00b7\-\*\?]\s+", line):
             if current:
                 bullets.append(" ".join(current).strip())
             started = True
-            current = [re.sub(r"^[\u2022•\-\*\?]\s*", "", line)]
+            current = [re.sub(r"^[\u2022•\u00b7\-\*\?]\s*", "", line)]
             continue
         if not started:
             header.append(line)

@@ -11,7 +11,7 @@ _HEADING_A = "IMMEDIATE ACTION REQUIRED - COMPLIANCE TEST FAILURE"
 _PHRASES_A = [
     "Contribution refunds to participants are required to correct compliance testing failures",
     "Excess Summary",
-    "Form W-4P",
+    "Form W-4R",
 ]
 
 

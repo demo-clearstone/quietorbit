@@ -56,6 +56,18 @@ def apply_cover_date(doc: fitz.Document, marks: list[dict] | None = None) -> lis
     return [f"Cover letter date left as printed (already {today}, or no letter date was found)."]
 
 
+def apply_402g_dates(
+    doc: fitz.Document,
+    profile: PlanProfile,
+    marks: list[dict] | None = None,
+) -> list[str]:
+    """Off-calendar 402(g) uses the calendar year before the plan year end.
+
+    A plan year ending 06/30/2026 uses 01/01/2025-12/31/2025 on the 402(g) report.
+    """
+    return _rewrite_402g_dates(doc, profile, marks)
+
+
 def apply_source_rewrites(
     doc: fitz.Document,
     profile: PlanProfile,

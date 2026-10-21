@@ -35,8 +35,7 @@ TEST_PATTERNS: dict[str, list[str]] = {
     "testing_method": [
         r"Testing\s*Method\s*[:#]?\s*(CURRENT|PRIOR)",
         r"\b(CURRENT|PRIOR)\s+METHOD\b",
-        r"\b(Prior|Current)\s+(?:YEAR|Testing)\b",
-        r"\b(CURRENT|PRIOR)\b",
+        r"\b(Prior|Current)\s+Testing\b",
     ],
     "top_heavy_percent": [
         r"Top\s*Heavy\s*(?:Percent(?:age)?|Ratio)?\s*[:#]?\s*(\d+(?:\.\d+)?)\s*%?",
@@ -87,7 +86,12 @@ FAIL_FLAGS: dict[str, list[str]] = {
         r"Census adjustment required",
     ],
     "partially_vested": [r"partially vested"],
-    "safe_harbor": [r"Safe Harbor:\s*Yes", r"\bN/A\s*SH\b"],
+    "safe_harbor": [
+        r"Safe Harbor:\s*Yes",
+        r"\bN/A\s*SH\b",
+        r"switching to (?:SH|safe harbor)",
+        r"(?:safe harbor|SH) next year",
+    ],
     "catchup_disallowed": [
         r"Catch-up contributions are not allowed",
         r"catchup contributions are not allowed",

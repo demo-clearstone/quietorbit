@@ -42,7 +42,10 @@ _OTHER_CONTRIBUTION = re.compile(
     r"\b(match|profit\s+sharing|shne|safe\s+harbor|qnec|employer\s+contribution)\b",
     re.I,
 )
-_SUMMARY_HEAD = re.compile(r"test summary|result summary|compliance summary", re.I)
+_SUMMARY_HEAD = re.compile(
+    r"test summary|result summary|compliance summary|testing summary of results",
+    re.I,
+)
 _SKIP_HEAD = re.compile(r"test summary|result summary|compliance summary|action required|cover letter", re.I)
 
 # Heading on the report itself, not a mention inside the Result Summary.
@@ -72,11 +75,31 @@ def stop_reasons(
     source_files: list[str],
     excel_plan_name: str | None = None,
     pdf_plan_name: str | None = None,
+    excel_company: str | None = None,
+    excel_address: str | None = None,
+    excel_pye: str | None = None,
+    cover_company: str | None = None,
+    cover_address: str | None = None,
+    cover_pye: str | None = None,
 ) -> list[str]:
     reasons = _content_reasons(doc)
     if not _is_valuation_package(source_files):
         return reasons
-    reasons.extend(_package_reasons(doc, profile, source_files, excel_plan_name, pdf_plan_name))
+    reasons.extend(
+        _package_reasons(
+            doc,
+            profile,
+            source_files,
+            excel_plan_name,
+            pdf_plan_name,
+            excel_company=excel_company,
+            excel_address=excel_address,
+            excel_pye=excel_pye,
+            cover_company=cover_company,
+            cover_address=cover_address,
+            cover_pye=cover_pye,
+        )
+    )
     return reasons
 
 
@@ -108,6 +131,12 @@ def _package_reasons(
     source_files: list[str],
     excel_plan_name: str | None,
     pdf_plan_name: str | None,
+    excel_company: str | None = None,
+    excel_address: str | None = None,
+    excel_pye: str | None = None,
+    cover_company: str | None = None,
+    cover_address: str | None = None,
+    cover_pye: str | None = None,
 ) -> list[str]:
     reasons: list[str] = []
     if profile.moa_logo_found is not True:
@@ -115,10 +144,20 @@ def _package_reasons(
             "The Mutual of America stamp was not found on the upper right of the cover letter. "
             "Assembly stopped."
         )
-    address = _address_reason(profile.company_address)
+    address = _address_reason(cover_address or profile.company_address)
     if address:
         reasons.append(address)
     reasons.extend(_name_reasons(doc, profile, excel_plan_name, pdf_plan_name))
+    reasons.extend(
+        _excel_cover_reasons(
+            excel_company=excel_company,
+            excel_address=excel_address,
+            excel_pye=excel_pye,
+            cover_company=cover_company,
+            cover_address=cover_address,
+            cover_pye=cover_pye,
+        )
+    )
     reasons.extend(_pye_reasons(doc, profile))
     reasons.extend(_missing_report_reasons(doc, profile, source_files))
     coverage = _coverage_reason(doc)
@@ -193,6 +232,35 @@ def _labeled_values(doc: fitz.Document, pattern: re.Pattern[str]) -> set[str]:
 
 def _norm_name(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", (value or "").lower()).strip()
+
+
+def _excel_cover_reasons(
+    *,
+    excel_company: str | None,
+    excel_address: str | None,
+    excel_pye: str | None,
+    cover_company: str | None,
+    cover_address: str | None,
+    cover_pye: str | None,
+) -> list[str]:
+    """Cover letter block must match the valuation package Excel when those cells are filled."""
+    reasons: list[str] = []
+    if excel_company and _norm_name(excel_company) != _norm_name(cover_company or ""):
+        reasons.append(
+            "The company name on the cover letter does not match the company name "
+            "in the valuation package Excel. Assembly stopped."
+        )
+    if excel_address and _norm_name(excel_address) != _norm_name(cover_address or ""):
+        reasons.append(
+            "The company address on the cover letter does not match the address "
+            "in the valuation package Excel. Assembly stopped."
+        )
+    if excel_pye and _norm_date(excel_pye) != _norm_date(cover_pye):
+        reasons.append(
+            "The plan year end on the cover letter does not match the plan year end "
+            "in the valuation package Excel. Assembly stopped."
+        )
+    return reasons
 
 
 def _pye_reasons(doc: fitz.Document, profile: PlanProfile) -> list[str]:
@@ -305,8 +373,13 @@ def _present_reports(doc: fitz.Document, source_files: list[str]) -> set[str]:
     for label, _summary_pattern, file_pattern, _head_pattern in _EXTRA_REPORTS:
         if re.search(file_pattern, filenames, re.I):
             present.add(label)
+    from services.package_polish import is_compliance_overview
+
     for page in doc:
-        lines = [line.strip() for line in (page.get_text("text") or "").splitlines() if line.strip()]
+        text = page.get_text("text") or ""
+        if is_compliance_overview(text):
+            continue
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
         if not lines:
             continue
         head = " ".join(lines[:3])
@@ -334,7 +407,13 @@ def _summary_text(doc: fitz.Document) -> str:
 
 
 def _coverage_reason(doc: fitz.Document) -> str | None:
-    full = "\n".join((page.get_text("text") or "") for page in doc)
+    from services.package_polish import is_compliance_overview
+
+    full = "\n".join(
+        text
+        for page in doc
+        if (text := page.get_text("text") or "") and not is_compliance_overview(text)
+    )
     if not _OTHER_CONTRIBUTION.search(full):
         return None
     summary = _summary_text(doc)

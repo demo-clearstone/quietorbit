@@ -24,7 +24,7 @@ def finalize_profile(profile: PlanProfile) -> PlanProfile:
         field_sources["beginning_plan_year"] = "Derived from plan_year_start"
 
     if profile.top_heavy is None and profile.top_heavy_percent is not None:
-        profile.top_heavy = profile.top_heavy_percent >= 60
+        profile.top_heavy = profile.top_heavy_percent > 60
         field_sources["top_heavy"] = "Derived from top_heavy_percent"
 
     flags = package_flags(profile.plan_type)
@@ -51,6 +51,12 @@ def finalize_profile(profile: PlanProfile) -> PlanProfile:
     ):
         profile.contributions_required = False
         field_sources["contributions_required"] = "Derived: no failure, variance, true-up, or explicit contribution requirement"
+    elif profile.contributions_required is None and (profile.true_up is True or profile.variance_report is True):
+        profile.contributions_required = True
+        field_sources["contributions_required"] = "Derived from true-up or variance client copy"
+    elif profile.contributions_required is None:
+        profile.contributions_required = False
+        field_sources["contributions_required"] = "Derived: no true-up, contribution note, or variance client copy"
 
     if profile.total_qnec is None:
         parts = [v for v in (profile.adp_qnec, profile.acp_qnec) if v is not None]
@@ -72,8 +78,11 @@ def finalize_profile(profile: PlanProfile) -> PlanProfile:
         profile.total_qnec = profile.acp_qnec
 
     outstanding = profile.returns_required is True and profile.adp_reclassified is not True
+    compliance_failure = profile.fail_415 is True or (
+        profile.fail_402g is True and profile.fail_402g_after_deadline is not True
+    )
     action_items: list[str] = []
-    if outstanding and (profile.fail_402g or profile.fail_415):
+    if outstanding and compliance_failure:
         action_items.append("Compliance returns required")
     if outstanding and (profile.adp_failed or profile.acp_failed):
         label = "ACP returns required" if flags.get("ignore_adp_results") else "ADP/ACP returns required"

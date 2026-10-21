@@ -1,0 +1,210 @@
+{
+  "folder": "403b/pass",
+  "stops": true,
+  "stopped": false,
+  "filename": "555403_2025-Valuation.pdf",
+  "email_subject": "MOA - 555403 - GRACE MEDICAL HOME, INC. 403(B) PLAN - PYE 12/31/2025",
+  "warnings": [
+    "Read Val Assembly Excel: Val Assembly.xlsx",
+    "Read Compliance Testing Summary: 555403 2025 ResultSumm.pdf",
+    "Cover letter date set to October 21, 2026 (2 place(s)). Check the letterhead spacing.",
+    "402(g) dates left as printed (calendar plan, or plan year end was not read).",
+    "Added 3 Compliance and Administrative Reports page(s).",
+    "Files were ordered using the TEST23 combine sequence.",
+    "Removed Action Required paragraph(s): A, B, C, M, ES, D, E, F, I, L, J_ACP, J_ADP, K",
+    "Removed Year End Recap bullet(s): Y1, Y2, Y4, Y5, Y7, Y8",
+    "Outlook draft subject: MOA - 555403 - GRACE MEDICAL HOME, INC. 403(B) PLAN - PYE 12/31/2025",
+    "Retained Action Required paragraph(s): G, Y3, Y6, Y10",
+    "Added 12 SOP bookmark(s)."
+  ],
+  "profile": {
+    "plan_number": "555403",
+    "plan_name": "GRACE MEDICAL HOME, INC. 403(B) PLAN",
+    "company_name": "GRACE MEDICAL HOME, INC.",
+    "company_address": "88 Chapel Street, Orlando, FL 32801",
+    "plan_type": "403b",
+    "plan_year_end": "12/31/2025",
+    "beginning_plan_year": "2025",
+    "testing_method": "CURRENT",
+    "top_heavy": false,
+    "adp_failed": false,
+    "acp_failed": false,
+    "fail_402g": false,
+    "fail_415": false,
+    "returns_required": false,
+    "safe_harbor": false,
+    "adp_qnec": null,
+    "acp_qnec": null,
+    "total_qnec": null
+  },
+  "page_count": 16,
+  "bookmarks": [
+    {
+      "level": 1,
+      "title": "Cover Letter",
+      "page": 1
+    },
+    {
+      "level": 1,
+      "title": "Top Heavy",
+      "page": 1
+    },
+    {
+      "level": 1,
+      "title": "Future HCE",
+      "page": 3
+    },
+    {
+      "level": 1,
+      "title": "Contribution Analysis",
+      "page": 3
+    },
+    {
+      "level": 1,
+      "title": "Test Summary",
+      "page": 7
+    },
+    {
+      "level": 1,
+      "title": "410(b) Test",
+      "page": 7
+    },
+    {
+      "level": 1,
+      "title": "402(g) Test",
+      "page": 7
+    },
+    {
+      "level": 1,
+      "title": "415 Limit Test",
+      "page": 7
+    },
+    {
+      "level": 1,
+      "title": "Benefits, Rights and Features test",
+      "page": 7
+    },
+    {
+      "level": 1,
+      "title": "HCE",
+      "page": 8
+    },
+    {
+      "level": 1,
+      "title": "ACP Test",
+      "page": 10
+    },
+    {
+      "level": 1,
+      "title": "Census",
+      "page": 15
+    }
+  ],
+  "review": [
+    {
+      "code": "cover_plan_number",
+      "passed": true,
+      "detail": "555403"
+    },
+    {
+      "code": "cover_plan_name",
+      "passed": true,
+      "detail": "GRACE MEDICAL HOME, INC. 403(B) PLAN"
+    },
+    {
+      "code": "cover_company",
+      "passed": true,
+      "detail": "GRACE MEDICAL HOME, INC."
+    },
+    {
+      "code": "cover_address",
+      "passed": true,
+      "detail": "88 Chapel Street, Orlando, FL 32801"
+    },
+    {
+      "code": "cover_plan_year_end",
+      "passed": true,
+      "detail": "12/31/2025"
+    },
+    {
+      "code": "cover_moa",
+      "passed": true,
+      "detail": "MOA stamp likely present: cover text has Mutual of America; cover text has Financial Group; red and navy mark in upper-right"
+    },
+    {
+      "code": "top_heavy",
+      "passed": true,
+      "detail": "5.0"
+    },
+    {
+      "code": "package_order",
+      "passed": false,
+      "detail": "Expected ['Cover Letter', 'Test Summary', 'Action Required', '415 Failure Information', 'Year End Recap', 'Failed Test Notice', 'HCE/Key', 'Future HCE', 'ADP/ACP', '410(b)', '402(g)', 'Contribution Analysis', 'Top Heavy', '415', 'Census', 'BRF']; detected ['Cover Letter', 'Action Required', 'Top Heavy', 'Test Summary', 'Failed Test Notice', 'ADP/ACP', 'Contribution Analysis', 'Census', 'Future HCE', '415 Failure Information', '415', '402(g)', 'Year End Recap', '410(b)', 'BRF', 'HCE/Key']"
+    },
+    {
+      "code": "action_compliance_wording",
+      "passed": true,
+      "detail": "Wording matches TEST23 \u00a7B.1: IMMEDIATE ACTION REQUIRED - COMPLIANCE TEST FAILURE"
+    },
+    {
+      "code": "cover_date_today",
+      "passed": true,
+      "detail": "October 21, 2026"
+    },
+    {
+      "code": "compliance_three_pages",
+      "passed": true,
+      "detail": "3 Compliance and Administrative Report pages are in the package."
+    },
+    {
+      "code": "brf_report",
+      "passed": true,
+      "detail": "403(b) keeps the Benefits, Rights and Features test when that report is in the package."
+    },
+    {
+      "code": "top_heavy_summary",
+      "passed": true,
+      "detail": "Top heavy 5.00% matches the report. Key-employee top heavy percent. It must match the Top Heavy test. Zero is written 0.00%. More than 60% is Plan is Top Heavy. 60% or less is Plan is not Top Heavy."
+    },
+    {
+      "code": "summary_402(g)",
+      "passed": true,
+      "detail": "402(g) agrees (pass). 402(g) deferral limit result, the same as the 402(g) report."
+    },
+    {
+      "code": "summary_415",
+      "passed": true,
+      "detail": "415 agrees (pass). 415 annual additions result, the same as the 415 report."
+    },
+    {
+      "code": "summary_ACP",
+      "passed": true,
+      "detail": "ACP agrees (pass). ACP result, the same as the ADP/ACP report."
+    },
+    {
+      "code": "summary_410(b)",
+      "passed": true,
+      "detail": "Standard pass 100% (Profit sharing and SHNE contributions. The ratio percent is that result.); 401(k) pass 100% (Salary deferrals and Roth. The ratio percent is that result.); 401(m) pass 100% (Match and safe harbor match contributions. The ratio percent is that result.)"
+    },
+    {
+      "code": "summary_brf",
+      "passed": true,
+      "detail": "BRF agrees (pass). BRF pass or fail stays on the Result Summary. The BRF report is not included."
+    },
+    {
+      "code": "variance_client",
+      "passed": true,
+      "detail": "No client variance report in this package."
+    },
+    {
+      "code": "report_identity",
+      "passed": true,
+      "detail": "Plan number and plan name appear on each report."
+    },
+    {
+      "code": "ssn_scan",
+      "passed": true,
+      "detail": "No SSNs found"
+    }
+  ]
+}

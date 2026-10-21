@@ -31,6 +31,7 @@ from services import (
     source_rewrite,
     ssn_scan,
 )
+from services import package_builder
 from services import midyear, plan_457
 from services.plan_config import is_457_plan, package_flags, plan_family
 
@@ -87,13 +88,25 @@ def process_uploads(
             and value not in (None, "", [], {})
         }
         pdf_plan_name = profile.plan_name
+        cover_company = profile.company_name
+        cover_address = profile.company_address
+        cover_pye = profile.plan_year_end
         overlays: list[dict] = []
         overlay_sources: list[str] = []
         excel_plan_name: str | None = None
+        excel_company: str | None = None
+        excel_address: str | None = None
+        excel_pye: str | None = None
         for name, data in excels:
             parsed = source_profile.parse_excel(data)
             if parsed.get("plan_name"):
                 excel_plan_name = str(parsed["plan_name"])
+            if parsed.get("company_name"):
+                excel_company = str(parsed["company_name"])
+            if parsed.get("company_address"):
+                excel_address = str(parsed["company_address"])
+            if parsed.get("plan_year_end"):
+                excel_pye = str(parsed["plan_year_end"])
             overlays.append(parsed)
             overlay_sources.append(f"Excel: {name}")
             warnings.append(f"Read Val Assembly Excel: {name}")
@@ -182,6 +195,17 @@ def process_uploads(
             warnings.extend(source_rewrite.apply_source_rewrites(doc, profile, highlights))
         else:
             warnings.extend(source_rewrite.apply_cover_date(doc, highlights))
+            warnings.extend(source_rewrite.apply_402g_dates(doc, profile, highlights))
+        if not profile.midyear and not is_457_plan(profile.plan_type):
+            warnings.extend(
+                package_builder.ensure_compliance_overview(
+                    doc,
+                    plan_name=profile.plan_name,
+                    plan_number=profile.plan_number,
+                    plan_year_start=profile.plan_year_start,
+                    plan_year_end=profile.plan_year_end,
+                )
+            )
         profile.detected_sections = pdf_extractor.detect_sections(doc)
         profile_debug_path = str(
             profile_debug.write_profile_debug(
@@ -231,6 +255,12 @@ def process_uploads(
                 source_files=[name for name, _data in ordered],
                 excel_plan_name=excel_plan_name,
                 pdf_plan_name=pdf_plan_name,
+                excel_company=excel_company,
+                excel_address=excel_address,
+                excel_pye=excel_pye,
+                cover_company=cover_company,
+                cover_address=cover_address,
+                cover_pye=cover_pye,
             )
             if reasons:
                 raise HTTPException(status_code=400, detail="Assembly stopped.\n" + "\n".join(reasons))
@@ -316,7 +346,10 @@ def _split_summaries(pdfs: list[tuple[str, bytes]]) -> tuple[list[tuple[str, byt
     for name, data in pdfs:
         text = _pdf_text(data)
         named_summary = bool(re.search(r"result\s*summ|test\s*summ", name, re.I))
-        if "compliance testing summary of results" in text.lower() or named_summary:
+        # A valuation package mentions the summary page inside Top Heavy wording.
+        # Only a document that opens with the summary is a summary sidecar.
+        opens_with_summary = "compliance testing summary of results" in text[:2000].lower()
+        if opens_with_summary or named_summary:
             summaries.append((name, text))
             # A named Result/Test Summary is both an extraction source and a
             # required package page. A generic compliance-summary sidecar is

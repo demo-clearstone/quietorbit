@@ -20,9 +20,25 @@ def _flat(text: str) -> str:
 def _pdf_text(path: str) -> str:
     doc = fitz.open(path)
     try:
-        return _flat("\n".join(page.get_text("text") or "" for page in doc))
+        return _flat(_reading_text(doc))
     finally:
         doc.close()
+
+
+def _reading_text(doc: fitz.Document) -> str:
+    """Read each page in visual order. Filled amounts sit on the original line."""
+    rows: list[str] = []
+    for page in doc:
+        lines: list[list[tuple]] = []
+        for word in sorted(page.get_text("words") or [], key=lambda item: (item[1], item[0])):
+            if not lines or abs(word[1] - lines[-1][0][1]) > 3:
+                lines.append([word])
+            else:
+                lines[-1].append(word)
+        for line in lines:
+            line.sort(key=lambda item: item[0])
+            rows.append(" ".join(str(item[4]) for item in line))
+    return "\n".join(rows)
 
 
 def _bytes(doc: fitz.Document) -> bytes:
@@ -66,12 +82,17 @@ def test_c2_current_keeps_notice_and_fills_qnec_and_refunds(tmp_path, monkeypatc
     text = _pdf_text(result.pdf_path)
     assert "Current method testing" in text
     assert "Prior method testing" not in text
-    assert "ADP/ACP test is $185,354.75" in text
-    assert "The ADP QNEC is $142,540.41" in text
-    assert "The ACP QNEC is $42,814.34" in text
-    assert "Deferral Contribution of $17,571.00" in text
-    assert "Match Contribution of $116.60" in text
+    assert "The amount of the QNEC that is required to pass the ADP/ACP test is $185,354.75" in text
+    assert text.index("$185,354.75") < text.index("The ADP QNEC is $142,540.41")
+    assert text.index("The ADP QNEC is $142,540.41") < text.index("The ACP QNEC is $42,814.34")
+    assert "Excess Aggregated Deferral Contribution of $17,571.00" in text
+    assert "Match contribution of $116.60" in text
+    assert "555555" in text
+    assert "HARBOR MANUFACTURING 401(K) PLAN" in text
+    assert "December 31, 2024" in text
     assert "$X,XXX,XXX.XX" not in text
+    identity = next(item for item in result.review.items if item.code == "report_identity")
+    assert identity.passed is True
 
 
 def test_c2_adp_only_drops_acp_qnec_line(tmp_path, monkeypatch):
@@ -93,18 +114,20 @@ def test_c3_prior_keeps_notice_and_fills_refunds_only(tmp_path, monkeypatch):
     text = _pdf_text(result.pdf_path)
     assert "Prior method testing" in text
     assert "Current method testing" not in text
-    assert "Deferral Contribution of $17,571.00" in text
-    assert "Match Contribution of $116.60" in text
+    assert "Excess Aggregated Deferral Contribution of $17,571.00" in text
+    assert "Match contribution of $116.60" in text
     assert "The ADP QNEC is" not in text
     assert "The ACP QNEC is" not in text
+    assert "555555" in text
+    assert "December 31, 2024" in text
 
 
 def test_c3_prior_drops_missing_match_refund_line(tmp_path, monkeypatch):
     doc = build_after_12_failure_notice_pdf(method="PRIOR", match=None)
     result = _process(tmp_path, monkeypatch, doc)
     text = _pdf_text(result.pdf_path)
-    assert "Deferral Contribution of $17,571.00" in text
-    assert "Match Contribution of" not in text
+    assert "Excess Aggregated Deferral Contribution of $17,571.00" in text
+    assert "Match contribution of" not in text
 
 
 def test_not_after_12_does_not_keep_c2_or_c3():
@@ -126,7 +149,9 @@ def test_not_after_12_does_not_keep_c2_or_c3():
 
 def test_after_12_templates_match_test23():
     assert "Current method testing" in AFTER_12_CURRENT_NOTICE
-    assert "ADP/ACP test is $X,XXX,XXX.XX" in AFTER_12_CURRENT_NOTICE
-    assert "Deferral Contribution of $X,XXX,XXX.XX" in AFTER_12_CURRENT_NOTICE
+    assert "The amount of the QNEC that is required to pass the ADP/ACP test is $X,XXX,XXX.XX" in AFTER_12_CURRENT_NOTICE
+    assert "Excess Aggregated Deferral Contribution of $X,XXX,XXX.XX" in AFTER_12_CURRENT_NOTICE
+    assert "Form W-4R" in AFTER_12_CURRENT_NOTICE
     assert "Prior method testing" in AFTER_12_PRIOR_NOTICE
-    assert "ADP QNEC" not in AFTER_12_PRIOR_NOTICE
+    assert "The ADP QNEC is" not in AFTER_12_PRIOR_NOTICE
+    assert "Form W-4R" in AFTER_12_PRIOR_NOTICE

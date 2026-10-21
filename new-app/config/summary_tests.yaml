@@ -1,0 +1,58 @@
+# Record of what each Compliance Testing Summary line means.
+# Later test pages are checked against this summary.
+
+tests:
+  - code: top_heavy
+    name: 416 Top Heavy Determination
+    means: >
+      Key-employee top heavy percent. It must match the Top Heavy test.
+      Zero is written 0.00%. More than 60% is Plan is Top Heavy.
+      60% or less is Plan is not Top Heavy.
+
+  - code: 410b_standard
+    name: 410(b) Standard
+    means: Profit sharing and SHNE contributions. The ratio percent is that result.
+
+  - code: 410b_401k
+    name: 410(b) 401(k)
+    means: Salary deferrals and Roth. The ratio percent is that result.
+
+  - code: 410b_401m
+    name: 410(b) 401(m)
+    means: Match and safe harbor match contributions. The ratio percent is that result.
+
+  - code: 410b_failed
+    name: Failed 410(b)
+    means: >
+      When 410(b) fails, the Average Benefit Percentage test is used.
+      A passing test keeps the sentence
+      "Average Benefits Test Passed; no action needed for Failed 410(b) Coverage Test"
+      and an Average Benefit Test line of Pass.
+
+  - code: brf
+    name: Benefits, Rights and Features
+    means: BRF pass or fail stays on the Result Summary. The BRF report is not included.
+
+  - code: 401a4
+    name: 401(a)(4)
+    means: 401(a)(4) nondiscrimination result, the same as the 401(a)(4) report.
+
+  - code: 414s
+    name: 414(s)
+    means: 414(s) compensation result, the same as the 414(s) report.
+
+  - code: 402g
+    name: 402(g) Deferral Limits
+    means: 402(g) deferral limit result, the same as the 402(g) report.
+
+  - code: "415"
+    name: 415(c) Annual Additions
+    means: 415 annual additions result, the same as the 415 report.
+
+  - code: adp
+    name: Average Deferral Percentage (ADP)
+    means: ADP result, the same as the ADP/ACP report.
+
+  - code: acp
+    name: Average Contribution Percentage (ACP)
+    means: ACP result, the same as the ADP/ACP report.

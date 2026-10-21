@@ -142,6 +142,28 @@ def test_missing_hce_report_stops(tmp_path, monkeypatch):
     assert "HCE Key Report" in raised.value.detail
 
 
+def test_po_box_address_is_complete(tmp_path, monkeypatch):
+    result = _run(
+        tmp_path,
+        monkeypatch,
+        [(
+            "100000 2024 401k Valuation Pkg.pdf",
+            _package(address="PO BOX 7174, EDMOND, OK 73083"),
+        )],
+    )
+    assert result.filename == "100000_2024-Valuation.pdf"
+
+
+def test_address_without_zip_stops(tmp_path, monkeypatch):
+    with pytest.raises(HTTPException) as raised:
+        _run(
+            tmp_path,
+            monkeypatch,
+            [("100000 2024 401k Valuation Pkg.pdf", _package(address="PO BOX 7174, EDMOND, OK"))],
+        )
+    assert "employer address" in raised.value.detail.lower()
+
+
 def test_incomplete_address_stops(tmp_path, monkeypatch):
     with pytest.raises(HTTPException) as raised:
         _run(
@@ -216,10 +238,80 @@ def test_ssn_and_masked_ssn_stop_a_single_report(tmp_path, monkeypatch):
 
 def test_unresolved_result_summary_wording_stops(tmp_path, monkeypatch):
     doc = fitz.open()
-    _page(doc, "Test Summary\nPlan is/is not Top Heavy")
+    _page(doc, "Test Summary\n416 Top Heavy Determination\nPlan is\\is not Top Heavy\nADP Test: Pass/Fail")
     with pytest.raises(HTTPException) as raised:
         _run(tmp_path, monkeypatch, [("summary.pdf", _bytes(doc))])
     assert "unresolved wording" in raised.value.detail
+
+
+def test_off_calendar_402g_keeps_the_prior_calendar_year(tmp_path, monkeypatch):
+    doc = fitz.open()
+    _page(
+        doc,
+        "\n".join(
+            [
+                "Cover Letter",
+                "Mutual of America",
+                "Plan Number: 100000",
+                "Plan Name: Example Plan",
+                "Company Name: Example Company",
+                "Address: PO BOX 7174, EDMOND, OK 73083",
+                "Plan Year: 07/01/2025 - 06/30/2026",
+            ]
+        ),
+        stamp=True,
+    )
+    sections = [
+        "Test Summary\nPlan is not Top Heavy\nTop Heavy Percent: 10%\nADP Test: Pass",
+        "402(g) Test\nPlan Name: Example Plan\nPlan Year: 01/01/2025 - 12/31/2025",
+        "415 Limit Test\nPlan Name: Example Plan\nPlan Year End: 06/30/2026",
+        "ADP/ACP Test\nPlan Name: Example Plan\nPlan Year End: 06/30/2026",
+        "410(b) Test\nPlan Name: Example Plan\nPlan Year End: 06/30/2026",
+        "HCE/Key\nPlan Name: Example Plan\nPlan Year End: 06/30/2026",
+        "Future HCE\nPlan Name: Example Plan\nPlan Year End: 06/30/2027",
+        "Top Heavy\nPlan Name: Example Plan\nPlan Year End: 06/30/2026",
+        "Census\nPlan Name: Example Plan\nPlan Year End: 06/30/2026",
+        "Contribution Analysis\nPlan Name: Example Plan\nPlan Year End: 06/30/2026",
+    ]
+    for text in sections:
+        _page(doc, text)
+    result = _run(tmp_path, monkeypatch, [("100000 2025 401k Valuation Pkg.pdf", _bytes(doc))])
+    assert result.filename.endswith("-Valuation.pdf")
+
+
+def test_safe_harbor_does_not_require_the_adp_report(tmp_path, monkeypatch):
+    doc = fitz.open()
+    _page(
+        doc,
+        "\n".join(
+            [
+                "Cover Letter",
+                "Mutual of America",
+                "Plan Number: 100000",
+                "Plan Name: Example Plan",
+                "Company Name: Example Company",
+                "Address: 200 Park Avenue, New York, NY 10166",
+                "Plan Year: 01/01/2024 - 12/31/2024",
+                "Safe Harbor: Yes",
+            ]
+        ),
+        stamp=True,
+    )
+    for text in (
+        "Test Summary\nPlan is not Top Heavy\nTop Heavy Percent: 10%\n"
+        "Standard: Pass\n401(k): Pass\n401(m): Pass",
+        "402(g) Test\nPlan Year End: 12/31/2024",
+        "415 Limit Test\nPlan Year End: 12/31/2024",
+        "410(b) Test\nPlan Year End: 12/31/2024",
+        "HCE/Key\nPlan Year End: 12/31/2024",
+        "Future HCE\nPlan Year End: 12/31/2025",
+        "Top Heavy\nPlan Year End: 12/31/2024",
+        "Census\nPlan Year End: 12/31/2024",
+        "Contribution Analysis\nPlan Year End: 12/31/2024",
+    ):
+        _page(doc, text)
+    result = _run(tmp_path, monkeypatch, [("100000 2024 401k Valuation Pkg.pdf", _bytes(doc))])
+    assert result.plan_profile.safe_harbor is True
 
 
 def test_single_notice_still_saves(tmp_path, monkeypatch):

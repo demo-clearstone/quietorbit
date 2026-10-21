@@ -65,10 +65,10 @@ def test_all_fail_with_returns_keeps_j_k_and_l():
 def test_j_k_l_pages_kept_when_all_apply(tmp_path, monkeypatch):
     result = _process(tmp_path, monkeypatch, build_sample_letters_pdf())
     text = _pdf_text(result.pdf_path)
-    assert "ADP/ACP excess returns" in text
-    assert "402(g) deferral limit has been exceeded" in text
-    assert "IRC 415 annual additions test" in text
-    assert "415 annual additions failure" in text
+    assert "failing the ADP/ACP nondiscrimination testing" in text
+    assert "402(g) Deferral Limit has been exceeded" in text
+    assert "Annual Additions (IRC 415) Test Failure Information" in text
+    assert "exceeding the Annual Additions (IRC 415) limit" in text
 
 
 def test_j_removed_when_adp_acp_pass(tmp_path, monkeypatch):
@@ -78,9 +78,9 @@ def test_j_removed_when_adp_acp_pass(tmp_path, monkeypatch):
     assert by_id["J_ADP"].action == "remove"
     assert by_id["J_ACP"].action == "remove"
     text = _pdf_text(result.pdf_path)
-    assert "ADP/ACP excess returns" not in text
-    assert "402(g) deferral limit has been exceeded" in text
-    assert "415 annual additions failure" in text
+    assert "failing the ADP/ACP nondiscrimination testing" not in text
+    assert "402(g) Deferral Limit has been exceeded" in text
+    assert "exceeding the Annual Additions (IRC 415) limit" in text
 
 
 def test_j_removed_when_no_returns(tmp_path, monkeypatch):
@@ -92,8 +92,8 @@ def test_j_removed_when_no_returns(tmp_path, monkeypatch):
     assert by_id["J_ACP"].action == "remove"
     assert by_id["K"].action == "remove"
     text = _pdf_text(result.pdf_path)
-    assert "ADP/ACP excess returns" not in text
-    assert "402(g) deferral limit has been exceeded" not in text
+    assert "failing the ADP/ACP nondiscrimination testing" not in text
+    assert "402(g) Deferral Limit has been exceeded" not in text
 
 
 def test_k_removed_when_402g_passes(tmp_path, monkeypatch):
@@ -103,8 +103,8 @@ def test_k_removed_when_402g_passes(tmp_path, monkeypatch):
     assert result.plan_profile.fail_402g is False
     assert by_id["K"].action == "remove"
     text = _pdf_text(result.pdf_path)
-    assert "402(g) deferral limit has been exceeded" not in text
-    assert "ADP/ACP excess returns" in text
+    assert "402(g) Deferral Limit has been exceeded" not in text
+    assert "failing the ADP/ACP nondiscrimination testing" in text
 
 
 def test_k_removed_when_402g_after_415_deadline(tmp_path, monkeypatch):
@@ -115,7 +115,7 @@ def test_k_removed_when_402g_after_415_deadline(tmp_path, monkeypatch):
     assert by_id["K"].action == "remove"
     assert by_id["A"].action == "remove"
     text = _pdf_text(result.pdf_path)
-    assert "402(g) deferral limit has been exceeded" not in text
+    assert "402(g) Deferral Limit has been exceeded" not in text
 
 
 def test_l_removed_when_415_passes(tmp_path, monkeypatch):
@@ -126,9 +126,9 @@ def test_l_removed_when_415_passes(tmp_path, monkeypatch):
     assert by_id["L"].action == "remove"
     text = _pdf_text(result.pdf_path)
     assert "Test Failure Information" not in text
-    assert "415 annual additions failure" not in text
-    assert "ADP/ACP excess returns" in text
-    assert "402(g) deferral limit has been exceeded" in text
+    assert "exceeding the Annual Additions (IRC 415) limit" not in text
+    assert "failing the ADP/ACP nondiscrimination testing" in text
+    assert "402(g) Deferral Limit has been exceeded" in text
 
 
 def test_only_415_keeps_packet_and_letter(tmp_path, monkeypatch):
@@ -146,10 +146,10 @@ def test_only_415_keeps_packet_and_letter(tmp_path, monkeypatch):
     assert by_id["K"].action == "remove"
     assert by_id["L"].action == "keep"
     text = _pdf_text(result.pdf_path)
-    assert "IRC 415 annual additions test" in text
-    assert "415 annual additions failure" in text
-    assert "ADP/ACP excess returns" not in text
-    assert "402(g) deferral limit has been exceeded" not in text
+    assert "Annual Additions (IRC 415) Test Failure Information" in text
+    assert "exceeding the Annual Additions (IRC 415) limit" in text
+    assert "failing the ADP/ACP nondiscrimination testing" not in text
+    assert "402(g) Deferral Limit has been exceeded" not in text
 
 
 def test_combined_adp_acp_letter_stays_when_only_adp_fails(tmp_path, monkeypatch):
@@ -189,23 +189,34 @@ def test_combined_adp_acp_letter_is_removed_when_neither_fails(tmp_path, monkeyp
         "Actual Deferral Percentage (ADP) and/or Actual Contribution Percentage (ACP)",
     )
     result = _process(tmp_path, monkeypatch, doc)
-    text = _pdf_text(result.pdf_path)
+    # The compliance overview describes the ACP test. It is not the participant letter.
+    from services.package_polish import is_compliance_overview
+
+    out = fitz.open(result.pdf_path)
+    try:
+        text = "\n".join(
+            page.get_text("text") or ""
+            for page in out
+            if not is_compliance_overview(page.get_text("text") or "")
+        )
+    finally:
+        out.close()
     assert "Actual Deferral Percentage (ADP)" not in text
     assert "Actual Contribution Percentage (ACP)" not in text
 
 
-def test_adp_only_keeps_adp_letter_and_drops_acp_letter(tmp_path, monkeypatch):
+def test_adp_only_keeps_the_combined_letter(tmp_path, monkeypatch):
     doc = build_sample_letters_pdf(adp="Fail", acp="Pass")
     result = _process(tmp_path, monkeypatch, doc)
     by_id = {item.rule_id: item for item in result.rule_decisions}
     assert by_id["J_ADP"].action == "keep"
     assert by_id["J_ACP"].action == "remove"
     text = _pdf_text(result.pdf_path)
-    assert "Average Deferral Percentage (ADP)" in text
-    assert "Actual Contribution Percentage (ACP)" not in text
+    assert "Actual Deferral Percentage (ADP)" in text
+    assert "Actual Contribution Percentage (ACP)" in text
 
 
-def test_acp_only_keeps_acp_letter_and_drops_adp_letter(tmp_path, monkeypatch):
+def test_acp_only_keeps_the_combined_letter(tmp_path, monkeypatch):
     doc = build_sample_letters_pdf(adp="Pass", acp="Fail")
     result = _process(tmp_path, monkeypatch, doc)
     by_id = {item.rule_id: item for item in result.rule_decisions}
@@ -213,7 +224,7 @@ def test_acp_only_keeps_acp_letter_and_drops_adp_letter(tmp_path, monkeypatch):
     assert by_id["J_ACP"].action == "keep"
     text = _pdf_text(result.pdf_path)
     assert "Actual Contribution Percentage (ACP)" in text
-    assert "Average Deferral Percentage (ADP)" not in text
+    assert "Actual Deferral Percentage (ADP)" in text
 
 
 def test_k_rule_drops_after_deadline_without_pdf():
@@ -237,7 +248,7 @@ def test_k_rule_drops_after_deadline_without_pdf():
 def test_sample_letter_templates_match_test23():
     assert "SAMPLE/DRAFT Communication to Participant" in SAMPLE_LETTER_ADP_ACP
     assert "Actual Contribution Percentage (ACP)" in SAMPLE_LETTER_ADP_ACP
-    assert "Average Deferral Percentage (ADP)" in SAMPLE_LETTER_ADP
-    assert "402(g) Deferral Limit" in SAMPLE_LETTER_402G
+    assert "Actual Deferral Percentage (ADP)" in SAMPLE_LETTER_ADP
+    assert "402(g) Deferral Limit has been exceeded" in SAMPLE_LETTER_402G
     assert "Annual Additions (IRC 415) Test Failure Information" in NOTICE_415
     assert "Annual Additions (IRC 415) limit has been exceeded" in SAMPLE_LETTER_415

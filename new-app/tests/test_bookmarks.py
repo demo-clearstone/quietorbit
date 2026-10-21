@@ -73,6 +73,38 @@ def test_bookmark_has_an_explicit_top_of_page_destination():
     assert toc[0][3]["page"] == 1
 
 
+def test_adp_children_are_summary_detail_then_corrections():
+    doc = fitz.open()
+    doc.new_page().insert_text((72, 72), "Cover Letter\nPlan Number: 111111", fontsize=11)
+    doc.new_page().insert_text((72, 72), "ADP/ACP Corrections Page\nRefunds", fontsize=11)
+    doc.new_page().insert_text((72, 72), "ADP/ACP Test Detail\nRates", fontsize=11)
+    doc.new_page().insert_text((72, 72), "ADP/ACP Summary Page\nResults", fontsize=11)
+    profile = PlanProfile(
+        plan_type="401k",
+        detected_sections=[
+            DetectedSection(name="Cover Letter", page=1, matched_alias="Cover Letter"),
+            DetectedSection(name="ADP/ACP", page=2, matched_alias="ADP/ACP"),
+        ],
+    )
+    try:
+        add_bookmarks(doc, profile, source_files=["10_adp-acp.pdf"])
+        toc = doc.get_toc()
+    finally:
+        doc.close()
+    assert [row[1] for row in toc] == [
+        "Cover Letter",
+        "ADP/ACP Tests",
+        "Summary",
+        "Detail",
+        "Corrections",
+    ]
+    assert [row[0] for row in toc] == [1, 1, 2, 2, 2]
+    pages = {row[1]: row[2] for row in toc}
+    assert pages["Summary"] == 4
+    assert pages["Detail"] == 3
+    assert pages["Corrections"] == 2
+
+
 def test_assembled_pdf_bookmark_from_adp_filename(tmp_path, monkeypatch):
     import services.save_service as save_service
 

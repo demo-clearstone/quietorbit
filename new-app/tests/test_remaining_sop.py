@@ -209,6 +209,43 @@ def test_prior_recap_bullet_is_filled_from_the_adp_nhce_rate(tmp_path, monkeypat
     assert "prior year data" in text
 
 
+def test_full_prior_bullet_is_filled_from_the_nhce_rate(tmp_path, monkeypatch):
+    import fitz
+
+    from services.package_builder import write_recap_page
+
+    doc = fitz.open()
+    cover = doc.new_page()
+    cover.insert_textbox(
+        fitz.Rect(54, 54, 540, 400),
+        "\n".join(
+            [
+                "Cover Letter",
+                "Plan Number: 800808",
+                "Testing Method: PRIOR",
+                "HCE Current Year: Yes",
+                "HCE Future year: Yes",
+                "Safe Harbor: No",
+            ]
+        ),
+        fontsize=11,
+    )
+    page = doc.new_page(width=595.28, height=841.89)
+    write_recap_page(page, ["Important Information"], [RECAP_BULLETS[1], RECAP_BULLETS[2]])
+    results = doc.new_page()
+    results.insert_text(
+        (72, 72),
+        "TEST RESULTS\nADP TEST USING PRIOR YEAR NHCE PERCENTAGES\n"
+        "The ADP for the 65 NHCE(s) is 2.21% (143.65/65). This value will be used in next year's test.",
+        fontsize=11,
+    )
+    result = _process(tmp_path, monkeypatch, doc)
+    text = _pdf_text(result.pdf_path)
+    assert "is 4.21% based on" in text
+    assert "for 2025 of 2.21%" in text
+    assert "the actual amount the employee can defer" not in text
+
+
 def test_recap_safe_harbor_keeps_sh_bullet(tmp_path, monkeypatch):
     doc = build_remaining_sop_pdf(safe_harbor="Yes")
     result = _process(tmp_path, monkeypatch, doc)
@@ -267,5 +304,87 @@ def test_recap_templates_match_test23():
     blob = " ".join(RECAP_BULLETS)
     assert "did not have any Highly Compensated Employees" in blob
     assert "prior year data" in blob
+    assert "is % based on" in blob
+    assert "for 2025 of %" in blob
+    assert "$24,500" in blob
+    assert "$11,250" in blob
     assert "Safe Harbor Plan" in blob
     assert "not administered by Mutual of America" in blob
+
+
+def test_adp_results_prior_year_wording_sets_prior_method():
+    import fitz
+
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text(
+        (72, 72),
+        "TEST RESULTS\nADP TEST USING PRIOR YEAR NHCE PERCENTAGES\nACP TEST USING PRIOR YEAR NHCE PERCENTAGES",
+        fontsize=11,
+    )
+    try:
+        profile = extract_plan_profile(doc)
+    finally:
+        doc.close()
+    assert profile.testing_method == "PRIOR"
+
+
+def test_results_page_without_prior_wording_is_current(tmp_path, monkeypatch):
+    import fitz
+
+    doc = fitz.open()
+    cover = doc.new_page()
+    cover.insert_textbox(
+        fitz.Rect(54, 54, 540, 400),
+        "\n".join(
+            [
+                "Cover Letter",
+                "Plan Number: 777777",
+                "HCE Current Year: Yes",
+                "HCE Future year: Yes",
+                "Safe Harbor: No",
+            ]
+        ),
+        fontsize=11,
+    )
+    results = doc.new_page()
+    results.insert_text(
+        (72, 72),
+        "TEST RESULTS\nADP TEST\nACP TEST\nThe ADP for the 65 NHCE(s) is 2.21% (143.65/65).",
+        fontsize=11,
+    )
+    recap = doc.new_page()
+    recap.insert_textbox(
+        fitz.Rect(54, 54, 540, 700),
+        "Important Information\n\n"
+        "- This rate is determined using the \"prior year data\" method. The maximum average deferral rate "
+        "for the 2026 plan year is % based on the average deferral rate for 2025 of %.\n\n"
+        "- Note: In addition, the actual amount the employee can defer in 2026 cannot exceed $24,500.",
+        fontsize=11,
+    )
+    result = _process(tmp_path, monkeypatch, doc)
+    assert result.plan_profile.testing_method == "CURRENT"
+    text = _pdf_text(result.pdf_path)
+    assert "prior year data" not in text
+    assert "the actual amount the employee can defer" in text
+
+
+def test_switching_to_safe_harbor_keeps_the_sh_bullet(tmp_path, monkeypatch):
+    doc = build_remaining_sop_pdf(method="CURRENT", safe_harbor="No", hce_current="Yes", hce_future="Yes")
+    # The cover line is added on top of Safe Harbor: No. The switching note is the keep signal.
+    page = doc[0]
+    page.insert_text((72, 400), "The plan is switching to SH next year.", fontsize=11)
+    result = _process(tmp_path, monkeypatch, doc)
+    text = _pdf_text(result.pdf_path)
+    assert result.plan_profile.safe_harbor is True
+    assert "Safe Harbor Plan" in text
+    assert "the actual amount the employee can defer" not in text
+    assert "prior year data" not in text
+
+
+def test_prior_and_safe_harbor_keeps_only_the_sh_bullet(tmp_path, monkeypatch):
+    doc = build_remaining_sop_pdf(method="PRIOR", safe_harbor="Yes")
+    result = _process(tmp_path, monkeypatch, doc)
+    text = _pdf_text(result.pdf_path)
+    assert "Safe Harbor Plan" in text
+    assert "prior year data" not in text

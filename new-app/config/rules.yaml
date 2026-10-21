@@ -35,6 +35,8 @@ rules:
         - field: returns_required
           equals: true
         - any_true: [adp_failed, acp_failed]
+        - field: adp_reclassified
+          not_true: true
     else: remove
 
   - id: D
@@ -45,7 +47,11 @@ rules:
           equals: CURRENT
         - field: after_12_months
           equals: true
+        - field: returns_required
+          equals: true
         - any_true: [adp_failed, acp_failed]
+        - field: adp_reclassified
+          not_true: true
     else: remove
 
   - id: E
@@ -56,7 +62,11 @@ rules:
           equals: PRIOR
         - field: after_12_months
           equals: true
+        - field: returns_required
+          equals: true
         - any_true: [adp_failed, acp_failed]
+        - field: adp_reclassified
+          not_true: true
     else: remove
 
   - id: F
@@ -168,6 +178,8 @@ rules:
       all:
         - field: testing_method
           equals: PRIOR
+        - field: safe_harbor
+          not_true: true
         - any_true: [hce_current, hce_future]
     else: remove
 

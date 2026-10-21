@@ -36,7 +36,11 @@ def parse_excel(data: bytes) -> dict[str, Any]:
     header_row = 1
     for col in range(1, (sheet.max_column or 1) + 1):
         headers.append(_cell_str(sheet.cell(header_row, col).value))
-    if headers and any("plan number" in h.lower() for h in headers):
+    if headers and any(
+        needle in h.lower()
+        for h in headers
+        for needle in ("plan number", "plan name", "company name", "employer name", "pye", "plan year")
+    ):
         for col, header in enumerate(headers, start=1):
             value = sheet.cell(2, col).value
             if header:
@@ -69,6 +73,8 @@ def parse_excel(data: bytes) -> dict[str, Any]:
     overlay: dict[str, Any] = {
         "plan_number": _digits(_first(cells, "omni plan number", "plan number", "plan #")),
         "plan_name": _first(cells, "plan name") or None,
+        "company_name": _first(cells, "company name", "employer name") or None,
+        "company_address": _first(cells, "company address", "employer address") or None,
         "plan_type": _plan_type(_first(cells, "plan type")),
         "plan_year_end": pye,
         "testing_method": method,

@@ -10,8 +10,8 @@ HEADING = "IMMEDIATE ACTION REQUIRED - COMPLIANCE TEST FAILURE"
 BODY = (
     "Contribution refunds to participants are required to correct compliance testing failures. "
     "Review the Excess Summary report provided in this package for details and return any "
-    "required documents to your local regional office representative.\n"
-    "To help ensure returns are processed correctly, please also return Form W-4P documents "
+    "required documents or contact your local regional office representative.\n"
+    "To help ensure returns are processed correctly, please also return Form W-4R documents "
     "for each affected participant."
 )
 

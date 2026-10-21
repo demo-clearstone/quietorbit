@@ -1,5 +1,10 @@
 # Combine order for Auto-order (missing files are skipped).
-# Cover Letter, then Result Summary, then Action Required, then the remaining reports.
+# Valuation package filename: Plan ID + YYYY + Plan Type + Valuation Pkg
+#   example: 123456 2025 401k Valuation Pkg
+# Cover Letter, then Result (ResultSumm), then Action Required and the other
+# cover-packet pages, then the Plan Year-End reports in this keyword order:
+# HCEKey, FYHCE, ADP, 410, MaVar, SHMaVar, PSVar, SHNEVar, 402, Contri,
+# TH or Top Heavy, 415, Census, 401a, ABPT, 414s.
 
 expected_order:
   - name: Cover Letter
@@ -45,8 +50,6 @@ expected_order:
     aliases: ["Valuation Reports"]
   - name: Summary of Compliance Test Results
     aliases: ["Summary of Compliance Test Results"]
-  - name: Compensation Limit Failure Summary
-    aliases: ["Compensation Limit Failure", "SHMaVar", "SHMa"]
   - name: Combined Testing Report
     aliases: ["Combined Testing Report", "Combined Compliance Testing Report"]
   - name: Failed Test Notice
@@ -80,40 +83,42 @@ expected_order:
   - name: 415 Failure Letter
     label: 415 Failure letter
     aliases: ["415 Failure letter", "Sample Letter 415"]
-  - name: Variance
-    aliases: ["Variance Report", "Variance", "MaVar"]
-  - name: PS Variance
-    aliases: ["PS Variance Report", "PS Variance", "PSVar"]
-  - name: SHNE Variance
-    aliases: ["SHNE Variance Report", "SHNE Variance", "SHNEVar"]
-  - name: Contribution Analysis
-    aliases: ["Contribution Analysis", "ContriAnalysis", "Contri"]
   - name: HCE/Key
     aliases: ["HCE/Key", "HCE Key", "HCEKey"]
   - name: Future HCE
     aliases: ["Future HCE", "Future Year HCE", "FYHCE", "HCE"]
   - name: ADP/ACP
     aliases: ["ADP/ACP", "ADP ACP", "ADP Test", "ACP Test", "ADP"]
-  - name: "402(g)"
-    aliases: ["402(g)", "402g", "402G", "402"]
   - name: "410(b)"
     aliases: ["410(b)", "410b", "410B", "410"]
+  - name: Variance
+    aliases: ["Variance Report", "Variance", "MaVar"]
+  - name: Compensation Limit Failure Summary
+    aliases: ["Compensation Limit Failure", "SHMaVar", "SHMa"]
+  - name: PS Variance
+    aliases: ["PS Variance Report", "PS Variance", "PSVar"]
+  - name: SHNE Variance
+    aliases: ["SHNE Variance Report", "SHNE Variance", "SHNEVar"]
+  - name: "402(g)"
+    aliases: ["402(g)", "402g", "402G", "402"]
+  - name: Contribution Analysis
+    aliases: ["Contribution Analysis", "ContriAnalysis", "Contri"]
+  - name: Top Heavy
+    aliases: ["Top Heavy", "Top-Heavy", "TH"]
+  - name: "415"
+    aliases: ["415 Limit", "415 Test", "Section 415", "415"]
+  - name: Census
+    aliases: ["Census"]
   - name: "401(a)(4)"
     aliases: ["401(a)(4)", "401(a)(4) Test", "401a4", "401a"]
   - name: Average Benefit Percentage Test
     aliases: ["Average Benefit Percentage", "Average Benefits", "ABPT"]
-  - name: BRF
-    aliases: ["Benefits, Rights and Features", "BRF Test", "BRF"]
   - name: "414(s)"
     aliases: ["414(s)", "414s"]
-  - name: "415"
-    aliases: ["415 Limit", "415 Test", "Section 415", "415"]
+  - name: BRF
+    aliases: ["Benefits, Rights and Features", "BRF Test", "BRF"]
   - name: 457 Limit
     aliases: ["457 Limit Test", "457 Limit", "Section 457"]
-  - name: Top Heavy
-    aliases: ["Top Heavy", "Top-Heavy", "TH"]
-  - name: Census
-    aliases: ["Census"]
 
 # Bookmark titles from TEST23.docx §O (only for sections that remain).
 bookmarks:

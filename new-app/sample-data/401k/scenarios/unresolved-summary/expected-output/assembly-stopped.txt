@@ -1,0 +1,2 @@
+Assembly stopped.
+The Result Summary still has unresolved wording such as "Plan is/is not" or "Pass/Fail". Assembly stopped.

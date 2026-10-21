@@ -16,7 +16,18 @@ def _flat(text: str) -> str:
 def _pdf_text(path: str) -> str:
     doc = fitz.open(path)
     try:
-        return _flat("\n".join(page.get_text("text") or "" for page in doc))
+        rows: list[str] = []
+        for page in doc:
+            lines: list[list[tuple]] = []
+            for word in sorted(page.get_text("words") or [], key=lambda item: (item[1], item[0])):
+                if not lines or abs(word[1] - lines[-1][0][1]) > 3:
+                    lines.append([word])
+                else:
+                    lines[-1].append(word)
+            for line in lines:
+                line.sort(key=lambda item: item[0])
+                rows.append(" ".join(str(item[4]) for item in line))
+        return _flat("\n".join(rows))
     finally:
         doc.close()
 
@@ -64,9 +75,11 @@ def test_current_both_qnecs_keeps_notice_and_fills_amounts(tmp_path, monkeypatch
     text = _pdf_text(result.pdf_path)
     assert "Failed Compliance Testing" in text
     assert "Excess Return Notice" in text
-    assert "ADP/ACP test is $185,354.75" in text
-    assert "The ADP QNEC is $142,540.41" in text
-    assert "The ACP QNEC is $42,814.34" in text
+    assert "The amount of the QNEC that is required to pass the ADP/ACP test is $185,354.75" in text
+    assert text.index("$185,354.75") < text.index("The ADP QNEC is $142,540.41")
+    assert text.index("The ADP QNEC is $142,540.41") < text.index("The ACP QNEC is $42,814.34")
+    assert "444444" in text
+    assert "HARBOR MANUFACTURING 401(K) PLAN" in text
     assert "$X,XXX,XXX.XX" not in text
 
 
@@ -192,6 +205,10 @@ def test_after_12_months_does_not_keep_standard_current_notice():
 
 
 def test_failure_notice_template_matches_test23():
+    assert "Current method testing" in FAILURE_NOTICE
     assert "Qualified Non-Elective Contribution" in FAILURE_NOTICE
-    assert "Form W-4P" in FAILURE_NOTICE
+    assert "Form W-4R" in FAILURE_NOTICE
+    assert "The ADP QNEC is $X,XXX,XXX.XX" in FAILURE_NOTICE
+    assert "The ACP QNEC is $X,XXX,XXX.XX" in FAILURE_NOTICE
+    assert "After 12-months" not in FAILURE_NOTICE
     assert "Excess Return Notice" in FAILURE_NOTICE

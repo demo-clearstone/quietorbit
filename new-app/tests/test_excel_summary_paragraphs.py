@@ -110,8 +110,11 @@ def test_process_excel_and_summary_keeps_only_no_action_paragraph(tmp_path, monk
 
     saved = fitz.open(result.pdf_path)
     try:
-        assert saved.page_count == 2
+        assert saved.page_count == 5
         text = "\n".join(page.get_text("text") or "" for page in saved)
+        assert "COMPLIANCE AND ADMINISTRATIVE REPORTS" in text
+        assert "410(b) COVERAGE TEST" in text
+        assert "HCE/KEY EMPLOYEE DETERMINATIONS" in text
         headings = _heading_map()
         assert headings["G"] in text
         for code in ("A", "B", "C", "D", "E", "F"):
