@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import sys
 
-# Windows resets the browser connection when a PDF upload rolls past Starlette's
-# 1 MB temp-file limit. The selector loop and a larger in-memory spool keep
-# POST /api/inspect and POST /api/jobs reachable after the files are chosen.
-if sys.platform == "win32":
+# Windows resets the browser connection while a PDF is uploading. Uvicorn's
+# default Proactor loop does this on POST /api/inspect. A selector loop keeps
+# the request open. PDF bytes also stay in memory so Windows does not lock a
+# temp file once the upload passes 1 MB.
+def selector_loop_factory(use_subprocess: bool = False):
     import asyncio
 
-    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    return asyncio.SelectorEventLoop
+
 
 from starlette.formparsers import MultiPartParser
 
@@ -77,10 +79,10 @@ if __name__ == "__main__":
 
     print(f"Keep this window open. App: http://127.0.0.1:{PORT}", flush=True)
     threading.Thread(target=_open_browser, daemon=True).start()
-    uvicorn.run(
-        "main:app",
-        host=HOST,
-        port=PORT,
-        reload=False,
-        http="h11" if sys.platform == "win32" else "auto",
-    )
+    run_kwargs = {"host": HOST, "port": PORT, "reload": False}
+    if sys.platform == "win32":
+        # Passing loop="asyncio" still builds a ProactorEventLoop on Windows.
+        run_kwargs["loop"] = "main:selector_loop_factory"
+        run_kwargs["http"] = "h11"
+        print("Windows PDF uploads use the selector event loop.", flush=True)
+    uvicorn.run("main:app", **run_kwargs)
