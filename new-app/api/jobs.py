@@ -15,7 +15,7 @@ from services.change_marks import apply_highlights, load_marks
 from services.file_order import list_file_meta
 from services.preview_view import add_annotation, add_highlight, add_secure_redaction, add_text, modify_pages
 from services.preview_view import outline as preview_outline
-from services.preview_view import page_lines, page_png, replace_line, search_pdf, update_bookmark, validate_bookmarks
+from services.preview_view import page_lines, page_png, replace_line, replace_lines, search_pdf, shift_line_down, update_bookmark, validate_bookmarks
 from services.preview_history import abort as abort_edit
 from services.preview_history import active_path, commit as commit_edit, edited_copy_path, editable_path, history_state, redo as redo_edit, snapshot_before, undo as undo_edit
 from services.folder_loader import apply_file_order, list_folder_files, load_pdfs_from_folder
@@ -276,9 +276,9 @@ def download_job_pdf(job_id: str) -> FileResponse:
             status_code=404,
             detail="Assembled PDF not found. Restart python main.py, then click Process package again. Do not reuse an old preview URL.",
         )
-    path, filename = found
+    original, filename = found
     return FileResponse(
-        path,
+        active_path(original),
         media_type="application/pdf",
         filename=filename,
         content_disposition_type="attachment",
@@ -321,6 +321,14 @@ def _preview_marks(job_id: str, pdf_path: Path) -> list[dict]:
     return load_marks(pdf_path)
 
 
+class PreviewLine(BaseModel):
+    x0: float
+    y0: float
+    x1: float
+    y1: float
+    text: str = ""
+
+
 class PreviewEdit(BaseModel):
     page: int = Field(ge=1)
     x0: float
@@ -328,6 +336,8 @@ class PreviewEdit(BaseModel):
     x1: float
     y1: float
     text: str = ""
+    caret: int | None = None
+    following: list[PreviewLine] = Field(default_factory=list)
 
 
 class PageOperation(BaseModel):
@@ -423,13 +433,23 @@ def edit_job_page(job_id: str, body: PreviewEdit) -> dict:
     marks = _preview_marks(job_id, path)
     snapshot = snapshot_before(path)
     try:
-        updated = replace_line(
-            path,
-            body.page,
-            (body.x0, body.y0, body.x1, body.y1),
-            body.text,
-            marks,
-        )
+        if body.caret is None:
+            updated = replace_line(
+                path,
+                body.page,
+                (body.x0, body.y0, body.x1, body.y1),
+                body.text,
+                marks,
+            )
+        else:
+            updated = shift_line_down(
+                path,
+                body.page,
+                (body.x0, body.y0, body.x1, body.y1),
+                body.text,
+                body.caret,
+                marks,
+            )
         commit_edit(path, snapshot)
     except ValueError as exc:
         abort_edit(snapshot)
@@ -439,7 +459,12 @@ def edit_job_page(job_id: str, body: PreviewEdit) -> dict:
         raise
     if job is not None:
         job.highlights = [HighlightMark(**item) for item in updated]
-    return {"page": body.page, "highlights": updated, "detail": f"Updated page {body.page}."}
+    return {
+        "page": body.page,
+        "highlights": updated,
+        "shifted": body.caret is not None,
+        "detail": "Moved the text onto the next line." if body.caret is not None else f"Updated page {body.page}.",
+    }
 
 
 @router.post("/jobs/{job_id}/pages/operation")

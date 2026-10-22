@@ -85,6 +85,14 @@ def page_lines(pdf_path: Path, page_number: int) -> dict:
             doc.close()
 
 
+def _split_at_caret(text: str, caret: int) -> tuple[str, str]:
+    value = text or ""
+    cut = max(0, min(int(caret), len(value)))
+    if cut <= 0 or cut >= len(value.rstrip()):
+        return "", value.strip()
+    return value[:cut].rstrip(), value[cut:].lstrip()
+
+
 def replace_line(
     pdf_path: Path,
     page_number: int,
@@ -94,72 +102,37 @@ def replace_line(
     copy_path: Path | None = None,
 ) -> list[dict]:
     """Replace a line, shrinking its font as needed to stay within the original line width."""
-    text = " ".join((new_text or "").split())
-    if len(text) > _MAX_TEXT:
-        raise ValueError(f"Keep the replacement under {_MAX_TEXT} characters.")
+    return replace_lines(pdf_path, page_number, [(rect, new_text)], marks, copy_path=copy_path)
+
+
+def replace_lines(
+    pdf_path: Path,
+    page_number: int,
+    edits: list[tuple[tuple[float, float, float, float], str]],
+    marks: list[dict],
+    copy_path: Path | None = None,
+) -> list[dict]:
+    """Replace several lines on one page in a single save."""
     with _LOCK:
         doc = fitz.open(pdf_path)
         try:
             page = _page(doc, page_number)
-            box = fitz.Rect(*rect) * page.derotation_matrix
-            spans = _spans_in(page, box)
-            if not spans:
-                raise ValueError("No text on that line. Click the words, then Apply.")
-            spans.sort(key=lambda span: (span["bbox"][1], span["bbox"][0]))
-            union = fitz.Rect(spans[0]["bbox"])
-            for span in spans[1:]:
-                union.include_rect(fitz.Rect(span["bbox"]))
-            old = " ".join((span.get("text") or "").strip() for span in spans).strip()
-            if old == text:
+            plans = [plan for plan in (_replacement_plan(page, rect, text) for rect, text in edits) if plan]
+            if not plans:
                 return marks
-            span = spans[0]
-            origin = span.get("origin") or (span["bbox"][0], span["bbox"][3])
-            point = fitz.Point(float(origin[0]), float(origin[1]))
-            size = float(span.get("size") or 11)
-            fontname = _base_font(str(span.get("font") or ""), int(span.get("flags") or 0))
-            color = _rgb(span.get("color") or 0)
-            available_width = _replacement_width(page, union, spans)
-            try:
-                required_width = float(fitz.get_text_length(text, fontname=fontname, fontsize=size))
-            except Exception:
-                fontname = "helv"
-                required_width = float(fitz.get_text_length(text, fontname=fontname, fontsize=size))
-            if required_width > available_width:
-                size *= available_width / required_width
-            if size < _MIN_REPLACEMENT_FONT_SIZE:
-                raise ValueError(
-                    f"That replacement will not fit in the original line, even at {_MIN_REPLACEMENT_FONT_SIZE:g} pt. "
-                    "Use shorter text or edit the PDF in a full editor."
-                )
-            for span in spans:
-                page.add_redact_annot(fitz.Rect(span["bbox"]), fill=(1, 1, 1))
+            for plan in plans:
+                for span in plan["spans"]:
+                    page.add_redact_annot(fitz.Rect(span["bbox"]), fill=(1, 1, 1))
             page.apply_redactions(
                 images=fitz.PDF_REDACT_IMAGE_NONE,
                 graphics=fitz.PDF_REDACT_LINE_ART_NONE,
                 text=fitz.PDF_REDACT_TEXT_REMOVE,
             )
-            if text:
-                try:
-                    page.insert_text(
-                        point,
-                        text,
-                        fontsize=size,
-                        fontname=fontname,
-                        color=color,
-                    )
-                except Exception:
-                    fontname = "helv"
-                    page.insert_text(
-                        point,
-                        text,
-                        fontsize=size,
-                        fontname=fontname,
-                        color=color,
-                    )
-                written = _written_rect(span, text, fontname, size)
-            else:
-                written = None
-            updated = _retarget_marks(marks, page.number, union, written)
+            updated = marks
+            for plan in plans:
+                written = _insert_replacement(page, plan)
+                updated = _retarget_marks(marks, page.number, plan["union"], written)
+                marks = updated
             tmp = _temporary_pdf_path(pdf_path)
             doc.save(tmp, garbage=3, deflate=True)
         finally:
@@ -169,6 +142,111 @@ def replace_line(
         save_marks(pdf_path, updated)
         _sync_saved_copy(pdf_path, copy_path)
     return updated
+
+
+def shift_line_down(
+    pdf_path: Path,
+    page_number: int,
+    rect: tuple[float, float, float, float],
+    new_text: str,
+    caret: int,
+    marks: list[dict],
+    copy_path: Path | None = None,
+) -> list[dict]:
+    """Move text from the caret onto the next line and push the lines under it down."""
+    stay, move = _split_at_caret(new_text, caret)
+    if not move:
+        raise ValueError("There is no text to move onto the next line.")
+    with _LOCK:
+        doc = fitz.open(pdf_path)
+        try:
+            page = _page(doc, page_number)
+            box = fitz.Rect(*rect) * page.derotation_matrix
+            spans = _spans_in(page, box)
+            if not spans:
+                raise ValueError("No text on that line. Double-click the words, then press Enter.")
+            spans.sort(key=lambda span: (span["bbox"][1], span["bbox"][0]))
+            union = fitz.Rect(spans[0]["bbox"])
+            for span in spans[1:]:
+                union.include_rect(fitz.Rect(span["bbox"]))
+            source = spans[0]
+            origin = source.get("origin") or (source["bbox"][0], source["bbox"][3])
+            size = float(source.get("size") or 11)
+            fontname = _base_font(str(source.get("font") or ""), int(source.get("flags") or 0))
+            color = _rgb(source.get("color") or 0)
+            below = [line for line in _lines(page) if line["y0"] > union.y0 + 1]
+            column = [line for line in below if abs(line["x0"] - union.x0) <= 90]
+            column = column or below
+            column.sort(key=lambda line: (line["y0"], line["x0"]))
+            captured: list[dict] = []
+            current_boxes = {tuple(round(value, 2) for value in span["bbox"]) for span in spans}
+            for line in column:
+                line_spans = _spans_in(page, fitz.Rect(line["x0"], line["y0"], line["x1"], line["y1"]))
+                if not line_spans:
+                    continue
+                if {tuple(round(value, 2) for value in span["bbox"]) for span in line_spans} <= current_boxes:
+                    continue
+                line_spans.sort(key=lambda span: (span["bbox"][1], span["bbox"][0]))
+                first = line_spans[0]
+                line_origin = first.get("origin") or (first["bbox"][0], first["bbox"][3])
+                captured.append(
+                    {
+                        "spans": line_spans,
+                        "text": line["text"],
+                        "origin": fitz.Point(float(line_origin[0]), float(line_origin[1])),
+                        "size": float(first.get("size") or size),
+                        "fontname": _base_font(str(first.get("font") or ""), int(first.get("flags") or 0)),
+                        "color": _rgb(first.get("color") or 0),
+                    }
+                )
+            gap = (captured[0]["origin"].y - float(origin[1])) if captured else size * 1.45
+            if gap < size * 0.8:
+                gap = size * 1.45
+            last_y = (captured[-1]["origin"].y if captured else float(origin[1])) + gap
+            if last_y > float(page.rect.y1) - 16:
+                raise ValueError("This line is too close to the bottom of the page to move the text down.")
+            for group in (spans, *[item["spans"] for item in captured]):
+                for span in group:
+                    page.add_redact_annot(fitz.Rect(span["bbox"]), fill=(1, 1, 1))
+            page.apply_redactions(
+                images=fitz.PDF_REDACT_IMAGE_NONE,
+                graphics=fitz.PDF_REDACT_LINE_ART_NONE,
+                text=fitz.PDF_REDACT_TEXT_REMOVE,
+            )
+            if stay:
+                _insert_shifted(page, fitz.Point(float(origin[0]), float(origin[1])), stay, size, fontname, color)
+            _insert_shifted(page, fitz.Point(float(origin[0]), float(origin[1]) + gap), move, size, fontname, color)
+            for item in captured:
+                _insert_shifted(
+                    page,
+                    fitz.Point(item["origin"].x, item["origin"].y + gap),
+                    item["text"],
+                    item["size"],
+                    item["fontname"],
+                    item["color"],
+                )
+            updated = []
+            for mark in marks:
+                if int(mark.get("page", -1)) != page.number or float(mark.get("y0", 0)) + 1 < union.y0:
+                    updated.append(mark)
+                    continue
+                updated.append({**mark, "y0": float(mark["y0"]) + gap, "y1": float(mark["y1"]) + gap})
+            tmp = _temporary_pdf_path(pdf_path)
+            doc.save(tmp, garbage=3, deflate=True)
+        finally:
+            doc.close()
+        tmp.replace(pdf_path)
+        _PNG_CACHE.clear()
+        save_marks(pdf_path, updated)
+        _sync_saved_copy(pdf_path, copy_path)
+    return updated
+
+
+def _insert_shifted(page: fitz.Page, point: fitz.Point, text: str, size: float, fontname: str, color: tuple[float, float, float]) -> None:
+    try:
+        page.insert_text(point, text, fontsize=size, fontname=fontname, color=color)
+    except Exception:
+        page.insert_text(point, text, fontsize=size, fontname="helv", color=color)
 
 
 def modify_pages(
@@ -558,6 +636,63 @@ def _spans_in(page: fitz.Page, box: fitz.Rect) -> list[dict]:
         for _dist, span in nearby
         if abs((span["bbox"][1] + span["bbox"][3]) / 2 - mid) <= 4
     ]
+
+
+def _replacement_plan(page: fitz.Page, rect: tuple[float, float, float, float], new_text: str) -> dict | None:
+    text = " ".join((new_text or "").split())
+    if len(text) > _MAX_TEXT:
+        raise ValueError(f"Keep the replacement under {_MAX_TEXT} characters.")
+    box = fitz.Rect(*rect) * page.derotation_matrix
+    spans = _spans_in(page, box)
+    if not spans:
+        raise ValueError("No text on that line. Click the words, then Apply.")
+    spans.sort(key=lambda span: (span["bbox"][1], span["bbox"][0]))
+    union = fitz.Rect(spans[0]["bbox"])
+    for span in spans[1:]:
+        union.include_rect(fitz.Rect(span["bbox"]))
+    old = " ".join((span.get("text") or "").strip() for span in spans).strip()
+    if old == text:
+        return None
+    span = spans[0]
+    origin = span.get("origin") or (span["bbox"][0], span["bbox"][3])
+    size = float(span.get("size") or 11)
+    fontname = _base_font(str(span.get("font") or ""), int(span.get("flags") or 0))
+    available_width = _replacement_width(page, union, spans)
+    try:
+        required_width = float(fitz.get_text_length(text, fontname=fontname, fontsize=size)) if text else 0
+    except Exception:
+        fontname = "helv"
+        required_width = float(fitz.get_text_length(text, fontname=fontname, fontsize=size)) if text else 0
+    if text and required_width > available_width:
+        size *= available_width / required_width
+    if text and size < _MIN_REPLACEMENT_FONT_SIZE:
+        raise ValueError(
+            f"That replacement will not fit in the original line, even at {_MIN_REPLACEMENT_FONT_SIZE:g} pt. "
+            "Use shorter text or edit the PDF in a full editor."
+        )
+    return {
+        "spans": spans,
+        "union": union,
+        "span": span,
+        "point": fitz.Point(float(origin[0]), float(origin[1])),
+        "size": size,
+        "fontname": fontname,
+        "color": _rgb(span.get("color") or 0),
+        "text": text,
+    }
+
+
+def _insert_replacement(page: fitz.Page, plan: dict) -> fitz.Rect | None:
+    text = plan["text"]
+    if not text:
+        return None
+    fontname = plan["fontname"]
+    try:
+        page.insert_text(plan["point"], text, fontsize=plan["size"], fontname=fontname, color=plan["color"])
+    except Exception:
+        fontname = "helv"
+        page.insert_text(plan["point"], text, fontsize=plan["size"], fontname=fontname, color=plan["color"])
+    return _written_rect(plan["span"], text, fontname, plan["size"])
 
 
 def _mostly_inside(rect: fitz.Rect, box: fitz.Rect) -> bool:

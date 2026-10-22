@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import fitz
 
-from services.preview_view import add_highlight, add_text, modify_pages, page_lines, replace_line
+from services.preview_view import add_highlight, add_text, modify_pages, page_lines, replace_line, shift_line_down
 
 
 def make_pdf(path):
@@ -86,6 +86,26 @@ def test_long_replacement_fits_original_line(tmp_path):
     assert replacement["size"] < 12
     assert replacement["bbox"][2] <= neighbor["bbox"][0]
     doc.close()
+
+
+def test_enter_moves_text_onto_the_next_line(tmp_path):
+    path = tmp_path / "shift.pdf"
+    doc = fitz.open()
+    page = doc.new_page(width=400, height=400)
+    page.insert_text((30, 60), "Hello world", fontsize=12)
+    page.insert_text((30, 84), "Next line", fontsize=12)
+    page.insert_text((30, 108), "Last line", fontsize=12)
+    doc.save(path)
+    doc.close()
+    lines = page_lines(path, 1)["lines"]
+    assert [line["text"] for line in lines] == ["Hello world", "Next line", "Last line"]
+    first = lines[0]
+    shift_line_down(path, 1, (first["x0"], first["y0"], first["x1"], first["y1"]), "Hello world", len("Hello world"), [])
+
+    updated = page_lines(path, 1)["lines"]
+    assert [line["text"] for line in updated] == ["Hello world", "Next line", "Last line"]
+    assert updated[0]["y0"] > first["y0"] + 8
+    assert updated[1]["y0"] > lines[1]["y0"] + 8
 
 
 def test_rotated_page_preview_coordinates_work_for_edits_and_annotations(tmp_path):
