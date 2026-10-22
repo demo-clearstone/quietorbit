@@ -75,8 +75,8 @@ app.add_middleware(_CloseAfterResponse)
 
 
 @app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok", "phase": "1"}
+def health() -> dict[str, str | bool]:
+    return {"status": "ok", "phase": "1", "console_trace": True}
 
 
 @app.get("/")

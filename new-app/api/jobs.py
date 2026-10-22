@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
@@ -20,6 +21,7 @@ from services.preview_history import active_path, commit as commit_edit, edited_
 from services.folder_loader import apply_file_order, list_folder_files, load_pdfs_from_folder
 from services.pdf_pages import expand_uploads_by_page, pdf_page_count, pdf_page_texts
 from services.orchestrator import process_uploads
+from services.console_trace import read_trace, run_traced, start_trace
 
 router = APIRouter()
 JOBS: dict[str, JobResult] = {}
@@ -60,6 +62,7 @@ async def create_job(
     item_name: list[str] | None = Form(default=None),
     item_page: list[int] | None = Form(default=None),
     upload_id: list[str] | None = Form(default=None),
+    trace_id: str = Form(default=""),
 ) -> JobResult:
     uploads: list[tuple[str, bytes]] = []
     warnings: list[str] = []
@@ -111,15 +114,19 @@ async def create_job(
             detail="Upload PDF files or enter a Valuation Package folder path",
         )
 
+    if trace_id and not _UPLOAD_ID.fullmatch(trace_id):
+        raise HTTPException(400, "Console trace ID is not valid")
+    options = dict(
+        auto_order=auto_order,
+        extra_warnings=warnings,
+        source_folder=folder or None,
+        rewrite_sources=rewrite_sources,
+        check_assembly_stops=check_assembly_stops,
+    )
+    token = trace_id or f"term_{uuid.uuid4().hex[:12]}"
+    start_trace(token)
     try:
-        result = process_uploads(
-            uploads,
-            auto_order=auto_order,
-            extra_warnings=warnings,
-            source_folder=folder or None,
-            rewrite_sources=rewrite_sources,
-            check_assembly_stops=check_assembly_stops,
-        )
+        result = await asyncio.to_thread(run_traced, token, process_uploads, uploads, **options)
     except HTTPException:
         raise
     except Exception as exc:
@@ -129,6 +136,18 @@ async def create_job(
     result.preview_url = f"{base}/api/jobs/{result.job_id}/preview"
     JOBS[result.job_id] = result
     return result
+
+
+@router.get("/console-traces/{trace_id}")
+async def console_trace(trace_id: str, after: int = 0) -> dict:
+    if not _UPLOAD_ID.fullmatch(trace_id) or after < 0:
+        raise HTTPException(400, "Console trace cursor is not valid")
+    try:
+        return read_trace(trace_id, after)
+    except HTTPException as exc:
+        if exc.status_code != 404:
+            raise
+        return {"events": [], "status": "waiting", "total": 0, "truncated": False}
 
 
 @router.get("/folder")

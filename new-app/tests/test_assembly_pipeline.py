@@ -97,3 +97,31 @@ def test_client_style_assembly_scenario_passes_strict_stops(
         assert result.plan_profile.total_qnec == 185354.75
         assert "ADP/ACP Tests" in titles
     doc.close()
+
+
+def test_console_trace_preserves_403b_assembly(tmp_path, monkeypatch):
+    from uuid import uuid4
+    from services.console_trace import read_trace, run_traced, start_trace
+
+    monkeypatch.setattr(save_service, "OUTPUT_DIR", tmp_path / "output")
+    token = uuid4().hex
+    start_trace(token)
+    result = run_traced(
+        token,
+        process_uploads,
+        _ui_ordered_uploads(ROOT / "sample-data/403b/pass"),
+        auto_order=True,
+        check_assembly_stops=True,
+    )
+    trace = read_trace(token)
+    assert trace["status"] == "completed"
+    assert trace["truncated"] is False
+    steps = [event for event in trace["events"] if event["event"] == "step"]
+    assert steps[-1]["function"] == "process_uploads"
+    assert any(event["function"] == "order_uploads" for event in steps)
+    assert len(steps) < 80
+    assert all(event["function"] != "_pdf_text" for event in steps)
+    assert all(event["purpose"] and event["code_link"] for event in steps)
+    with fitz.open(result.pdf_path) as doc:
+        assert doc.page_count == 16
+        assert doc.get_toc()[1][1:3] == ["Test Summary", 2]

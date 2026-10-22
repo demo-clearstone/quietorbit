@@ -550,10 +550,21 @@
     .thumbnail span { display: block; font-size: 0.65rem; padding-top: 3px; }
     .thumbnail.dragging { opacity: 0.45; }
     .edit-panel {
-      flex-basis: 230px;
+      flex-basis: 268px;
       border-left: 1px solid var(--line);
       background: #fff;
     }
+    .edit-tools {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4px;
+      margin: 6px 0 8px;
+    }
+    .edit-tools .btn, .edit-tools select { width: 100%; padding: 5px 6px; font-size: 0.68rem; }
+    .edit-tools select { border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--text); }
+    .edit-row { display: flex; gap: 6px; }
+    .edit-row .btn { width: auto; flex: 1; }
+    .edit-panel label { display: block; margin-top: 8px; }
     .bookmark-head {
       font-size: 0.68rem;
       font-weight: 700;
@@ -627,8 +638,28 @@
     .page-line { pointer-events: auto; }
     .preview-body.annotating .page-lines, .preview-body.annotating .page-line { pointer-events: none; }
     .preview-body.annotating .page-sheet { cursor: crosshair; }
+    .page-lines { z-index: 4; }
     .page-line:hover { background: rgba(29, 78, 216, 0.16); }
+    .preview-body.editing .page-line { background: rgba(29, 78, 216, 0.08); }
+    .preview-body.editing .page-sheet { cursor: text; }
+    .preview-body.editing .page-line:hover { background: rgba(29, 78, 216, 0.28); outline: 1px solid #1d4ed8; }
+    .more-tools { margin-top: 12px; }
+    .more-tools summary { cursor: pointer; color: var(--muted); font-size: 0.72rem; font-weight: 700; }
     .page-line.selected { outline: 2px solid #1d4ed8; background: rgba(29, 78, 216, 0.12); }
+    .inline-edit {
+      position: absolute;
+      z-index: 6;
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0 3px;
+      border: 2px solid #1d4ed8;
+      border-radius: 2px;
+      background: #fff;
+      color: #111;
+      font-family: "Times New Roman", Times, serif;
+      line-height: 1.15;
+      box-shadow: 0 1px 4px rgba(15, 23, 42, 0.25);
+    }
     .mark-box {
       display: none;
       background: rgba(255, 214, 50, 0.45);
@@ -645,7 +676,7 @@
       font: inherit;
       font-size: 0.75rem;
     }
-    .edit-panel input[type="search"] { width: 100%; margin: 4px 0; padding: 6px; border: 1px solid var(--line); border-radius: 5px; font: inherit; font-size: 0.75rem; }
+    .edit-panel input[type="search"], .edit-panel input[type="text"], .edit-panel select { width: 100%; margin: 4px 0; padding: 6px; border: 1px solid var(--line); border-radius: 5px; font: inherit; font-size: 0.75rem; background: #fff; }
     #search-results button { display: block; width: 100%; margin: 3px 0; padding: 5px; text-align: left; background: #fff; border: 1px solid var(--line); color: var(--text); font-size: 0.68rem; }
     .edit-where { margin: 6px 0; font-size: 0.72rem; color: var(--muted); }
     .edit-panel .btn { width: 100%; }
@@ -786,22 +817,7 @@
             </label>
             <span class="preview-note" id="highlight-note"></span>
             <span class="preview-note" id="active-page-label">Page 1</span>
-            <details class="tool-menu"><summary>Edit</summary><div class="tool-menu-content">
-              <button type="button" class="btn ghost" id="edit-preview">Edit text</button>
-              <button type="button" class="btn ghost" id="add-text">Add text</button>
-              <button type="button" class="btn ghost" id="add-note">Note</button>
-              <button type="button" class="btn ghost" id="add-stamp">Stamp</button>
-              <button type="button" class="btn ghost" id="add-rectangle">Rectangle</button>
-              <button type="button" class="btn ghost" id="add-circle">Circle</button>
-              <button type="button" class="btn ghost" id="add-line">Line</button>
-              <button type="button" class="btn ghost" id="add-signature">Signature</button>
-              <button type="button" class="btn ghost" id="add-highlight">Highlight</button>
-              <button type="button" class="btn ghost" id="add-redaction">Redact</button>
-              <button type="button" class="btn ghost" id="page-crop">Crop page</button>
-              <select id="page-size" aria-label="Page size"><option value="">Page size…</option><option value="letter">Letter canvas</option><option value="a4">A4 canvas</option><option value="legal">Legal canvas</option></select>
-              <button type="button" class="btn ghost" id="undo-edit" title="Undo">Undo</button>
-              <button type="button" class="btn ghost" id="redo-edit" title="Redo">Redo</button>
-            </div></details>
+            <button type="button" class="btn ghost" id="edit-preview">Edit</button>
             <details class="tool-menu"><summary>Pages</summary><div class="tool-menu-content">
               <button type="button" class="btn ghost" id="page-up" title="Move page earlier">Move earlier</button>
               <button type="button" class="btn ghost" id="page-down" title="Move page later">Move later</button>
@@ -838,17 +854,39 @@
           </aside>
           <div class="preview-scroll" id="preview-scroll"></div>
           <aside class="edit-panel hidden" id="edit-panel">
-            <div class="bookmark-head">Edit text</div>
-            <p class="preview-note">Click a line on the page, change it, then Apply. Download uses this text.</p>
-            <p class="edit-where" id="edit-where">No line selected.</p>
-            <textarea id="edit-text" rows="5" placeholder="Selected line"></textarea>
-            <button type="button" class="btn" id="edit-apply">Apply</button>
+            <div class="bookmark-head">Edit like a document</div>
+            <p class="edit-where" id="edit-where">Click the words on the page and type. Enter saves, Backspace deletes, Tab goes to the next line, and Escape cancels.</p>
+            <textarea id="edit-text" class="hidden" rows="2"></textarea>
+            <button type="button" class="btn" id="edit-apply">Save</button>
             <p class="preview-note" id="edit-status"></p>
-            <p class="preview-note">Replacement text fits the existing line when possible. It does not reflow the page.</p>
-            <label class="preview-note" for="search-query">Search PDF text</label>
-            <input id="search-query" type="search" placeholder="Find text…" />
-            <button type="button" class="btn ghost" id="search-submit">Search</button>
-            <div id="search-results"></div>
+            <div class="edit-row">
+              <button type="button" class="btn ghost" id="undo-edit">Undo</button>
+              <button type="button" class="btn ghost" id="redo-edit">Redo</button>
+            </div>
+            <details class="more-tools">
+              <summary>More</summary>
+              <button type="button" class="btn ghost" id="edit-clear">Remove this line</button>
+              <p class="preview-note" id="edit-hint">Extra tools are optional.</p>
+              <div class="edit-tools">
+                <button type="button" class="btn ghost" id="add-text">Add text</button>
+                <button type="button" class="btn ghost" id="add-note">Note</button>
+                <button type="button" class="btn ghost" id="add-stamp">Stamp</button>
+                <button type="button" class="btn ghost" id="add-highlight">Highlight</button>
+                <button type="button" class="btn ghost" id="add-redaction">Redact</button>
+                <button type="button" class="btn ghost" id="add-signature">Signature</button>
+                <button type="button" class="btn ghost" id="add-rectangle">Rectangle</button>
+                <button type="button" class="btn ghost" id="add-circle">Circle</button>
+                <button type="button" class="btn ghost" id="add-line">Line</button>
+                <button type="button" class="btn ghost" id="page-crop">Crop</button>
+                <select id="page-size" aria-label="Page size"><option value="">Page size…</option><option value="letter">Letter canvas</option><option value="a4">A4 canvas</option><option value="legal">Legal canvas</option></select>
+              </div>
+              <input id="bookmark-title" type="text" placeholder="Bookmark title" />
+              <select id="bookmark-level" aria-label="Bookmark level"><option value="1">Top level</option><option value="2">Nested</option></select>
+              <button type="button" class="btn ghost" id="bookmark-save">Save bookmark</button>
+              <input id="search-query" type="search" placeholder="Find text…" />
+              <button type="button" class="btn ghost" id="search-submit">Search</button>
+              <div id="search-results"></div>
+            </details>
             <div id="edit-shortcuts"></div>
           </aside>
         </div>
@@ -890,6 +928,8 @@
     let previewVersion = 0;
     let pageZoom = 1;
     let selectedLine = null;
+    let inlineInput = null;
+    let inlineSkipBlur = false;
     let activePage = 1;
     let annotationMode = "";
     let highlightDrag = null;
@@ -898,6 +938,7 @@
     let selectedBookmarkIndex = -1;
     let searchMatches = [];
     let draggedThumbnailPage = 0;
+    let bookmarkEditAction = "add";
     let bookmarkLock = 0;
     const pageLoads = new Map();
     const pageGeometryLoads = new Map();
@@ -1259,6 +1300,89 @@
       return JSON.stringify(detail);
     }
 
+    async function startConsoleTrace(traceId) {
+      try {
+        const response = await fetch(apiBase() + "/health", { cache: "no-store" });
+        const health = response.ok ? await response.json() : {};
+        if (!health.console_trace) {
+          console.warn("[Assembly] Console tracing requires restarting the Python app. Close the old server, start the app again, then refresh this page.");
+          return async () => {};
+        }
+      } catch (error) {
+        console.warn("[Assembly] Console tracing unavailable: cannot reach the Python app.", error);
+        return async () => {};
+      }
+      let cursor = 0;
+      let stopped = false;
+      let pending = Promise.resolve();
+      let truncationReported = false;
+      console.log("[Assembly] Started", { traceId });
+      console.log("[Assembly] Each step is closed. Click it to open the input and output.");
+      let sawOldTrace = false;
+      async function poll() {
+        try {
+          const response = await fetch(apiBase() + "/api/console-traces/" + traceId + "?after=" + cursor);
+          if (!response.ok) {
+            stopped = true;
+            console.warn("[Assembly] Console trace endpoint unavailable. Restart the Python app and refresh this page.");
+            return;
+          }
+          const trace = await response.json();
+          for (const event of trace.events) {
+            if (event.event !== "step" && event.event !== "error") {
+              if (!sawOldTrace) {
+                sawOldTrace = true;
+                console.warn("[Assembly] The running Python app is still writing one line per helper call. Stop python main.py, start it again, then refresh this page.");
+              }
+              cursor = event.sequence;
+              continue;
+            }
+            const purpose = event.purpose || "Running " + (event.function || "this step");
+            const codeLink = event.code_link || (event.file && event.line ? event.file + ":" + event.line : event.file || "");
+            const title = "#" + event.sequence + "  " + purpose + "  |  " + codeLink;
+            if (event.event === "error") console.group(title);
+            else console.groupCollapsed(title);
+            console.log("purpose: " + purpose);
+            console.log("file name: " + (event.file || ""));
+            console.log("function: " + (event.function || ""));
+            console.log("code link: " + codeLink);
+            console.log("input object:");
+            console.dir(event.input);
+            console.log("output object:");
+            console.dir(event.output);
+            console.groupEnd();
+            cursor = event.sequence;
+          }
+          if (trace.truncated && !truncationReported) {
+            console.warn("[Assembly] Console trace limit reached; remaining calls are omitted.");
+            truncationReported = true;
+          }
+          return trace;
+        } catch (error) {
+          console.warn("[Assembly] Could not fetch console trace", error);
+        }
+      }
+      async function tick() {
+        if (stopped) return;
+        pending = poll();
+        await pending;
+        if (!stopped) setTimeout(tick, 500);
+      }
+      tick();
+      return async function finish() {
+        stopped = true;
+        await pending;
+        let trace;
+        do {
+          trace = await poll();
+        } while (trace && cursor < trace.total);
+        if (trace && trace.status === "waiting") {
+          console.warn("[Assembly] No service trace was created. The request may have failed before assembly started; check the error shown on the page.");
+        }
+        console.log("[Assembly] Finished", { traceId, status: trace ? trace.status : "unavailable" });
+      };
+    }
+
     runBtn.addEventListener("click", async () => {
       errorEl.textContent = "";
       const sourcePath = (document.getElementById("source-path").value || "").trim();
@@ -1302,6 +1426,9 @@
       setStatus("Processing… " + elapsedLabel(0));
       hidePreview();
       results.classList.remove("open");
+      const traceId = "trace_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2);
+      form.append("trace_id", traceId);
+      const finishConsoleTrace = await startConsoleTrace(traceId);
       try {
         const payload = await postJson("/api/jobs", form);
         showResults(payload);
@@ -1314,6 +1441,7 @@
         showElapsed("Stopped after ", (Date.now() - processStarted) / 1000, ".");
       } finally {
         clearInterval(processTimer);
+        await finishConsoleTrace();
         runBtn.disabled = false;
       }
     });
@@ -1347,6 +1475,7 @@
       viewerJobId = "";
       pageLoads.clear();
       pageGeometryLoads.clear();
+      closeInline();
       selectedLine = null;
       activePage = 1;
       annotationMode = "";
@@ -1400,6 +1529,7 @@
       viewerJobId = currentJob.job_id;
       pageLoads.clear();
       pageGeometryLoads.clear();
+      closeInline();
       selectedLine = null;
       previewVersion += 1;
       stopObservers();
@@ -1620,11 +1750,16 @@
         button.style.width = (Math.max(line.x1 - line.x0, 8) / meta.width * 100) + "%";
         button.style.height = (Math.max(line.y1 - line.y0, 8) / meta.height * 100 + padY * 2) + "%";
         button.title = line.text;
-        button.addEventListener("click", () => selectLine(meta.page, line, button));
+        button.dataset.line = JSON.stringify(line);
+        button.addEventListener("click", (event) => {
+          event.stopPropagation();
+          selectLine(meta.page, line, button);
+        });
         layer.appendChild(button);
       });
       sheet.querySelector(".page-lines")?.remove();
       sheet.appendChild(layer);
+      sheet.dataset.textLines = String((meta.lines || []).length);
     }
 
     function placeMarks(sheet, meta, page) {
@@ -1665,15 +1800,98 @@
       sheet.appendChild(layer);
     }
 
+    function closeInline() {
+      if (inlineInput) inlineInput.remove();
+      inlineInput = null;
+    }
+
+    function openInline(line, button) {
+      const sheet = button.closest(".page-sheet");
+      if (!sheet) return;
+      inlineSkipBlur = true;
+      if (!inlineInput || inlineInput.parentElement !== sheet) {
+        closeInline();
+        inlineInput = document.createElement("input");
+        inlineInput.type = "text";
+        inlineInput.className = "inline-edit";
+        inlineInput.setAttribute("aria-label", "Edit this line");
+        inlineInput.addEventListener("keydown", onInlineKey);
+        inlineInput.addEventListener("blur", onInlineBlur);
+        sheet.appendChild(inlineInput);
+      }
+      const left = parseFloat(button.style.left) || 0;
+      inlineInput.style.left = left + "%";
+      inlineInput.style.top = button.style.top;
+      inlineInput.style.width = Math.max(parseFloat(button.style.width) || 10, Math.min(80, 97 - left)) + "%";
+      inlineInput.style.height = Math.max(parseFloat(button.style.height) || 2, 2.4) + "%";
+      inlineInput.style.fontSize = Math.max(12, button.getBoundingClientRect().height * 0.72) + "px";
+      inlineInput.value = line.text;
+      editText.value = line.text;
+      inlineInput.focus();
+      inlineInput.select();
+      setTimeout(() => { inlineSkipBlur = false; }, 0);
+    }
+
     function selectLine(page, line, button) {
+      if (annotationMode) return;
       if (!previewBody.classList.contains("editing")) setEditMode(true);
       previewScroll.querySelectorAll(".page-line.selected").forEach((item) => item.classList.remove("selected"));
       if (button) button.classList.add("selected");
       selectedLine = { page, x0: line.x0, y0: line.y0, x1: line.x1, y1: line.y1, text: line.text };
-      editWhere.textContent = "Page " + page;
-      editText.value = line.text;
+      editWhere.textContent = "Type on the page. Enter saves, Backspace deletes, Tab next line, Escape cancels.";
       editStatus.textContent = "";
-      editText.focus();
+      if (button) openInline(selectedLine, button);
+    }
+
+    function onInlineBlur() {
+      if (inlineSkipBlur || !inlineInput || !selectedLine) return;
+      const line = selectedLine;
+      const value = inlineInput.value;
+      if (value === line.text) return;
+      applyLineEdit(value, false, line);
+    }
+
+    async function onInlineKey(event) {
+      if (!selectedLine || !inlineInput) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        inlineSkipBlur = true;
+        closeInline();
+        editStatus.textContent = "Cancelled.";
+        return;
+      }
+      if (event.key === "Enter") {
+        event.preventDefault();
+        inlineSkipBlur = true;
+        const line = selectedLine;
+        const value = inlineInput.value;
+        closeInline();
+        await applyLineEdit(value, false, line);
+        return;
+      }
+      if (event.key === "Tab") {
+        event.preventDefault();
+        inlineSkipBlur = true;
+        const index = lineButtons().indexOf(previewScroll.querySelector(".page-line.selected"));
+        const line = selectedLine;
+        const value = inlineInput.value;
+        closeInline();
+        if (value !== line.text && !await applyLineEdit(value, false, line)) return;
+        chooseLine(index + (event.shiftKey ? -1 : 1));
+      }
+    }
+
+    function lineButtons() {
+      return [...previewScroll.querySelectorAll(".page-line")];
+    }
+
+    function chooseLine(index) {
+      const buttons = lineButtons();
+      if (!buttons.length) return;
+      const next = buttons[Math.max(0, Math.min(index, buttons.length - 1))];
+      const page = Number(next.closest(".page-sheet").dataset.page);
+      selectLine(page, JSON.parse(next.dataset.line), next);
+      next.scrollIntoView({ block: "nearest" });
     }
 
     function fillEditShortcuts() {
@@ -1754,7 +1972,37 @@
     });
     closePreview.addEventListener("click", hidePreview);
     editButton.addEventListener("click", () => {
-      setEditMode(!previewBody.classList.contains("editing"));
+      const open = !previewBody.classList.contains("editing");
+      if (open) {
+        annotationMode = "";
+        previewBody.classList.remove("annotating");
+        editWhere.textContent = "1. Click the words on the page.";
+        editStatus.textContent = "";
+      }
+      setEditMode(open);
+    });
+    previewScroll.addEventListener("click", (event) => {
+      if (!previewBody.classList.contains("editing") || annotationMode) return;
+      if (event.target.closest(".page-line") || event.target.closest(".inline-edit")) return;
+      const sheet = event.target.closest(".page-sheet");
+      if (!sheet) return;
+      if (sheet.dataset.textLines === "0") {
+        editStatus.textContent = "This page has no text to change. It may be a scanned image.";
+        return;
+      }
+      let best = null;
+      sheet.querySelectorAll(".page-line").forEach((button) => {
+        const rect = button.getBoundingClientRect();
+        const dx = Math.max(rect.left - event.clientX, 0, event.clientX - rect.right);
+        const dy = Math.max(rect.top - event.clientY, 0, event.clientY - rect.bottom);
+        const dist = dx * dx + dy * dy;
+        if (!best || dist < best.dist) best = { button, dist };
+      });
+      if (!best || best.dist > 48 * 48) {
+        editStatus.textContent = "Click closer to the words you want to change.";
+        return;
+      }
+      selectLine(Number(sheet.dataset.page), JSON.parse(best.button.dataset.line), best.button);
     });
     document.getElementById("zoom-in").addEventListener("click", () => {
       pageZoom = Math.min(2.5, Math.round((pageZoom + 0.25) * 100) / 100);
@@ -1827,18 +2075,34 @@
       }
     }
     document.getElementById("bookmark-add").addEventListener("click", () => {
-      const title = window.prompt("Bookmark title:");
-      if (title) {
-        const level = window.prompt("Bookmark level: enter 1 for top-level or 2 for nested", "1");
-        if (level === null) return;
-        runBookmarkOperation({ action: "add", title, page: activePage, level: Number(level) || 1 });
-      }
+      bookmarkEditAction = "add";
+      setEditMode(true);
+      document.getElementById("bookmark-title").value = "";
+      document.getElementById("bookmark-level").value = "1";
+      editWhere.textContent = "New bookmark on page " + activePage + ".";
+      document.getElementById("bookmark-title").focus();
     });
     document.getElementById("bookmark-rename").addEventListener("click", () => {
       const item = bookmarkItems[selectedBookmarkIndex];
       if (!item) { pageActionStatus.textContent = "Select a bookmark first."; return; }
-      const title = window.prompt("Bookmark title:", item.title);
-      if (title) runBookmarkOperation({ action: "rename", index: selectedBookmarkIndex, title, page: bookmarkPage(item, previewScroll.querySelectorAll(".page-sheet").length) });
+      bookmarkEditAction = "rename";
+      setEditMode(true);
+      document.getElementById("bookmark-title").value = item.title || "";
+      document.getElementById("bookmark-level").value = String(item.level || 1);
+      editWhere.textContent = "Renaming the selected bookmark.";
+      document.getElementById("bookmark-title").focus();
+    });
+    document.getElementById("bookmark-save").addEventListener("click", () => {
+      const title = document.getElementById("bookmark-title").value.trim();
+      if (!title) { editStatus.textContent = "Enter a bookmark title."; return; }
+      const level = Number(document.getElementById("bookmark-level").value) || 1;
+      if (bookmarkEditAction === "rename") {
+        const item = bookmarkItems[selectedBookmarkIndex];
+        if (!item) { editStatus.textContent = "Select a bookmark in the list first."; return; }
+        runBookmarkOperation({ action: "rename", index: selectedBookmarkIndex, title, page: bookmarkPage(item, previewScroll.querySelectorAll(".page-sheet").length), level });
+        return;
+      }
+      runBookmarkOperation({ action: "add", title, page: activePage, level });
     });
     document.getElementById("bookmark-delete").addEventListener("click", () => {
       const item = bookmarkItems[selectedBookmarkIndex];
@@ -1943,7 +2207,7 @@
       event.target.value = "";
     });
     document.getElementById("page-delete").addEventListener("click", () => {
-      if (window.confirm("Delete page " + activePage + " from this PDF? This cannot be undone.")) runPageOperation("delete");
+      if (window.confirm("Delete page " + activePage + "? You can undo this before saving the edited copy.")) runPageOperation("delete");
     });
     document.getElementById("page-insert").addEventListener("click", () => insertPdfFile.click());
     insertPdfFile.addEventListener("change", async () => {
@@ -1993,7 +2257,11 @@
         highlight: "Drag over an area to highlight it.", redact: "Drag over sensitive content. Redaction is permanent on the edited copy.",
         crop: "Drag to select the page area to keep.",
       };
-      pageActionStatus.textContent = instructions[annotationMode] || "";
+      const hint = instructions[annotationMode] || "Click a line, change the text, then Replace line.";
+      pageActionStatus.textContent = hint;
+      const editHint = document.getElementById("edit-hint");
+      if (editHint) editHint.textContent = hint;
+      if (["text", "note", "stamp"].includes(annotationMode)) editText.focus();
     }
     [["add-text", "text"], ["add-note", "note"], ["add-stamp", "stamp"], ["add-rectangle", "rectangle"], ["add-circle", "circle"], ["add-line", "line"], ["add-signature", "signature"], ["add-highlight", "highlight"], ["add-redaction", "redact"], ["page-crop", "crop"]].forEach(([id, mode]) => {
       document.getElementById(id).addEventListener("click", () => activateAnnotationTool(mode));
@@ -2087,24 +2355,27 @@
       }
     }
 
-    editApply.addEventListener("click", async () => {
-      if (!selectedLine || !currentJob) {
+    async function applyLineEdit(text, reselect = true, line = null) {
+      const target = line || selectedLine;
+      if (!target || !currentJob) {
         editStatus.textContent = "Click a line on the page first.";
-        return;
+        return false;
       }
       editApply.disabled = true;
       editStatus.textContent = "Saving…";
+      const page = target.page;
+      const lineIndex = lineButtons().indexOf(previewScroll.querySelector(".page-line.selected"));
       try {
         const response = await fetch(jobApi("/edit"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            page: selectedLine.page,
-            x0: selectedLine.x0,
-            y0: selectedLine.y0,
-            x1: selectedLine.x1,
-            y1: selectedLine.y1,
-            text: editText.value,
+            page,
+            x0: target.x0,
+            y0: target.y0,
+            x1: target.x1,
+            y1: target.y1,
+            text,
           }),
         });
         const payload = await response.json();
@@ -2113,10 +2384,9 @@
         highlightCount = currentJob.highlights.length;
         syncHighlightLabel();
         fillEditShortcuts();
-        const page = selectedLine.page;
-        selectedLine = null;
-        editText.value = "";
-        editWhere.textContent = "No line selected.";
+        selectedLine.text = text;
+        editText.value = text;
+        editWhere.textContent = text ? "Updated page " + page + "." : "Cleared the line on page " + page + ".";
         editStatus.textContent = payload.detail || "Saved.";
         pageLoads.delete(page);
         pageGeometryLoads.delete(page);
@@ -2128,11 +2398,26 @@
         }
         await loadPage(page);
         await refreshHistoryControls();
+        const again = lineButtons();
+        if (reselect && again.length) chooseLine(text ? lineIndex : Math.min(lineIndex, again.length - 1));
+        return true;
       } catch (err) {
         editStatus.textContent = err.message || String(err);
+        return false;
       } finally {
         editApply.disabled = false;
       }
+    }
+    editApply.addEventListener("click", () => {
+      inlineSkipBlur = true;
+      const value = inlineInput ? inlineInput.value : editText.value;
+      closeInline();
+      applyLineEdit(value);
+    });
+    document.getElementById("edit-clear").addEventListener("click", () => {
+      inlineSkipBlur = true;
+      closeInline();
+      applyLineEdit("");
     });
 
     function showResults(job) {
