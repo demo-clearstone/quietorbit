@@ -494,7 +494,10 @@
     #source-order li:not(:last-child)::after { content: " · "; }
     #tab-warnings { margin: 0; padding-left: 16px; font-size: 0.72rem; color: var(--muted); }
     .preview-wrap { padding: 0; display: none; }
-    .workspace.preview-on .preview-wrap { display: flex; }
+    .workspace.preview-on .preview-wrap {
+      display: flex;
+      flex-direction: column;
+    }
     .preview-bar {
       display: flex;
       justify-content: space-between;
@@ -508,17 +511,156 @@
     .preview-tools {
       display: flex;
       align-items: center;
-      gap: 10px;
+      justify-content: flex-end;
+      flex-wrap: wrap;
+      gap: 6px;
       margin-left: auto;
     }
+    .preview-tools > button, .preview-tools > a { padding: 5px 7px; font-size: 0.72rem; }
+    .tool-menu { position: relative; }
+    .tool-menu summary { list-style: none; cursor: pointer; border: 1px solid var(--line); border-radius: 6px; padding: 5px 9px; color: var(--accent); font-size: 0.72rem; font-weight: 700; white-space: nowrap; }
+    .tool-menu summary::-webkit-details-marker { display: none; }
+    .tool-menu[open] summary { background: #dbeafe; }
+    .tool-menu-content { position: absolute; z-index: 20; top: calc(100% + 5px); right: 0; min-width: 190px; max-width: min(420px, 80vw); max-height: 52vh; overflow: auto; display: flex; flex-wrap: wrap; gap: 5px; padding: 9px; border: 1px solid var(--line); border-radius: 8px; background: #fff; box-shadow: 0 8px 24px rgba(15, 23, 42, .18); }
+    .tool-menu-content button, .tool-menu-content a, .tool-menu-content select { padding: 5px 7px; font-size: 0.72rem; }
+    .tool-menu-content select { border: 1px solid var(--line); border-radius: 6px; color: var(--text); background: #fff; }
+    .tool-menu-content .preview-note { width: 100%; }
+    .preview-tools select { border: 1px solid var(--line); border-radius: 6px; color: var(--text); background: #fff; }
     .preview-note { color: var(--muted); font-size: 0.7rem; }
-    .preview-frame {
+    .preview-body {
       flex: 1 1 auto;
-      width: 100%;
       min-height: 0;
-      height: 100%;
+      display: flex;
+      background: #fff;
+    }
+    .bookmark-panel, .edit-panel {
+      flex: 0 0 200px;
+      min-height: 0;
+      overflow: auto;
+      background: #f8fafc;
+      padding: 8px 6px 12px;
+    }
+    .bookmark-panel { border-right: 1px solid var(--line); }
+    .sidebar-tabs { display: flex; gap: 4px; margin: 0 0 6px; }
+    .sidebar-tabs button { flex: 1; padding: 5px; background: transparent; color: var(--muted); font-size: 0.7rem; }
+    .sidebar-tabs button.active { background: #dbeafe; color: var(--accent); }
+    #thumbnail-list { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+    .thumbnail { padding: 4px !important; border: 1px solid var(--line) !important; background: #fff !important; color: var(--text) !important; }
+    .thumbnail img { display: block; width: 100%; aspect-ratio: 0.75; object-fit: contain; background: #e2e8f0; }
+    .thumbnail span { display: block; font-size: 0.65rem; padding-top: 3px; }
+    .thumbnail.dragging { opacity: 0.45; }
+    .edit-panel {
+      flex-basis: 230px;
+      border-left: 1px solid var(--line);
+      background: #fff;
+    }
+    .bookmark-head {
+      font-size: 0.68rem;
+      font-weight: 700;
+      color: var(--muted);
+      padding: 2px 6px 6px;
+    }
+    .bookmark-list button, #bookmark-list button {
+      display: block;
+      width: 100%;
+      text-align: left;
+      background: transparent;
       border: 0;
+      border-radius: 4px;
+      padding: 4px 6px;
+      font-size: 0.72rem;
+      line-height: 1.3;
+      color: var(--text);
+      cursor: pointer;
+    }
+    #bookmark-list button:hover { background: #e2e8f0; }
+    #bookmark-list button.active {
+      background: #dbeafe;
+      color: var(--accent);
+      font-weight: 700;
+    }
+    .preview-scroll {
+      flex: 1 1 auto;
+      min-width: 0;
+      overflow: auto;
       background: #525659;
+      padding: 12px;
+    }
+    .page-sheet {
+      position: relative;
+      margin: 0 auto 12px;
+      background: #fff;
+      width: 100%;
+      aspect-ratio: 8.5 / 11;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+    }
+    .page-sheet img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+    .page-label {
+      position: absolute;
+      z-index: 3;
+      left: 8px;
+      top: 6px;
+      font-size: 0.68rem;
+      color: #64748b;
+      background: rgba(255, 255, 255, 0.85);
+      padding: 1px 5px;
+      border-radius: 3px;
+      pointer-events: none;
+    }
+    .page-lines, .page-marks { position: absolute; inset: 0; z-index: 1; }
+    .page-marks { pointer-events: none; }
+    .search-marks { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
+    .search-mark { position: absolute; background: rgba(255, 166, 0, 0.42); outline: 1px solid #d97706; }
+    .page-line, .mark-box { position: absolute; }
+    .page-line {
+      background: transparent;
+      border: 0;
+      padding: 0;
+      margin: 0;
+      cursor: text;
+    }
+    .page-line { pointer-events: auto; }
+    .preview-body.annotating .page-lines, .preview-body.annotating .page-line { pointer-events: none; }
+    .preview-body.annotating .page-sheet { cursor: crosshair; }
+    .page-line:hover { background: rgba(29, 78, 216, 0.16); }
+    .page-line.selected { outline: 2px solid #1d4ed8; background: rgba(29, 78, 216, 0.12); }
+    .mark-box {
+      display: none;
+      background: rgba(255, 214, 50, 0.45);
+      border: 1px solid rgba(180, 110, 0, 0.85);
+      pointer-events: none;
+    }
+    .preview-body.show-marks .mark-box { display: block; }
+    .edit-panel textarea {
+      width: 100%;
+      margin: 6px 0;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 6px;
+      font: inherit;
+      font-size: 0.75rem;
+    }
+    .edit-panel input[type="search"] { width: 100%; margin: 4px 0; padding: 6px; border: 1px solid var(--line); border-radius: 5px; font: inherit; font-size: 0.75rem; }
+    #search-results button { display: block; width: 100%; margin: 3px 0; padding: 5px; text-align: left; background: #fff; border: 1px solid var(--line); color: var(--text); font-size: 0.68rem; }
+    .edit-where { margin: 6px 0; font-size: 0.72rem; color: var(--muted); }
+    .edit-panel .btn { width: 100%; }
+    button.btn.on { background: #dbeafe; color: var(--accent); border: 1px solid #bfdbfe; }
+    #edit-shortcuts button {
+      display: block;
+      width: 100%;
+      text-align: left;
+      margin-top: 4px;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      padding: 4px 6px;
+      font-size: 0.7rem;
+      cursor: pointer;
     }
     .hidden { display: none !important; }
     @media (max-width: 900px) {
@@ -532,6 +674,8 @@
       }
       .workspace.preview-on .summary { max-height: none; }
       .preview-wrap { height: 50vh; }
+      .bookmark-panel { flex-basis: 140px; }
+      .edit-panel { flex-basis: 180px; }
       .top-row { flex-direction: column; }
       .run-wrap { flex: 0 0 auto; }
       .summary {
@@ -641,10 +785,73 @@
               <span id="highlight-label">Highlight changes</span>
             </label>
             <span class="preview-note" id="highlight-note"></span>
+            <span class="preview-note" id="active-page-label">Page 1</span>
+            <details class="tool-menu"><summary>Edit</summary><div class="tool-menu-content">
+              <button type="button" class="btn ghost" id="edit-preview">Edit text</button>
+              <button type="button" class="btn ghost" id="add-text">Add text</button>
+              <button type="button" class="btn ghost" id="add-note">Note</button>
+              <button type="button" class="btn ghost" id="add-stamp">Stamp</button>
+              <button type="button" class="btn ghost" id="add-rectangle">Rectangle</button>
+              <button type="button" class="btn ghost" id="add-circle">Circle</button>
+              <button type="button" class="btn ghost" id="add-line">Line</button>
+              <button type="button" class="btn ghost" id="add-signature">Signature</button>
+              <button type="button" class="btn ghost" id="add-highlight">Highlight</button>
+              <button type="button" class="btn ghost" id="add-redaction">Redact</button>
+              <button type="button" class="btn ghost" id="page-crop">Crop page</button>
+              <select id="page-size" aria-label="Page size"><option value="">Page size…</option><option value="letter">Letter canvas</option><option value="a4">A4 canvas</option><option value="legal">Legal canvas</option></select>
+              <button type="button" class="btn ghost" id="undo-edit" title="Undo">Undo</button>
+              <button type="button" class="btn ghost" id="redo-edit" title="Redo">Redo</button>
+            </div></details>
+            <details class="tool-menu"><summary>Pages</summary><div class="tool-menu-content">
+              <button type="button" class="btn ghost" id="page-up" title="Move page earlier">Move earlier</button>
+              <button type="button" class="btn ghost" id="page-down" title="Move page later">Move later</button>
+              <button type="button" class="btn ghost" id="page-rotate" title="Rotate page 90 degrees">Rotate</button>
+              <button type="button" class="btn ghost" id="page-insert">Insert PDF</button>
+              <input id="insert-pdf-file" type="file" accept="application/pdf,.pdf" hidden />
+              <button type="button" class="btn ghost" id="page-delete">Delete page</button>
+            </div></details>
+            <details class="tool-menu"><summary>Bookmarks</summary><div class="tool-menu-content">
+              <button type="button" class="btn ghost" id="bookmark-add">Add bookmark</button>
+              <button type="button" class="btn ghost" id="bookmark-rename">Rename</button>
+              <button type="button" class="btn ghost" id="bookmark-delete">Delete</button>
+              <button type="button" class="btn ghost" id="bookmark-validate">Check bookmarks</button>
+            </div></details>
+            <details class="tool-menu"><summary>Save</summary><div class="tool-menu-content">
+              <button type="button" class="btn ghost" id="save-edited">Save edited copy</button>
+              <a class="btn ghost hidden" id="download-edited" href="#">Download edited copy</a>
+              <a class="btn ghost" id="download-original" href="#">Download original</a>
+            </div></details>
+            <span class="preview-note" id="page-action-status" role="status"></span>
+            <button type="button" class="btn ghost" id="zoom-out" title="Smaller">−</button>
+            <button type="button" class="btn ghost" id="zoom-in" title="Larger">+</button>
             <button type="button" class="btn ghost" id="close-preview">Close preview</button>
           </div>
         </div>
-        <iframe id="preview" class="preview-frame" title="Assembled valuation package"></iframe>
+        <div class="preview-body show-marks" id="preview-body">
+          <aside class="bookmark-panel" id="bookmark-panel">
+            <div class="sidebar-tabs">
+              <button type="button" class="active" data-sidebar="bookmarks">Bookmarks</button>
+              <button type="button" data-sidebar="thumbnails">Pages</button>
+            </div>
+            <div id="bookmark-list"></div>
+            <div id="thumbnail-list" class="hidden"></div>
+          </aside>
+          <div class="preview-scroll" id="preview-scroll"></div>
+          <aside class="edit-panel hidden" id="edit-panel">
+            <div class="bookmark-head">Edit text</div>
+            <p class="preview-note">Click a line on the page, change it, then Apply. Download uses this text.</p>
+            <p class="edit-where" id="edit-where">No line selected.</p>
+            <textarea id="edit-text" rows="5" placeholder="Selected line"></textarea>
+            <button type="button" class="btn" id="edit-apply">Apply</button>
+            <p class="preview-note" id="edit-status"></p>
+            <p class="preview-note">Replacement text fits the existing line when possible. It does not reflow the page.</p>
+            <label class="preview-note" for="search-query">Search PDF text</label>
+            <input id="search-query" type="search" placeholder="Find text…" />
+            <button type="button" class="btn ghost" id="search-submit">Search</button>
+            <div id="search-results"></div>
+            <div id="edit-shortcuts"></div>
+          </aside>
+        </div>
       </div>
     </section>
   </div>
@@ -658,13 +865,44 @@
     const results = document.getElementById("results");
     const previewLink = document.getElementById("preview-link");
     const closePreview = document.getElementById("close-preview");
-    const previewFrame = document.getElementById("preview");
     const highlightChanges = document.getElementById("highlight-changes");
+    const previewBody = document.getElementById("preview-body");
+    const previewScroll = document.getElementById("preview-scroll");
+    const bookmarkList = document.getElementById("bookmark-list");
+    const thumbnailList = document.getElementById("thumbnail-list");
+    const editPanel = document.getElementById("edit-panel");
+    const editButton = document.getElementById("edit-preview");
+    const editText = document.getElementById("edit-text");
+    const editWhere = document.getElementById("edit-where");
+    const editStatus = document.getElementById("edit-status");
+    const editApply = document.getElementById("edit-apply");
+    const insertPdfFile = document.getElementById("insert-pdf-file");
+    const activePageLabel = document.getElementById("active-page-label");
+    const pageActionStatus = document.getElementById("page-action-status");
     const app = document.querySelector(".app");
+    const REWRITE_LABELS = new Set(["Cover date", "402(g) date", "HCE %", "Filled amount"]);
     let files = [];
     let currentPreview = "";
     let highlightCount = 0;
     let listedPath = "";
+    let currentJob = null;
+    let viewerJobId = "";
+    let previewVersion = 0;
+    let pageZoom = 1;
+    let selectedLine = null;
+    let activePage = 1;
+    let annotationMode = "";
+    let highlightDrag = null;
+    let signatureStroke = [];
+    let bookmarkItems = [];
+    let selectedBookmarkIndex = -1;
+    let searchMatches = [];
+    let draggedThumbnailPage = 0;
+    let bookmarkLock = 0;
+    const pageLoads = new Map();
+    const pageGeometryLoads = new Map();
+    let pageObserver = null;
+    let seenObserver = null;
 
     document.getElementById("hide-upload").addEventListener("click", () => setUploadOpen(false));
     document.getElementById("show-upload").addEventListener("click", () => setUploadOpen(true));
@@ -1092,15 +1330,6 @@
       return apiBase() + path;
     }
 
-    function previewSrc() {
-      if (!currentPreview) return "";
-      const base = currentPreview.split("?")[0];
-      const params = new URLSearchParams();
-      if (highlightChanges.checked) params.set("highlight", "1");
-      params.set("v", String(Date.now()));
-      return base + "?" + params.toString();
-    }
-
     function syncHighlightLabel() {
       document.getElementById("highlight-label").textContent = highlightCount
         ? "Highlight changes (" + highlightCount + ")"
@@ -1110,16 +1339,405 @@
         : "No rewritten text on this file.";
     }
 
+    function jobApi(suffix) {
+      return apiBase() + "/api/jobs/" + currentJob.job_id + suffix;
+    }
+
+    function resetViewer() {
+      viewerJobId = "";
+      pageLoads.clear();
+      pageGeometryLoads.clear();
+      selectedLine = null;
+      activePage = 1;
+      annotationMode = "";
+      highlightDrag = null;
+      signatureStroke = [];
+      bookmarkItems = [];
+      selectedBookmarkIndex = -1;
+      searchMatches = [];
+      previewBody.classList.remove("annotating");
+      document.getElementById("add-text").classList.remove("on");
+      document.getElementById("add-highlight").classList.remove("on");
+      stopObservers();
+      bookmarkList.innerHTML = "";
+      thumbnailList.innerHTML = "";
+      document.getElementById("search-results").innerHTML = "";
+      previewScroll.innerHTML = "";
+      document.getElementById("edit-shortcuts").innerHTML = "";
+      editText.value = "";
+      editWhere.textContent = "No line selected.";
+      editStatus.textContent = "";
+      setEditMode(false);
+    }
+
+    function setEditMode(on) {
+      previewBody.classList.toggle("editing", on);
+      editPanel.classList.toggle("hidden", !on);
+      editButton.classList.toggle("on", on);
+      editButton.textContent = on ? "Close edit" : "Edit";
+    }
+
     function showPreview() {
-      previewFrame.src = previewSrc();
       results.classList.add("preview-on");
       previewLink.textContent = "Hide preview";
+      if (!currentJob) return;
+      if (viewerJobId !== currentJob.job_id) buildViewer();
     }
 
     function hidePreview() {
-      previewFrame.removeAttribute("src");
       results.classList.remove("preview-on");
       previewLink.textContent = "Preview";
+    }
+
+    function stopObservers() {
+      if (pageObserver) pageObserver.disconnect();
+      if (seenObserver) seenObserver.disconnect();
+      pageObserver = null;
+      seenObserver = null;
+    }
+
+    async function buildViewer() {
+      viewerJobId = currentJob.job_id;
+      pageLoads.clear();
+      pageGeometryLoads.clear();
+      selectedLine = null;
+      previewVersion += 1;
+      stopObservers();
+      bookmarkList.innerHTML = "<p class='preview-note'>Loading bookmarks…</p>";
+      previewScroll.innerHTML = "";
+      previewBody.classList.toggle("show-marks", highlightChanges.checked);
+      fillEditShortcuts();
+      let outline = { page_count: 0, bookmarks: [] };
+      try {
+        const response = await fetch(jobApi("/outline"));
+        const payload = await response.json();
+        if (!response.ok) throw new Error(formatDetail(payload.detail) || "Could not read bookmarks");
+        outline = payload;
+      } catch (err) {
+        viewerJobId = "";
+        bookmarkList.innerHTML = "<p class='preview-note'>" + escapeHtml(err.message || String(err)) + "</p>";
+        return;
+      }
+      const count = outline.page_count || 0;
+      renderBookmarks(outline.bookmarks || [], count);
+      if (!count) {
+        previewScroll.innerHTML = "<p class='preview-note'>This package has no pages.</p>";
+        return;
+      }
+      for (let page = 1; page <= count; page += 1) {
+        const sheet = document.createElement("article");
+        sheet.className = "page-sheet";
+        sheet.id = "pdf-page-" + page;
+        sheet.dataset.page = String(page);
+        sheet.style.width = (pageZoom * 100) + "%";
+        sheet.innerHTML = "<img alt='Page " + page + "' /><div class='page-label'>Page " + page + "</div>";
+        previewScroll.appendChild(sheet);
+      }
+      renderThumbnails(count);
+      pageObserver = new IntersectionObserver((entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) loadPage(Number(entry.target.dataset.page));
+        });
+      }, { root: previewScroll, rootMargin: "800px 0px" });
+      seenObserver = new IntersectionObserver((entries) => {
+        const visible = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+        if (visible) {
+          activePage = Number(visible.target.dataset.page);
+          activePageLabel.textContent = "Page " + activePage;
+          setActiveBookmark(activePage);
+        }
+      }, { root: previewScroll, threshold: [0.35] });
+      previewScroll.querySelectorAll(".page-sheet").forEach((sheet) => {
+        pageObserver.observe(sheet);
+        seenObserver.observe(sheet);
+      });
+    }
+
+    function bookmarkPage(item, pageCount) {
+      let page = Number(item && item.page);
+      if (!Number.isFinite(page) || page < 1) page = 1;
+      if (pageCount && page > pageCount) page = pageCount;
+      return page;
+    }
+
+    function renderBookmarks(items, pageCount) {
+      bookmarkItems = items;
+      selectedBookmarkIndex = -1;
+      if (!items.length) {
+        bookmarkList.innerHTML = "<p class='preview-note'>No bookmarks in this file.</p>";
+        return;
+      }
+      bookmarkList.innerHTML = "";
+      items.forEach((item, index) => {
+        const page = bookmarkPage(item, pageCount);
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = item.title || "Bookmark";
+        button.dataset.page = String(page);
+        button.dataset.index = String(index);
+        button.style.paddingLeft = (6 + Math.max(0, (item.level || 1) - 1) * 12) + "px";
+        button.addEventListener("click", () => {
+          selectedBookmarkIndex = index;
+          bookmarkList.querySelectorAll("button").forEach((node) => node.classList.toggle("selected", node === button));
+          bookmarkLock = Date.now() + 1200;
+          setActiveBookmark(page, button);
+          scrollToPage(page).catch((err) => {
+            pageActionStatus.textContent = err.message || String(err);
+          });
+        });
+        bookmarkList.appendChild(button);
+      });
+    }
+
+    function renderThumbnails(pageCount) {
+      thumbnailList.innerHTML = "";
+      for (let page = 1; page <= pageCount; page += 1) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "thumbnail";
+        button.draggable = true;
+        button.dataset.page = String(page);
+        const image = document.createElement("img");
+        image.alt = "Page " + page;
+        image.loading = "lazy";
+        image.src = jobApi("/pages/" + page + "/thumbnail");
+        const label = document.createElement("span");
+        label.textContent = "Page " + page;
+        button.append(image, label);
+        button.addEventListener("click", () => scrollToPage(page));
+        button.addEventListener("dragstart", (event) => {
+          draggedThumbnailPage = page;
+          button.classList.add("dragging");
+          event.dataTransfer.effectAllowed = "move";
+          event.dataTransfer.setData("text/plain", String(page));
+        });
+        button.addEventListener("dragend", () => button.classList.remove("dragging"));
+        button.addEventListener("dragover", (event) => event.preventDefault());
+        button.addEventListener("drop", (event) => {
+          event.preventDefault();
+          const from = Number(event.dataTransfer.getData("text/plain")) || draggedThumbnailPage;
+          if (from && from !== page) reorderThumbnail(from, page);
+        });
+        thumbnailList.appendChild(button);
+      }
+    }
+
+    function setSidebar(tab) {
+      document.querySelectorAll(".sidebar-tabs button").forEach((button) => button.classList.toggle("active", button.dataset.sidebar === tab));
+      bookmarkList.classList.toggle("hidden", tab !== "bookmarks");
+      thumbnailList.classList.toggle("hidden", tab !== "thumbnails");
+    }
+
+    async function scrollToPage(page) {
+      if (!currentJob || page < 1) return;
+      // Earlier pages determine this page's vertical position. Load their geometry
+      // first so late aspect-ratio changes cannot shift the target after scrolling.
+      await Promise.all(Array.from({ length: page }, (_, index) => loadPageGeometry(index + 1)));
+      const sheet = document.getElementById("pdf-page-" + page);
+      if (!sheet) return;
+      const host = previewScroll.getBoundingClientRect();
+      const box = sheet.getBoundingClientRect();
+      previewScroll.scrollTop += box.top - host.top - 8;
+      await loadPage(page);
+    }
+
+    function setActiveBookmark(page, onlyButton) {
+      if (!onlyButton && Date.now() < bookmarkLock) return;
+      const buttons = [...bookmarkList.querySelectorAll("button")];
+      if (!onlyButton) {
+        const current = buttons.find((button) => button.classList.contains("active"));
+        if (current && Number(current.dataset.page) === Number(page)) return;
+      }
+      const active = onlyButton || buttons.find((button) => Number(button.dataset.page) === Number(page)) || null;
+      buttons.forEach((button) => button.classList.toggle("active", button === active));
+      if (onlyButton) onlyButton.scrollIntoView({ block: "nearest" });
+    }
+
+    async function loadPage(page) {
+      if (!currentJob) return;
+      if (pageLoads.has(page)) return pageLoads.get(page);
+      const pending = loadPageNow(page);
+      pageLoads.set(page, pending);
+      try {
+        await pending;
+      } catch (err) {
+        pageLoads.delete(page);
+        pageGeometryLoads.delete(page);
+        editStatus.textContent = err.message || String(err);
+      }
+    }
+
+    function loadPageGeometry(page) {
+      if (!currentJob) return Promise.resolve();
+      if (pageGeometryLoads.has(page)) return pageGeometryLoads.get(page);
+      const pending = (async () => {
+        const sheet = document.getElementById("pdf-page-" + page);
+        if (!sheet) return;
+        const version = previewVersion;
+        const response = await fetch(jobApi("/pages/" + page + "/lines?v=" + version));
+        const meta = await response.json();
+        if (!response.ok) throw new Error(formatDetail(meta.detail) || "Could not read page " + page);
+        if (version !== previewVersion || viewerJobId !== currentJob.job_id) return;
+        sheet.dataset.pdfWidth = String(meta.width);
+        sheet.dataset.pdfHeight = String(meta.height);
+        sheet.dataset.baseWidth = String(meta.base_width || meta.width);
+        sheet.dataset.baseHeight = String(meta.base_height || meta.height);
+        sheet.dataset.rotation = String(meta.rotation || 0);
+        if (meta.width && meta.height) sheet.style.aspectRatio = meta.width + " / " + meta.height;
+        placeLines(sheet, meta);
+        placeMarks(sheet, meta, page);
+        placeSearchMarks(sheet, meta, page);
+      })().catch((err) => {
+        pageGeometryLoads.delete(page);
+        throw err;
+      });
+      pageGeometryLoads.set(page, pending);
+      return pending;
+    }
+
+    async function loadPageNow(page) {
+      const sheet = document.getElementById("pdf-page-" + page);
+      if (!sheet) return;
+      const version = previewVersion;
+      await loadPageGeometry(page);
+      if (version !== previewVersion || viewerJobId !== currentJob.job_id) return;
+      const img = sheet.querySelector("img");
+      img.src = jobApi("/pages/" + page + "?v=" + version);
+    }
+
+    function placeLines(sheet, meta) {
+      const layer = document.createElement("div");
+      layer.className = "page-lines";
+      (meta.lines || []).forEach((line) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "page-line";
+        const padY = 4 / meta.height * 100;
+        button.style.left = (line.x0 / meta.width * 100) + "%";
+        button.style.top = (line.y0 / meta.height * 100 - padY) + "%";
+        button.style.width = (Math.max(line.x1 - line.x0, 8) / meta.width * 100) + "%";
+        button.style.height = (Math.max(line.y1 - line.y0, 8) / meta.height * 100 + padY * 2) + "%";
+        button.title = line.text;
+        button.addEventListener("click", () => selectLine(meta.page, line, button));
+        layer.appendChild(button);
+      });
+      sheet.querySelector(".page-lines")?.remove();
+      sheet.appendChild(layer);
+    }
+
+    function placeMarks(sheet, meta, page) {
+      const layer = document.createElement("div");
+      layer.className = "page-marks";
+      (currentJob.highlights || []).forEach((mark) => {
+        if (Number(mark.page) + 1 !== page) return;
+        let { x0, y0, x1, y1 } = mark;
+        if (meta.rotation === 90) [x0, y0, x1, y1] = [meta.base_height - mark.y1, mark.x0, meta.base_height - mark.y0, mark.x1];
+        else if (meta.rotation === 180) [x0, y0, x1, y1] = [meta.base_width - mark.x1, meta.base_height - mark.y1, meta.base_width - mark.x0, meta.base_height - mark.y0];
+        else if (meta.rotation === 270) [x0, y0, x1, y1] = [mark.y0, meta.base_width - mark.x1, mark.y1, meta.base_width - mark.x0];
+        const box = document.createElement("div");
+        box.className = "mark-box";
+        box.style.left = (x0 / meta.width * 100) + "%";
+        box.style.top = (y0 / meta.height * 100) + "%";
+        box.style.width = (Math.max(x1 - x0, 2) / meta.width * 100) + "%";
+        box.style.height = (Math.max(y1 - y0, 2) / meta.height * 100) + "%";
+        box.title = mark.label || "Change";
+        layer.appendChild(box);
+      });
+      sheet.querySelector(".page-marks")?.remove();
+      sheet.appendChild(layer);
+    }
+
+    function placeSearchMarks(sheet, meta, page) {
+      const layer = document.createElement("div");
+      layer.className = "search-marks";
+      searchMatches.filter((match) => Number(match.page) === page).forEach((match) => {
+        const mark = document.createElement("div");
+        mark.className = "search-mark";
+        mark.style.left = (match.x0 / meta.width * 100) + "%";
+        mark.style.top = (match.y0 / meta.height * 100) + "%";
+        mark.style.width = (Math.max(match.x1 - match.x0, 2) / meta.width * 100) + "%";
+        mark.style.height = (Math.max(match.y1 - match.y0, 2) / meta.height * 100) + "%";
+        layer.appendChild(mark);
+      });
+      sheet.querySelector(".search-marks")?.remove();
+      sheet.appendChild(layer);
+    }
+
+    function selectLine(page, line, button) {
+      if (!previewBody.classList.contains("editing")) setEditMode(true);
+      previewScroll.querySelectorAll(".page-line.selected").forEach((item) => item.classList.remove("selected"));
+      if (button) button.classList.add("selected");
+      selectedLine = { page, x0: line.x0, y0: line.y0, x1: line.x1, y1: line.y1, text: line.text };
+      editWhere.textContent = "Page " + page;
+      editText.value = line.text;
+      editStatus.textContent = "";
+      editText.focus();
+    }
+
+    function fillEditShortcuts() {
+      const host = document.getElementById("edit-shortcuts");
+      const items = (currentJob.highlights || []).filter((mark) => REWRITE_LABELS.has(mark.label));
+      if (!items.length) {
+        host.innerHTML = "";
+        return;
+      }
+      host.innerHTML = "<div class='bookmark-head'>Rewritten text</div>";
+      items.forEach((mark) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = mark.label + " · page " + (Number(mark.page) + 1);
+        button.addEventListener("click", () => selectMark(mark));
+        host.appendChild(button);
+      });
+    }
+
+    async function selectMark(mark) {
+      const page = Number(mark.page) + 1;
+      bookmarkLock = Date.now() + 1200;
+      setActiveBookmark(page);
+      scrollToPage(page);
+      await loadPage(page);
+      const sheet = document.getElementById("pdf-page-" + page);
+      if (!sheet) return;
+      let best = null;
+      sheet.querySelectorAll(".page-line").forEach((button) => {
+        if (!buttonHitsMark(button, mark, sheet)) return;
+        const area = parseFloat(button.style.width) * parseFloat(button.style.height);
+        if (!best || area < best.area) best = { button, area };
+      });
+      if (best) selectLine(page, lineFromButton(best.button, sheet), best.button);
+    }
+
+    function lineFromButton(button, sheet) {
+      const width = Number(sheet.dataset.pdfWidth);
+      const height = Number(sheet.dataset.pdfHeight);
+      const x0 = parseFloat(button.style.left) / 100 * width;
+      const y0 = parseFloat(button.style.top) / 100 * height;
+      const x1 = x0 + parseFloat(button.style.width) / 100 * width;
+      const y1 = y0 + parseFloat(button.style.height) / 100 * height;
+      return { x0, y0, x1, y1, text: button.title };
+    }
+
+    function buttonHitsMark(button, mark, sheet) {
+      const line = lineFromButton(button, sheet);
+      if (!line.x1) return false;
+      const meta = { width: Number(sheet.dataset.pdfWidth), height: Number(sheet.dataset.pdfHeight) };
+      const rotation = Number(sheet.dataset.rotation) || 0;
+      const baseWidth = Number(sheet.dataset.baseWidth) || meta.width;
+      const baseHeight = Number(sheet.dataset.baseHeight) || meta.height;
+      let { x0, y0, x1, y1 } = mark;
+      if (rotation === 90) [x0, y0, x1, y1] = [baseHeight - mark.y1, mark.x0, baseHeight - mark.y0, mark.x1];
+      else if (rotation === 180) [x0, y0, x1, y1] = [baseWidth - mark.x1, baseHeight - mark.y1, baseWidth - mark.x0, baseHeight - mark.y0];
+      else if (rotation === 270) [x0, y0, x1, y1] = [mark.y0, baseWidth - mark.x1, mark.y1, baseWidth - mark.x0];
+      return line.x1 > x0 && line.x0 < x1 && line.y1 > y0 && line.y0 < y1;
+    }
+
+    function applyZoom() {
+      previewScroll.querySelectorAll(".page-sheet").forEach((sheet) => {
+        sheet.style.width = (pageZoom * 100) + "%";
+      });
     }
 
     previewLink.addEventListener("click", (event) => {
@@ -1132,12 +1750,395 @@
       showPreview();
     });
     highlightChanges.addEventListener("change", () => {
-      if (results.classList.contains("preview-on")) showPreview();
+      previewBody.classList.toggle("show-marks", highlightChanges.checked);
     });
     closePreview.addEventListener("click", hidePreview);
+    editButton.addEventListener("click", () => {
+      setEditMode(!previewBody.classList.contains("editing"));
+    });
+    document.getElementById("zoom-in").addEventListener("click", () => {
+      pageZoom = Math.min(2.5, Math.round((pageZoom + 0.25) * 100) / 100);
+      applyZoom();
+    });
+
+    document.querySelectorAll(".sidebar-tabs button").forEach((button) => button.addEventListener("click", () => setSidebar(button.dataset.sidebar)));
+
+    async function refreshPreview(page = activePage) {
+      const savedPage = Math.max(1, page || 1);
+      await buildViewer();
+      await scrollToPage(savedPage);
+      activePage = savedPage;
+      activePageLabel.textContent = "Page " + savedPage;
+      refreshHistoryControls();
+    }
+
+    async function reorderThumbnail(from, to) {
+      activePage = from;
+      await runPageOperation("reorder", to);
+      setSidebar("thumbnails");
+    }
+
+    async function refreshHistoryControls() {
+      if (!currentJob) return;
+      try {
+        const response = await fetch(jobApi("/history"));
+        const state = await response.json();
+        document.getElementById("undo-edit").disabled = !state.can_undo;
+        document.getElementById("redo-edit").disabled = !state.can_redo;
+      } catch (_err) {
+        document.getElementById("undo-edit").disabled = true;
+        document.getElementById("redo-edit").disabled = true;
+      }
+    }
+
+    async function runHistory(action) {
+      if (!currentJob) return;
+      try {
+        const response = await fetch(jobApi("/history/" + action), { method: "POST" });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(formatDetail(payload.detail) || action + " failed");
+        pageActionStatus.textContent = payload.detail;
+        currentJob.highlights = payload.highlights || [];
+        highlightCount = currentJob.highlights.length;
+        syncHighlightLabel();
+        if (payload.changed) await refreshPreview(activePage);
+        await refreshHistoryControls();
+      } catch (err) {
+        pageActionStatus.textContent = err.message || String(err);
+      }
+    }
+    document.getElementById("undo-edit").addEventListener("click", () => runHistory("undo"));
+    document.getElementById("redo-edit").addEventListener("click", () => runHistory("redo"));
+
+    async function runBookmarkOperation(body) {
+      try {
+        const response = await fetch(jobApi("/bookmarks"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(formatDetail(payload.detail) || "Could not update bookmarks");
+        renderBookmarks(payload.bookmarks || [], previewScroll.querySelectorAll(".page-sheet").length);
+        pageActionStatus.textContent = payload.detail;
+        await refreshHistoryControls();
+      } catch (err) {
+        pageActionStatus.textContent = err.message || String(err);
+      }
+    }
+    document.getElementById("bookmark-add").addEventListener("click", () => {
+      const title = window.prompt("Bookmark title:");
+      if (title) {
+        const level = window.prompt("Bookmark level: enter 1 for top-level or 2 for nested", "1");
+        if (level === null) return;
+        runBookmarkOperation({ action: "add", title, page: activePage, level: Number(level) || 1 });
+      }
+    });
+    document.getElementById("bookmark-rename").addEventListener("click", () => {
+      const item = bookmarkItems[selectedBookmarkIndex];
+      if (!item) { pageActionStatus.textContent = "Select a bookmark first."; return; }
+      const title = window.prompt("Bookmark title:", item.title);
+      if (title) runBookmarkOperation({ action: "rename", index: selectedBookmarkIndex, title, page: bookmarkPage(item, previewScroll.querySelectorAll(".page-sheet").length) });
+    });
+    document.getElementById("bookmark-delete").addEventListener("click", () => {
+      const item = bookmarkItems[selectedBookmarkIndex];
+      if (!item) { pageActionStatus.textContent = "Select a bookmark first."; return; }
+      if (window.confirm("Delete bookmark ‘" + item.title + "’?")) runBookmarkOperation({ action: "delete", index: selectedBookmarkIndex });
+    });
+    document.getElementById("bookmark-validate").addEventListener("click", async () => {
+      try {
+        const response = await fetch(jobApi("/bookmarks/validate"));
+        const result = await response.json();
+        if (!response.ok) throw new Error(formatDetail(result.detail) || "Bookmark check failed");
+        pageActionStatus.textContent = result.valid ? "Bookmarks look valid." : result.issues.length + " bookmark issue(s); see bookmark list.";
+        if (result.issues.length) bookmarkList.insertAdjacentHTML("beforeend", result.issues.map((item) => "<p class='preview-note'>" + escapeHtml(item.title + " · page " + item.page + ": " + item.issue) + "</p>").join(""));
+      } catch (err) { pageActionStatus.textContent = err.message || String(err); }
+    });
+
+    async function runSearch() {
+      const query = document.getElementById("search-query").value.trim();
+      const host = document.getElementById("search-results");
+      searchMatches = [];
+      host.innerHTML = "";
+      if (!query) return;
+      try {
+        const response = await fetch(jobApi("/search?q=" + encodeURIComponent(query)));
+        const payload = await response.json();
+        if (!response.ok) throw new Error(formatDetail(payload.detail) || "Search failed");
+        searchMatches = payload.matches || [];
+        if (!searchMatches.length) host.innerHTML = "<p class='preview-note'>No text matches. Scanned pages require OCR.</p>";
+        searchMatches.forEach((match, index) => {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.textContent = "Page " + match.page + " · “" + query + "”";
+          button.addEventListener("click", async () => {
+            await scrollToPage(Number(match.page));
+            const sheet = document.getElementById("pdf-page-" + match.page);
+            if (sheet) placeSearchMarks(sheet, { width: Number(sheet.dataset.pdfWidth), height: Number(sheet.dataset.pdfHeight) }, Number(match.page));
+            const mark = sheet?.querySelectorAll(".search-mark")[searchMatches.filter((item) => item.page === match.page).indexOf(match)];
+            mark?.scrollIntoView({ block: "center", inline: "center" });
+          });
+          host.appendChild(button);
+          if (index === 0) activePage = Number(match.page);
+        });
+        for (const page of new Set(searchMatches.map((item) => Number(item.page)))) {
+          await loadPage(page);
+        }
+      } catch (err) { host.textContent = err.message || String(err); }
+    }
+    document.getElementById("search-submit").addEventListener("click", runSearch);
+    document.getElementById("search-query").addEventListener("keydown", (event) => { if (event.key === "Enter") runSearch(); });
+
+    document.getElementById("save-edited").addEventListener("click", async () => {
+      try {
+        const response = await fetch(jobApi("/save-edited"), { method: "POST" });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(formatDetail(payload.detail) || "Could not save edited copy");
+        const link = document.getElementById("download-edited");
+        link.href = apiBase() + payload.url;
+        link.classList.remove("hidden");
+        pageActionStatus.textContent = payload.detail;
+      } catch (err) { pageActionStatus.textContent = err.message || String(err); }
+    });
+    document.getElementById("zoom-out").addEventListener("click", () => {
+      pageZoom = Math.max(0.75, Math.round((pageZoom - 0.25) * 100) / 100);
+      applyZoom();
+    });
+
+    async function runPageOperation(action, targetPage, geometry = {}) {
+      if (!currentJob) return;
+      pageActionStatus.textContent = "Saving page change…";
+      try {
+        const response = await fetch(jobApi("/pages/operation"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action, page: geometry.page || activePage, target_page: targetPage || null, ...geometry }),
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(formatDetail(payload.detail) || "Could not change the pages");
+        activePage = payload.page;
+        await buildViewer();
+        await scrollToPage(activePage);
+        activePageLabel.textContent = "Page " + activePage;
+        pageActionStatus.textContent = payload.detail;
+        await refreshHistoryControls();
+      } catch (err) {
+        pageActionStatus.textContent = err.message || String(err);
+      }
+    }
+
+    document.getElementById("page-up").addEventListener("click", () => {
+      if (activePage > 1) runPageOperation("reorder", activePage - 1);
+    });
+    document.getElementById("page-down").addEventListener("click", () => {
+      const count = previewScroll.querySelectorAll(".page-sheet").length;
+      if (activePage < count) runPageOperation("reorder", activePage + 1);
+    });
+    document.getElementById("page-rotate").addEventListener("click", () => runPageOperation("rotate"));
+    document.getElementById("page-size").addEventListener("change", async (event) => {
+      const pageSize = event.target.value;
+      if (!pageSize) return;
+      if (!window.confirm("Change this page's canvas size? The existing content will not be scaled. Undo is available.")) { event.target.value = ""; return; }
+      await runPageOperation("resize", null, { page_size: pageSize });
+      event.target.value = "";
+    });
+    document.getElementById("page-delete").addEventListener("click", () => {
+      if (window.confirm("Delete page " + activePage + " from this PDF? This cannot be undone.")) runPageOperation("delete");
+    });
+    document.getElementById("page-insert").addEventListener("click", () => insertPdfFile.click());
+    insertPdfFile.addEventListener("change", async () => {
+      const file = insertPdfFile.files && insertPdfFile.files[0];
+      if (!file || !currentJob) return;
+      const form = new FormData();
+      form.append("page", String(activePage));
+      form.append("file", file);
+      pageActionStatus.textContent = "Inserting PDF…";
+      try {
+        const response = await fetch(jobApi("/pages/insert"), { method: "POST", body: form });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(formatDetail(payload.detail) || "Could not insert that PDF");
+        activePage = payload.page;
+        await buildViewer();
+        await scrollToPage(activePage);
+        activePageLabel.textContent = "Page " + activePage;
+        pageActionStatus.textContent = payload.detail;
+        await refreshHistoryControls();
+      } catch (err) {
+        pageActionStatus.textContent = err.message || String(err);
+      } finally {
+        insertPdfFile.value = "";
+      }
+    });
+
+    function activateAnnotationTool(mode) {
+      annotationMode = annotationMode === mode ? "" : mode;
+      highlightDrag = null;
+      signatureStroke = [];
+      previewBody.classList.toggle("annotating", Boolean(annotationMode));
+      document.querySelectorAll("#add-text, #add-note, #add-stamp, #add-rectangle, #add-circle, #add-line, #add-signature, #add-highlight, #add-redaction, #page-crop").forEach((button) => button.classList.toggle("on", button.id === ({text:"add-text",note:"add-note",stamp:"add-stamp",rectangle:"add-rectangle",circle:"add-circle",line:"add-line",signature:"add-signature",highlight:"add-highlight",redact:"add-redaction",crop:"page-crop"}[annotationMode])));
+      if (["text", "note", "stamp"].includes(annotationMode)) {
+        editText.value = "";
+        editText.placeholder = annotationMode === "text" ? "Text to add to the page" : "Annotation text";
+        editWhere.textContent = "Enter text, then " + (annotationMode === "text" ? "click" : "drag an area on") + " the page.";
+        setEditMode(true);
+      } else {
+        editText.placeholder = "Selected line";
+      }
+      const instructions = {
+        text: "Enter text, then click where it should appear.",
+        note: "Enter note text, then drag out a note box.",
+        stamp: "Enter stamp text, then drag out the stamp box.",
+        rectangle: "Drag to draw a rectangle.", circle: "Drag to draw an ellipse.", line: "Drag to draw a line.",
+        signature: "Draw your signature on the page with the pointer.",
+        highlight: "Drag over an area to highlight it.", redact: "Drag over sensitive content. Redaction is permanent on the edited copy.",
+        crop: "Drag to select the page area to keep.",
+      };
+      pageActionStatus.textContent = instructions[annotationMode] || "";
+    }
+    [["add-text", "text"], ["add-note", "note"], ["add-stamp", "stamp"], ["add-rectangle", "rectangle"], ["add-circle", "circle"], ["add-line", "line"], ["add-signature", "signature"], ["add-highlight", "highlight"], ["add-redaction", "redact"], ["page-crop", "crop"]].forEach(([id, mode]) => {
+      document.getElementById(id).addEventListener("click", () => activateAnnotationTool(mode));
+    });
+
+    function pagePoint(sheet, clientX, clientY) {
+      const box = sheet.getBoundingClientRect();
+      return [
+        (clientX - box.left) / box.width * Number(sheet.dataset.pdfWidth),
+        (clientY - box.top) / box.height * Number(sheet.dataset.pdfHeight),
+      ];
+    }
+
+    previewScroll.addEventListener("pointerdown", (event) => {
+      if (!annotationMode) return;
+      const sheet = event.target.closest(".page-sheet");
+      if (!sheet || !sheet.dataset.pdfWidth) return;
+      const box = sheet.getBoundingClientRect();
+      const point = pagePoint(sheet, event.clientX, event.clientY);
+      highlightDrag = { sheet, page: Number(sheet.dataset.page), box, x0: event.clientX, y0: event.clientY, points: [point] };
+      if (annotationMode === "signature") signatureStroke = [point];
+      event.preventDefault();
+    });
+    previewScroll.addEventListener("pointermove", (event) => {
+      if (annotationMode !== "signature" || !highlightDrag) return;
+      signatureStroke.push(pagePoint(highlightDrag.sheet, event.clientX, event.clientY));
+    });
+    previewScroll.addEventListener("pointerup", async (event) => {
+      if (!annotationMode || !highlightDrag) return;
+      const drag = highlightDrag;
+      highlightDrag = null;
+      const rect = {
+        page: drag.page,
+        x0: Math.min(drag.x0, event.clientX) - drag.box.left,
+        y0: Math.min(drag.y0, event.clientY) - drag.box.top,
+        x1: Math.max(drag.x0, event.clientX) - drag.box.left,
+        y1: Math.max(drag.y0, event.clientY) - drag.box.top,
+      };
+      const coords = {
+        page: drag.page,
+        x0: rect.x0 / drag.box.width * Number(drag.sheet.dataset.pdfWidth),
+        y0: rect.y0 / drag.box.height * Number(drag.sheet.dataset.pdfHeight),
+        x1: rect.x1 / drag.box.width * Number(drag.sheet.dataset.pdfWidth),
+        y1: rect.y1 / drag.box.height * Number(drag.sheet.dataset.pdfHeight),
+      };
+      if (annotationMode === "text") {
+        const [x, y] = pagePoint(drag.sheet, event.clientX, event.clientY);
+        if (!editText.value.trim()) { pageActionStatus.textContent = "Enter text in the Edit text box first."; return; }
+        if (await submitAnnotation({ action: "text", page: drag.page, x, y, text: editText.value.trim() })) editText.value = "";
+      } else if (annotationMode === "crop") {
+        if (window.confirm("Crop page " + drag.page + " to the selected area? Undo is available.")) await runPageOperation("crop", null, coords);
+      } else if (annotationMode === "redact") {
+        if (window.confirm("Permanently redact this area in the edited copy? Text and touched image pixels/line art will be removed. This cannot be undone after saving the edited copy.")) await submitAnnotation({ action: "redact", ...coords });
+      } else if (annotationMode === "highlight") {
+        await submitAnnotation({ action: "highlight", ...coords });
+      } else if (annotationMode === "signature") {
+        signatureStroke.push(pagePoint(drag.sheet, event.clientX, event.clientY));
+        await submitAnnotation({ action: "signature", ...coords, points: signatureStroke });
+      } else {
+        const action = annotationMode;
+        const text = editText.value.trim();
+        await submitAnnotation({ action, ...coords, text });
+      }
+    });
+
+    async function submitAnnotation(body) {
+      try {
+        const response = await fetch(jobApi("/annotate"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(formatDetail(payload.detail) || "Could not add the annotation");
+        const page = body.page;
+        pageLoads.delete(page);
+        pageGeometryLoads.delete(page);
+        previewVersion += 1;
+        const sheet = document.getElementById("pdf-page-" + page);
+        if (sheet) {
+          sheet.querySelector("img").src = jobApi("/pages/" + page + "?v=" + previewVersion);
+          sheet.querySelector(".page-lines")?.remove();
+        }
+        await loadPage(page);
+        pageActionStatus.textContent = payload.detail;
+        await refreshHistoryControls();
+        return true;
+      } catch (err) {
+        pageActionStatus.textContent = err.message || String(err);
+        return false;
+      }
+    }
+
+    editApply.addEventListener("click", async () => {
+      if (!selectedLine || !currentJob) {
+        editStatus.textContent = "Click a line on the page first.";
+        return;
+      }
+      editApply.disabled = true;
+      editStatus.textContent = "Saving…";
+      try {
+        const response = await fetch(jobApi("/edit"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            page: selectedLine.page,
+            x0: selectedLine.x0,
+            y0: selectedLine.y0,
+            x1: selectedLine.x1,
+            y1: selectedLine.y1,
+            text: editText.value,
+          }),
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(formatDetail(payload.detail) || "Could not update that line");
+        currentJob.highlights = payload.highlights || [];
+        highlightCount = currentJob.highlights.length;
+        syncHighlightLabel();
+        fillEditShortcuts();
+        const page = selectedLine.page;
+        selectedLine = null;
+        editText.value = "";
+        editWhere.textContent = "No line selected.";
+        editStatus.textContent = payload.detail || "Saved.";
+        pageLoads.delete(page);
+        pageGeometryLoads.delete(page);
+        previewVersion += 1;
+        const sheet = document.getElementById("pdf-page-" + page);
+        if (sheet) {
+          sheet.querySelector(".page-lines")?.remove();
+          sheet.querySelector(".page-marks")?.remove();
+        }
+        await loadPage(page);
+        await refreshHistoryControls();
+      } catch (err) {
+        editStatus.textContent = err.message || String(err);
+      } finally {
+        editApply.disabled = false;
+      }
+    });
 
     function showResults(job) {
       hidePreview();
+      resetViewer();
+      currentJob = job;
       results.classList.add("open");
       app.classList.add("has-results");
       setUploadOpen(false);
@@ -1159,6 +2160,9 @@
         ? names.map((name) => `<li>${escapeHtml(name)}</li>`).join("")
         : "<li>No source files</li>";
       link.href = url;
+      document.getElementById("download-original").href = apiBase() + "/api/jobs/" + job.job_id + "/original-pdf";
+      document.getElementById("download-edited").classList.add("hidden");
+      refreshHistoryControls();
       link.setAttribute("download", job.filename || "valuation.pdf");
       const email = document.getElementById("email-link");
       const eml = document.getElementById("eml-link");

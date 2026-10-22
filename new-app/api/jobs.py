@@ -6,11 +6,17 @@ from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, Response
+from pydantic import BaseModel, Field
 
 from config.settings import MAX_FILE_BYTES, MAX_FILES, OUTPUT_DIR
-from models.job import JobResult
+from models.job import HighlightMark, JobResult
 from services.change_marks import apply_highlights, load_marks
 from services.file_order import list_file_meta
+from services.preview_view import add_annotation, add_highlight, add_secure_redaction, add_text, modify_pages
+from services.preview_view import outline as preview_outline
+from services.preview_view import page_lines, page_png, replace_line, search_pdf, update_bookmark, validate_bookmarks
+from services.preview_history import abort as abort_edit
+from services.preview_history import active_path, commit as commit_edit, edited_copy_path, editable_path, history_state, redo as redo_edit, snapshot_before, undo as undo_edit
 from services.folder_loader import apply_file_order, list_folder_files, load_pdfs_from_folder
 from services.pdf_pages import expand_uploads_by_page, pdf_page_count, pdf_page_texts
 from services.orchestrator import process_uploads
@@ -268,7 +274,8 @@ def preview_job_pdf(job_id: str, highlight: bool = False) -> Response:
             status_code=404,
             detail="Assembled PDF not found. Restart python main.py, then click Process package again. Do not reuse an old preview URL.",
         )
-    path, filename = found
+    original, filename = found
+    path = active_path(original)
     if not highlight:
         return FileResponse(
             path,
@@ -293,6 +300,309 @@ def _preview_marks(job_id: str, pdf_path: Path) -> list[dict]:
     if job is not None:
         return [item.model_dump() for item in job.highlights]
     return load_marks(pdf_path)
+
+
+class PreviewEdit(BaseModel):
+    page: int = Field(ge=1)
+    x0: float
+    y0: float
+    x1: float
+    y1: float
+    text: str = ""
+
+
+class PageOperation(BaseModel):
+    action: str
+    page: int = Field(ge=1)
+    target_page: int | None = Field(default=None, ge=1)
+    x0: float | None = None
+    y0: float | None = None
+    x1: float | None = None
+    y1: float | None = None
+    page_size: str | None = None
+
+
+class PreviewAnnotation(BaseModel):
+    action: str
+    page: int = Field(ge=1)
+    x: float | None = None
+    y: float | None = None
+    x0: float | None = None
+    y0: float | None = None
+    x1: float | None = None
+    y1: float | None = None
+    text: str = ""
+    points: list[list[float]] = Field(default_factory=list)
+
+
+class BookmarkOperation(BaseModel):
+    action: str
+    index: int | None = None
+    title: str = ""
+    page: int = Field(default=1, ge=1)
+    level: int = Field(default=1, ge=1, le=2)
+
+
+def _job_pdf(job_id: str) -> tuple[Path, str]:
+    found = _saved_pdf(job_id)
+    if not found:
+        raise HTTPException(
+            status_code=404,
+            detail="Assembled PDF not found. Restart python main.py, then click Process package again.",
+        )
+    original, filename = found
+    return active_path(original), filename
+
+
+def _editable_job_pdf(job_id: str) -> tuple[Path, str]:
+    found = _saved_pdf(job_id)
+    if not found:
+        raise HTTPException(status_code=404, detail="Assembled PDF not found. Process the package again.")
+    original, filename = found
+    return editable_path(original), filename
+
+
+@router.get("/jobs/{job_id}/outline")
+def job_outline(job_id: str) -> dict:
+    path, _filename = _job_pdf(job_id)
+    return preview_outline(path)
+
+
+@router.get("/jobs/{job_id}/pages/{page_no}")
+def job_page_image(job_id: str, page_no: int) -> Response:
+    path, _filename = _job_pdf(job_id)
+    try:
+        data = page_png(path, page_no)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return Response(content=data, media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
+@router.get("/jobs/{job_id}/pages/{page_no}/thumbnail")
+def job_page_thumbnail(job_id: str, page_no: int) -> Response:
+    path, _filename = _job_pdf(job_id)
+    try:
+        data = page_png(path, page_no, scale=0.35)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return Response(content=data, media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
+@router.get("/jobs/{job_id}/pages/{page_no}/lines")
+def job_page_lines(job_id: str, page_no: int) -> dict:
+    path, _filename = _job_pdf(job_id)
+    try:
+        return page_lines(path, page_no)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/jobs/{job_id}/edit")
+def edit_job_page(job_id: str, body: PreviewEdit) -> dict:
+    path, _filename = _editable_job_pdf(job_id)
+    job = JOBS.get(job_id)
+    marks = _preview_marks(job_id, path)
+    snapshot = snapshot_before(path)
+    try:
+        updated = replace_line(
+            path,
+            body.page,
+            (body.x0, body.y0, body.x1, body.y1),
+            body.text,
+            marks,
+        )
+        commit_edit(path, snapshot)
+    except ValueError as exc:
+        abort_edit(snapshot)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception:
+        abort_edit(snapshot)
+        raise
+    if job is not None:
+        job.highlights = [HighlightMark(**item) for item in updated]
+    return {"page": body.page, "highlights": updated, "detail": f"Updated page {body.page}."}
+
+
+@router.post("/jobs/{job_id}/pages/operation")
+def operate_job_pages(job_id: str, body: PageOperation) -> dict:
+    path, _filename = _editable_job_pdf(job_id)
+    job = JOBS.get(job_id)
+    marks = _preview_marks(job_id, path)
+    if body.action in {"crop"} and None in (body.x0, body.y0, body.x1, body.y1):
+        raise HTTPException(status_code=400, detail="Select the page area first.")
+    snapshot = snapshot_before(path)
+    try:
+        page, page_count, updated = modify_pages(
+            path,
+            body.action,
+            body.page,
+            marks,
+            target_page=body.target_page,
+            rect=(body.x0, body.y0, body.x1, body.y1) if None not in (body.x0, body.y0, body.x1, body.y1) else None,
+            page_size=body.page_size,
+        )
+        commit_edit(path, snapshot)
+    except ValueError as exc:
+        abort_edit(snapshot)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception:
+        abort_edit(snapshot)
+        raise
+    if job is not None:
+        job.highlights = [HighlightMark(**item) for item in updated]
+    return {"page": page, "page_count": page_count, "detail": f"Page operation complete: {body.action}."}
+
+
+@router.post("/jobs/{job_id}/pages/insert")
+async def insert_job_pages(job_id: str, page: int = Form(ge=1), file: UploadFile = File(...)) -> dict:
+    path, _filename = _editable_job_pdf(job_id)
+    if not (file.filename or "").lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Choose a PDF file to insert.")
+    data = await file.read(MAX_FILE_BYTES + 1)
+    if not data or len(data) > MAX_FILE_BYTES:
+        raise HTTPException(status_code=400, detail=f"The inserted PDF must be under {MAX_FILE_BYTES // (1024 * 1024)} MB.")
+    job = JOBS.get(job_id)
+    marks = _preview_marks(job_id, path)
+    snapshot = snapshot_before(path)
+    try:
+        inserted_at, page_count, updated = modify_pages(
+            path,
+            "insert",
+            page,
+            marks,
+            inserted_pdf=data,
+        )
+        commit_edit(path, snapshot)
+    except ValueError as exc:
+        abort_edit(snapshot)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception:
+        abort_edit(snapshot)
+        raise
+    if job is not None:
+        job.highlights = [HighlightMark(**item) for item in updated]
+    return {"page": inserted_at, "page_count": page_count, "detail": "PDF pages inserted."}
+
+
+@router.post("/jobs/{job_id}/annotate")
+def annotate_job_pdf(job_id: str, body: PreviewAnnotation) -> dict:
+    path, _filename = _editable_job_pdf(job_id)
+    snapshot = snapshot_before(path)
+    try:
+        if body.action == "text" and body.x is not None and body.y is not None:
+            add_text(path, body.page, body.x, body.y, body.text)
+        elif body.action == "highlight" and None not in (body.x0, body.y0, body.x1, body.y1):
+            add_highlight(path, body.page, (body.x0, body.y0, body.x1, body.y1))
+        else:
+            rect = (body.x0, body.y0, body.x1, body.y1)
+            if body.action == "redact" and None not in rect:
+                removed_chars = add_secure_redaction(path, body.page, rect)
+            elif body.action in {"note", "rectangle", "circle", "line", "stamp", "signature"} and None not in rect:
+                add_annotation(path, body.page, body.action, rect, text=body.text, points=body.points)
+            else:
+                raise ValueError("Choose a tool and provide its position on the page.")
+            commit_edit(path, snapshot)
+            return {"page": body.page, "detail": f"Permanent redaction applied; {removed_chars} text character(s) removed." if body.action == "redact" else f"{body.action.title()} added to PDF."}
+        commit_edit(path, snapshot)
+    except ValueError as exc:
+        abort_edit(snapshot)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception:
+        abort_edit(snapshot)
+        raise
+    return {"page": body.page, "detail": "PDF annotation saved."}
+
+
+@router.get("/jobs/{job_id}/search")
+def search_job_pdf(job_id: str, q: str = "") -> dict:
+    path, _filename = _job_pdf(job_id)
+    try:
+        matches = search_pdf(path, q)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"query": q, "matches": matches}
+
+
+@router.post("/jobs/{job_id}/bookmarks")
+def edit_job_bookmarks(job_id: str, body: BookmarkOperation) -> dict:
+    path, _filename = _editable_job_pdf(job_id)
+    snapshot = snapshot_before(path)
+    try:
+        bookmarks = update_bookmark(path, body.action, index=body.index, title=body.title, page=body.page, level=body.level)
+        commit_edit(path, snapshot)
+    except ValueError as exc:
+        abort_edit(snapshot)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"bookmarks": bookmarks, "detail": "Bookmarks updated."}
+
+
+@router.get("/jobs/{job_id}/bookmarks/validate")
+def validate_job_bookmarks(job_id: str) -> dict:
+    path, _filename = _job_pdf(job_id)
+    return validate_bookmarks(path)
+
+
+@router.post("/jobs/{job_id}/history/{action}")
+def history_job_pdf(job_id: str, action: str) -> dict:
+    path, _filename = _editable_job_pdf(job_id)
+    if action == "undo":
+        changed = undo_edit(path)
+    elif action == "redo":
+        changed = redo_edit(path)
+    else:
+        raise HTTPException(status_code=404, detail="Unknown history operation.")
+    if changed:
+        from services.preview_view import _PNG_CACHE
+        _PNG_CACHE.clear()
+    job = JOBS.get(job_id)
+    marks = load_marks(path)
+    if job is not None:
+        job.highlights = [HighlightMark(**item) for item in marks]
+        marks = [item.model_dump() for item in job.highlights]
+    return {"changed": changed, "highlights": marks, **history_state(path), "detail": f"{action.title()} complete." if changed else f"Nothing to {action}."}
+
+
+@router.get("/jobs/{job_id}/history")
+def get_job_history(job_id: str) -> dict:
+    found = _saved_pdf(job_id)
+    if not found:
+        raise HTTPException(status_code=404, detail="Assembled PDF not found.")
+    return history_state(active_path(found[0]))
+
+
+@router.post("/jobs/{job_id}/save-edited")
+def save_edited_job_pdf(job_id: str) -> dict:
+    found = _saved_pdf(job_id)
+    if not found:
+        raise HTTPException(status_code=404, detail="Assembled PDF not found.")
+    original, _filename = found
+    working = editable_path(original)
+    if working.stat().st_size == original.stat().st_size and working.read_bytes() == original.read_bytes():
+        raise HTTPException(status_code=400, detail="No preview edits have been made yet.")
+    destination = edited_copy_path(original)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(working.read_bytes())
+    return {"filename": destination.name, "url": f"/api/jobs/{job_id}/edited-pdf", "detail": "Separate edited copy saved. Original package unchanged."}
+
+
+@router.get("/jobs/{job_id}/edited-pdf")
+def download_edited_job_pdf(job_id: str) -> FileResponse:
+    found = _saved_pdf(job_id)
+    if not found:
+        raise HTTPException(status_code=404, detail="Assembled PDF not found.")
+    path = edited_copy_path(found[0])
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Save an edited copy from the preview first.")
+    return FileResponse(path, media_type="application/pdf", filename=path.name, content_disposition_type="attachment")
+
+
+@router.get("/jobs/{job_id}/original-pdf")
+def download_original_job_pdf(job_id: str) -> FileResponse:
+    found = _saved_pdf(job_id)
+    if not found:
+        raise HTTPException(status_code=404, detail="Original assembled PDF not found.")
+    path, filename = found
+    return FileResponse(path, media_type="application/pdf", filename=filename, content_disposition_type="attachment")
 
 
 @router.get("/jobs/{job_id}/email")

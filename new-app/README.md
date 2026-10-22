@@ -4,7 +4,7 @@ Greenfield app in `new-app/`. It does **not** use the existing POC backend or `p
 
 Phase 1: upload PDFs **or** a Valuation Package folder path → assemble in TEST23 SOP order → extract a Plan Profile → preview keep/remove rules → add bookmarks → save `{PlanNumber}_{BeginningPlanYear}-Valuation.pdf`.
 
-Page removal, bookmarks, SSN scan, and Outlook are not applied yet.
+The preview editor supports manual page rotation, reordering, deletion and insertion; crop and page-canvas sizing; text search; bookmark add/rename/delete/validation; undo/redo; text replacement/insertion; notes, stamps, shapes, drawn signatures and highlights; and permanent redaction. Preview edits use a working copy, leaving the assembled original untouched; choose **Save edited copy** to download a separate edited PDF. Search uses the PDF text layer (scanned-image pages need OCR), page-size changes adjust the canvas without scaling the page content, and drawn signatures are visual annotations rather than cryptographic signatures. Automatic rule-driven page removal, SSN scanning and Outlook integration are not applied yet.
 
 Developer onboarding (folder map, pipeline, how to change rules): [`docs/Developer-Guide.md`](docs/Developer-Guide.md).  
 Solution architecture (for submission / handover): [`docs/Solution-Architecture.md`](docs/Solution-Architecture.md).

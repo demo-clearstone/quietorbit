@@ -8,7 +8,7 @@ import yaml
 from config.settings import CONFIG_DIR
 from models.plan_profile import PlanProfile
 from services.file_order import load_section_specs
-from services.plan_config import bookmark_overrides, is_457_plan, package_flags
+from services.plan_config import bookmark_overrides, is_403b_plan
 
 _ADP_FILE = re.compile(r"\badp\s*test\b")
 _ACP_FILE = re.compile(r"\bacp\s*test\b")
@@ -24,6 +24,38 @@ _ADP_CHILD = (
 )
 _ADP_CHILD_ORDER = ("Summary", "Detail", "Corrections")
 _ADP_TITLES = {"ADP/ACP Tests", "ADP Test", "ACP Test"}
+_SOP_SECTION_ORDER = (
+    "Cover Letter",
+    "Test Summary",
+    "Contribution Analysis",
+    "HCE/Key",
+    "Future HCE",
+    "ADP/ACP",
+    "402(g)",
+    "410(b)",
+    "401(a)(4)",
+    "Average Benefit Percentage Test",
+    "414(s)",
+    "415",
+    "Top Heavy",
+    "Census",
+)
+_SECTION_HEADINGS: dict[str, re.Pattern[str]] = {
+    "Cover Letter": re.compile(r"^(?:cover letter|cover page)$", re.I),
+    "Test Summary": re.compile(r"^(?:compliance testing summary of results|compliance summary|test summary)$", re.I),
+    "Contribution Analysis": re.compile(r"^contribution analysis(?:\s+loc(?:ation)?\s*\d+)?$", re.I),
+    "HCE/Key": re.compile(r"^(?:hce\s*/\s*key|hce\s*/\s*key employee determinations|hce\s+key)$", re.I),
+    "Future HCE": re.compile(r"^(?:future\s+hce|future\s+highly compensated employee(?:s)?(?:\s+projection)?)$", re.I),
+    "ADP/ACP": re.compile(r"^(?:adp\s*/\s*acp\s+(?:summary|test results|tests?)|adp\s+(?:summary|test results|tests?)|acp\s+(?:summary|test results|tests?))$", re.I),
+    "402(g)": re.compile(r"^(?:402\s*\(\s*g\s*\)|402\s*g)(?:\s+(?:deferral limits?|test))?$", re.I),
+    "410(b)": re.compile(r"^(?:410\s*\(\s*b\s*\)|410\s*b)(?:\s+(?:coverage\s+)?test)?$", re.I),
+    "401(a)(4)": re.compile(r"^401\s*\(\s*a\s*\)\s*\(\s*4\s*\)(?:\s+test)?$", re.I),
+    "Average Benefit Percentage Test": re.compile(r"^(?:average benefit percentage(?: test)?|abpt)$", re.I),
+    "414(s)": re.compile(r"^414\s*\(\s*s\s*\)(?:\s+test)?$", re.I),
+    "415": re.compile(r"^(?:415(?:\s*\(\s*c\s*\))?|415\s+limit)(?:\s+(?:annual additions\s+)?test)?$", re.I),
+    "Top Heavy": re.compile(r"^(?:top\s*[- ]?heavy)(?:\s+test)?$", re.I),
+    "Census": re.compile(r"^census(?:\s+report)?$", re.I),
+}
 _WRAPPER_PAGE = re.compile(
     r"cover letter|as you requested|we are pleased to provide|"
     r"result summary|test summary|summary of results|summary of compliance|"
@@ -57,40 +89,28 @@ def add_bookmarks(
     """Write SOP §O bookmarks for detected sections (TEST23.docx)."""
     titles = _bookmark_map()
     overrides = bookmark_overrides(profile.plan_type)
-    keep_brf = bool(package_flags(profile.plan_type).get("keep_brf"))
-    testing_only = (
-        is_testing_only(doc) and not profile.midyear and not is_457_plan(profile.plan_type)
-    )
     entries: list[tuple[str, int]] = []
-    seen: set[str] = set()
-    for section in profile.detected_sections:
-        if testing_only and section.name not in _ONLY_BOOKMARKS:
+    toc: list[list] = []
+    for name in _SOP_SECTION_ORDER:
+        title = overrides.get(name) or titles.get(name)
+        if name == "ADP/ACP" and name not in overrides:
+            title = adp_acp_bookmark_title(profile, doc, source_files)
+        page = _find_section_page(doc, name)
+        if page is None:
             continue
-        if section.name == "BRF" and not keep_brf:
-            continue
-        if section.name in {"Variance", "PS Variance", "SHNE Variance", "Compensation Limit Failure Summary"}:
-            continue
-        title = overrides.get(section.name) or titles.get(section.name)
         if not title:
             continue
-        if section.name == "ADP/ACP" and section.name not in overrides:
-            title = adp_acp_bookmark_title(profile, doc, source_files)
-        if title in seen:
-            continue
-        page = _bookmark_page(doc, section.name, section.page)
         entries.append((title, page))
-        seen.add(title)
-    toc: list[list] = []
     pages = [page for _title, page in entries]
     for index, (title, page) in enumerate(entries):
-        toc.append([1, title, page, _destination(page)])
+        toc.append([1, title, page])
         if title in _ADP_TITLES:
-            end = pages[index + 1] if index + 1 < len(pages) else doc.page_count + 1
-            if end <= page:
-                end = doc.page_count + 1
-            for child, child_page in _adp_children(doc, page, end):
-                toc.append([2, child, child_page, _destination(child_page)])
-    doc.set_toc(toc)
+            for child, child_page in _adp_children(doc, page, doc.page_count + 1):
+                toc.append([2, child, child_page])
+    # collapse=0 keeps child bookmarks expanded. A zoom of 0 on a GoTo action is
+    # not a valid destination: the viewer then stays put and closes the sidebar.
+    doc.set_toc(toc, collapse=0)
+    _normalize_outline_destinations(doc)
     return len([row for row in toc if row[0] == 1])
 
 
@@ -121,27 +141,84 @@ def is_testing_only(doc: fitz.Document) -> bool:
     return True
 
 
-def _destination(page: int) -> dict:
-    return {
-        "kind": fitz.LINK_GOTO,
-        "page": page - 1,
-        "to": fitz.Point(0, 0),
-        "zoom": 0,
-    }
+def _normalize_outline_destinations(doc: fitz.Document) -> None:
+    """Use /Dest with a null zoom so a click opens that page and leaves the sidebar up.
+
+    PyMuPDF writes /A << /S /GoTo /D [page /XYZ x y 0] >>. Zoom 0 is invalid, and an
+    action (instead of /Dest) makes Chrome and Safari close the bookmark panel.
+    """
+    for xref in range(1, doc.xref_length()):
+        try:
+            raw = doc.xref_object(xref)
+        except Exception:
+            continue
+        if "/Title" not in raw or "/A" not in raw:
+            continue
+        kind, action = doc.xref_get_key(xref, "A")
+        if kind != "dict":
+            continue
+        match = re.search(r"/D\s*(\[[^\]]+\])", action)
+        if not match:
+            continue
+        dest = re.sub(r"\s+0(\s*\])", r" null\1", match.group(1))
+        doc.xref_set_key(xref, "Dest", dest)
+        obj = re.sub(r"/A\s+<<.*?>>", "", doc.xref_object(xref), count=1, flags=re.S)
+        obj = re.sub(r"/A\s+null", "", obj, count=1)
+        doc.update_object(xref, obj)
 
 
 def _adp_children(doc: fitz.Document, start_page: int, end_page: int) -> list[tuple[str, int]]:
     """Summary, Detail, then Corrections inside the ADP/ACP report."""
     found: dict[str, int] = {}
-    last = min(end_page, doc.page_count + 1)
-    for index in range(max(start_page, 1) - 1, last - 1):
-        lines = [line.strip() for line in (doc[index].get_text("text") or "").splitlines() if line.strip()]
-        head = " ".join(lines[:4])
+    patterns = {
+        "Summary": re.compile(r"^(?:adp\s*/\s*acp\s+)?(?:adp\s*/\s*acp\s+)?summary$", re.I),
+        "Detail": re.compile(r"^(?:adp\s*/\s*acp\s+)?(?:test\s+)?detail$", re.I),
+        "Corrections": re.compile(r"^(?:adp\s*/\s*acp\s+)?corrections?$", re.I),
+    }
+    for index, page in enumerate(doc):
+        if index + 1 < start_page or index + 1 >= end_page:
+            continue
+        if _is_summary_or_overview(page):
+            continue
+        lines = _heading_lines(page)
         for title, pattern in _ADP_CHILD:
-            if pattern.search(head):
+            heading = patterns[title]
+            if any(heading.fullmatch(line) for line in lines):
                 found.setdefault(title, index + 1)
                 break
     return [(title, found[title]) for title in _ADP_CHILD_ORDER if title in found]
+
+
+def _heading_lines(page: fitz.Page) -> list[str]:
+    """Return the page's printed headings, excluding body-text mentions."""
+    return [
+        re.sub(r"\s+", " ", line).strip(" \t\r\n:·")
+        for line in (page.get_text("text") or "").splitlines()[:14]
+        if line.strip()
+    ]
+
+
+def _find_section_page(doc: fitz.Document, section_name: str) -> int | None:
+    if section_name == "Cover Letter":
+        return 1 if doc.page_count else None
+    pattern = _SECTION_HEADINGS.get(section_name)
+    if pattern is None:
+        return None
+    for index, page in enumerate(doc):
+        if section_name != "Test Summary" and _is_summary_or_overview(page):
+            continue
+        if any(pattern.fullmatch(line) for line in _heading_lines(page)):
+            return index + 1
+    return None
+
+
+def _is_summary_or_overview(page: fitz.Page) -> bool:
+    from services.package_polish import is_compliance_overview
+
+    text = page.get_text("text") or ""
+    if is_compliance_overview(text):
+        return True
+    return any(_SECTION_HEADINGS["Test Summary"].fullmatch(line) for line in _heading_lines(page))
 
 
 def _bookmark_page(doc: fitz.Document, section_name: str, detected_page: int) -> int:
