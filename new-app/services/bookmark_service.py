@@ -8,7 +8,7 @@ import yaml
 from config.settings import CONFIG_DIR
 from models.plan_profile import PlanProfile
 from services.file_order import load_section_specs
-from services.plan_config import bookmark_overrides, is_403b_plan
+from services.plan_config import bookmark_overrides, is_403b_plan, package_flags
 
 _ADP_FILE = re.compile(r"\badp\s*test\b")
 _ACP_FILE = re.compile(r"\bacp\s*test\b")
@@ -35,6 +35,7 @@ _SOP_SECTION_ORDER = (
     "410(b)",
     "401(a)(4)",
     "Average Benefit Percentage Test",
+    "BRF",
     "414(s)",
     "415",
     "Top Heavy",
@@ -51,6 +52,7 @@ _SECTION_HEADINGS: dict[str, re.Pattern[str]] = {
     "410(b)": re.compile(r"^(?:410\s*\(\s*b\s*\)|410\s*b)(?:\s+(?:coverage\s+)?test)?$", re.I),
     "401(a)(4)": re.compile(r"^401\s*\(\s*a\s*\)\s*\(\s*4\s*\)(?:\s+test)?$", re.I),
     "Average Benefit Percentage Test": re.compile(r"^(?:average benefit percentage(?: test)?|abpt)$", re.I),
+    "BRF": re.compile(r"^(?:benefits,? rights(?: and features)?(?: test)?|brf test)$", re.I),
     "414(s)": re.compile(r"^414\s*\(\s*s\s*\)(?:\s+test)?$", re.I),
     "415": re.compile(r"^(?:415(?:\s*\(\s*c\s*\))?|415\s+limit)(?:\s+(?:annual additions\s+)?test)?$", re.I),
     "Top Heavy": re.compile(r"^(?:top\s*[- ]?heavy)(?:\s+test)?$", re.I),
@@ -89,12 +91,15 @@ def add_bookmarks(
     """Write SOP §O bookmarks for detected sections (TEST23.docx)."""
     titles = _bookmark_map()
     overrides = bookmark_overrides(profile.plan_type)
+    keep_brf = bool(package_flags(profile.plan_type).get("keep_brf"))
     entries: list[tuple[str, int]] = []
     toc: list[list] = []
     for name in _SOP_SECTION_ORDER:
         title = overrides.get(name) or titles.get(name)
         if name == "ADP/ACP" and name not in overrides:
             title = adp_acp_bookmark_title(profile, doc, source_files)
+        if name == "BRF" and not keep_brf:
+            continue
         page = _find_section_page(doc, name)
         if page is None:
             continue

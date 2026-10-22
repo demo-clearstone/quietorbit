@@ -8,6 +8,7 @@ package:
   ignore_adp_results: true
   acp_notice_amount: true
 
+
 bookmarks:
   HCE/Key: HCE
   ADP/ACP: ACP Test
@@ -50,6 +51,8 @@ rules:
           equals: CURRENT
         - field: after_12_months
           equals: true
+        - field: returns_required
+          equals: true
         - field: acp_failed
           equals: true
     else: remove
@@ -61,6 +64,8 @@ rules:
         - field: testing_method
           equals: PRIOR
         - field: after_12_months
+          equals: true
+        - field: returns_required
           equals: true
         - field: acp_failed
           equals: true

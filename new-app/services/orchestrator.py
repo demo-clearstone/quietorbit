@@ -56,7 +56,11 @@ def process_uploads(
     highlights: list[dict] = []
     pdfs, excels = _split_uploads(uploads)
     valuation, summary_texts = _split_summaries(pdfs)
-    is_403b = package_polish.package_is_403b(valuation)
+    excel_profiles = [(name, source_profile.parse_excel(data)) for name, data in excels]
+    is_403b = package_polish.package_is_403b(valuation) or any(
+        str(parsed.get("plan_type") or "").lower().startswith("403")
+        for _name, parsed in excel_profiles
+    )
     is_midyear = midyear.package_is_midyear(valuation)
     valuation, brf_notes = package_polish.exclude_brf_uploads(valuation, keep_brf=is_403b)
     warnings.extend(brf_notes)
@@ -91,14 +95,13 @@ def process_uploads(
         cover_company = profile.company_name
         cover_address = profile.company_address
         cover_pye = profile.plan_year_end
-        overlays: list[dict] = []
-        overlay_sources: list[str] = []
+        excel_overlays: list[dict] = []
+        excel_sources: list[str] = []
         excel_plan_name: str | None = None
         excel_company: str | None = None
         excel_address: str | None = None
         excel_pye: str | None = None
-        for name, data in excels:
-            parsed = source_profile.parse_excel(data)
+        for name, parsed in excel_profiles:
             if parsed.get("plan_name"):
                 excel_plan_name = str(parsed["plan_name"])
             if parsed.get("company_name"):
@@ -107,14 +110,16 @@ def process_uploads(
                 excel_address = str(parsed["company_address"])
             if parsed.get("plan_year_end"):
                 excel_pye = str(parsed["plan_year_end"])
-            overlays.append(parsed)
-            overlay_sources.append(f"Excel: {name}")
+            excel_overlays.append(parsed)
+            excel_sources.append(f"Excel: {name}")
             warnings.append(f"Read Val Assembly Excel: {name}")
+        summary_overlays: list[dict] = []
+        summary_sources: list[str] = []
         for name, text in summary_texts:
-            overlays.append(source_profile.parse_summary_text(text))
-            overlay_sources.append(f"Result Summary: {name}")
+            summary_overlays.append(source_profile.parse_summary_text(text))
+            summary_sources.append(f"Result Summary: {name}")
             warnings.append(f"Read Compliance Testing Summary: {name}")
-        if not summary_texts:
+        if not summary_overlays:
             merged_text = "\n".join((page.get_text("text") or "") for page in doc)
             if re.search(
                 r"compliance testing summary of results|result summary|test summary",
@@ -123,8 +128,12 @@ def process_uploads(
             ):
                 parsed = source_profile.parse_summary_text(merged_text)
                 if parsed.get("adp_failed") is not None or parsed.get("fail_402g") is not None:
-                    overlays.append(parsed)
-                    overlay_sources.append("Result Summary embedded in PDF package")
+                    summary_overlays.append(parsed)
+                    summary_sources.append("Result Summary embedded in PDF package")
+        # Summary tests are authoritative for pass/fail. Excel remains the final
+        # overlay for fields it explicitly provides (identity, method, HCE flags).
+        overlays = summary_overlays + excel_overlays
+        overlay_sources = summary_sources + excel_sources
         explicit_contributions = any(
             "contributions_required" in overlay for overlay in overlays
         )
@@ -134,6 +143,9 @@ def process_uploads(
             warnings,
             sources=overlay_sources,
         )
+        if profile.top_heavy_percent is not None:
+            profile.top_heavy = profile.top_heavy_percent > 60
+            profile.extra.setdefault("field_sources", {})["top_heavy"] = "Top-heavy percentage; threshold is greater than 60%"
         section_names = {
             str(spec.get("name"))
             for name, _data in ordered
@@ -206,6 +218,7 @@ def process_uploads(
                     plan_year_end=profile.plan_year_end,
                 )
             )
+        warnings.extend(package_polish.renumber_footers(doc))
         profile.detected_sections = pdf_extractor.detect_sections(doc)
         profile_debug_path = str(
             profile_debug.write_profile_debug(
@@ -346,16 +359,19 @@ def _split_summaries(pdfs: list[tuple[str, bytes]]) -> tuple[list[tuple[str, byt
     for name, data in pdfs:
         text = _pdf_text(data)
         named_summary = bool(re.search(r"result\s*summ|test\s*summ", name, re.I))
+        is_valuation_package = bool(re.search(r"valuation\s*(?:pkg|package)", name, re.I))
         # A valuation package mentions the summary page inside Top Heavy wording.
         # Only a document that opens with the summary is a summary sidecar.
-        opens_with_summary = "compliance testing summary of results" in text[:2000].lower()
-        if opens_with_summary or named_summary:
+        first_lines = [line.strip() for line in text.splitlines() if line.strip()][:6]
+        opens_with_summary = bool(first_lines) and bool(
+            re.match(r"^(?:compliance testing summary of results|result summary|test summary|compliance summary)\b", first_lines[0], re.I)
+        )
+        if (opens_with_summary and not is_valuation_package) or named_summary:
             summaries.append((name, text))
-            # A named Result/Test Summary is both an extraction source and a
-            # required package page. A generic compliance-summary sidecar is
-            # extraction-only for backward compatibility.
-            if named_summary:
-                valuation.append((name, data))
+            # Summary PDFs are both extraction sources and required package pages,
+            # regardless of filename. A summary embedded in a Valuation Pkg is
+            # already part of that document and therefore is not duplicated.
+            valuation.append((name, data))
         else:
             valuation.append((name, data))
     return valuation, summaries

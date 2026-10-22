@@ -90,11 +90,11 @@ Do not look in `backend/`, `frontend/`, `electron/`, or the root `pdf-process.py
 
 `process_uploads` in `services/orchestrator.py` is the function to scroll while you talk. The steps below are that function, in order.
 
-**1. Split uploads.** PDFs stay in the package. `.xlsx` files are the valuation log and are not merged into the PDF. A PDF whose text contains “compliance testing summary of results” is read for pass/fail and is not added as an extra report.
+**1. Split uploads.** PDFs stay in the package. `.xlsx` files are the valuation log and are not merged into the PDF. A separately uploaded Result/Test Summary PDF is read for pass/fail and included in the merged PDF even when its filename is generic; an embedded summary in the Valuation Pkg is not duplicated.
 
 **2. Drop a BRF report file.** `package_polish.exclude_brf_uploads`. The Result Summary line can stay. The BRF report file does not go into the merge. If every file was a BRF report, Process stops with an error.
 
-**3. Order.** If Auto-order is on, `file_order.order_uploads` sorts by `sections.yaml`. The longest keyword wins, so `SHMaVar` is Compensation Limit and not a normal variance file. Files named Loc 1 sort before Loc 2 inside the same section. Unknown names sort last. If Auto-order is off, the list on screen is the order.
+**3. Order.** If Auto-order is on, `file_order.order_uploads` follows the explicit `combine_order` in `sections.yaml`, then splits report names by their longest keyword. `SHMaVar` is Compensation Limit, not normal variance. Files named Loc 1 sort before Loc 2 inside the same section. Unknown names sort last. If Auto-order is off, the list on screen is the order. The final edited PDF gets a second TEST23 order check; when Assembly stops is on (default), an order mismatch stops saving.
 
 **4. Merge.** `pdf_assembler.merge_pdfs`. One PyMuPDF document. Encrypted PDFs and empty files are rejected.
 
@@ -108,11 +108,11 @@ A page that does not carry one of those headings is left where it is.
 
 **6. Read the PDF.** `pdf_extractor.extract_plan_profile` fills a `PlanProfile` from the cover and the rest of the text. Patterns live in `config/field_patterns.py`. If an ADP/ACP Test Results page does not say Prior Testing, the method is set to CURRENT.
 
-**7. Overlay Excel and the summary.** `source_profile.parse_excel` and `parse_summary_text`, then `merge_overlays`. Excel wins for the fields it contains, because the overlay is applied after the PDF read. The allocation Yes/No and the notes text become `contributions_required` and `assembly_notes`.
+**7. Overlay Excel and the summary.** `source_profile.parse_excel` and `parse_summary_text`, then `merge_overlays`. Summary values are applied first for pass/fail; explicit Excel identity, plan type, method, and HCE fields are applied after them. Excel is also read early to identify a 403(b) before filtering its BRF report. Annual allocation and explicit true-up both retain contribution wording; an explicit true-up/variance client copy is a separate requirement.
 
-**8. Finish a few derived flags.** `plan_profile_service.finalize_profile`. Example: top heavy is true when the percent is 60 or more. Excess Summary is kept only for the cases in the requirements.
+**8. Finish a few derived flags.** `plan_profile_service.finalize_profile`. Top heavy is true only when the percent is over 60%; 60% is not top heavy. Excess Summary is kept only for the cases in the requirements.
 
-**9. First checks.** `review_service.validate` checks that plan number, name, company, address, and year were found, and checks the stamp. These are the cover rows on the Checks tab. The later checks are added in step 14.
+**9. First checks.** `review_service.validate` checks that plan number, name, company, address, and year were found, and checks the stamp. These are the cover rows on the Checks tab. The final physical report-order check runs after editing, and Assembly stops prevents saving on an order violation.
 
 **10. Rules, still not editing.** `rules_engine.evaluate` reads `config/rules.yaml`. Each rule becomes keep, remove, or skipped. Skipped means a required fact was missing, so the code refuses to guess. The PDF is unchanged at this moment. You can point at the Rules tab: that JSON is this list.
 
@@ -128,13 +128,13 @@ A page that does not carry one of those headings is left where it is.
 
 If the box is unchecked, this function is not called. The Checks tab still says the cover date is not today.
 
-**14. Refresh sections and run the new checks.** `pdf_extractor.detect_sections` runs again because pages may have been deleted. `package_polish.package_checks` adds the Result Summary, compliance-page count, variance, BRF-omitted, cover-date, and plan-identity rows.
+**14. Refresh sections and run the new checks.** `pdf_extractor.detect_sections` runs again because pages may have been deleted. `package_polish.package_checks` adds the Result Summary, compliance-page count, variance, BRF, cover-date, plan-identity, and final TEST23 report-order rows. With the default Assembly stops setting, unresolved Result Summary comparisons and order failures stop before saving.
 
-**15. Bookmarks.** `bookmark_service.add_bookmarks`. Titles come from the `bookmarks:` block in `sections.yaml`. A 403(b) plan uses **HCE** and **ACP Test**. Other plans use **HCE/Key**, and **ADP Test**, **ACP Test**, or **ADP/ACP Tests** depending on which test files are present. BRF is skipped even if a section was detected. Old bookmarks are replaced by `set_toc`.
+**15. Bookmarks.** `bookmark_service.add_bookmarks`. Destinations use actual report headings. Titles follow TEST23 in the client-specific order. A 403(b) plan uses **HCE** and **ACP Test**; it retains and bookmarks BRF when included. 401(k) packages omit BRF. Old bookmarks are replaced by `set_toc`.
 
 **16. Social Security numbers.** `ssn_scan.scan_ssns` looks for `XXX-XX-XXXX` and ignores an EIN pattern. A hit is a failed check. The digits are not removed.
 
-**17. Save.** `save_service.save_package` writes `output/<job id>/<plan number>_<beginning year>-Valuation.pdf`. Missing number or year becomes the word UNKNOWN. If the source path is a Valuation Package folder, a second copy is written in the parent Testing folder.
+**17. Save.** `save_service.save_package` writes `output/<job id>/<plan number>_<beginning year>-Valuation.pdf`. Missing number or year becomes the word UNKNOWN. If the source path is a Valuation Package folder, a second copy is written in the parent Testing folder. Assembly stops are enabled by default; do not uncheck them for production work.
 
 **18. Email draft.** `outlook_service.write_draft` writes `<same name>.eml` beside the PDF. Subject is exactly `MOA | {plan number} | {plan name} | PYE {plan year end}`. To is empty. Nothing is sent.
 

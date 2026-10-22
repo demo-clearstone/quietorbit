@@ -3,7 +3,6 @@ from __future__ import annotations
 from models.plan_profile import PlanProfile
 from models.review import ReviewResult, ValidationItem
 from services.action_required import inspect_compliance_failure_wording
-from services.file_order import load_section_specs
 
 
 def validate(profile: PlanProfile, doc=None) -> ReviewResult:
@@ -25,7 +24,6 @@ def validate(profile: PlanProfile, doc=None) -> ReviewResult:
             ),
         ),
         _present("top_heavy", "Top Heavy %", profile.top_heavy_percent),
-        _order_item(profile),
     ]
     if doc is not None:
         wording = inspect_compliance_failure_wording(doc)
@@ -50,17 +48,16 @@ def _present(code: str, label: str, value: object) -> ValidationItem:
     )
 
 
-def _order_item(profile: PlanProfile) -> ValidationItem:
-    expected = [str(spec["name"]) for spec in load_section_specs()]
-    found = [section.name for section in profile.detected_sections]
-    expected_found = [name for name in expected if name in found]
-    actual = [name for name in found if name in expected]
-    ok = actual == expected_found
+def _order_item(profile: PlanProfile, doc=None) -> ValidationItem:
+    if doc is not None:
+        from services.package_polish import _assembly_order_check
+
+        result = _assembly_order_check(doc, profile)
+        result.label = "Package order (TEST23)"
+        return result
     return ValidationItem(
         code="package_order",
-        label="Package order (SOP)",
-        passed=ok,
-        detail="Detected sections follow TEST23 combine order"
-        if ok
-        else f"Expected {expected_found}; detected {actual}",
+        label="Package order (TEST23)",
+        passed=False,
+        detail="Could not inspect the assembled PDF pages.",
     )

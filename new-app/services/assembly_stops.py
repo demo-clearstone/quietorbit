@@ -12,7 +12,7 @@ import re
 import fitz
 
 from models.plan_profile import PlanProfile
-from services import file_order, ssn_scan
+from services import file_order, package_polish, ssn_scan
 from services.plan_config import package_flags
 from services.source_rewrite import calendar_402g_year
 
@@ -148,6 +148,7 @@ def _package_reasons(
     if address:
         reasons.append(address)
     reasons.extend(_name_reasons(doc, profile, excel_plan_name, pdf_plan_name))
+    reasons.extend(_summary_result_reasons(doc))
     reasons.extend(
         _excel_cover_reasons(
             excel_company=excel_company,
@@ -160,10 +161,24 @@ def _package_reasons(
     )
     reasons.extend(_pye_reasons(doc, profile))
     reasons.extend(_missing_report_reasons(doc, profile, source_files))
+    order_check = package_polish._assembly_order_check(doc, profile)
+    if not order_check.passed:
+        reasons.append("Report pages do not follow TEST23 order: " + order_check.detail + ". Assembly stopped.")
     coverage = _coverage_reason(doc)
     if coverage:
         reasons.append(coverage)
     return reasons
+
+
+def _summary_result_reasons(doc: fitz.Document) -> list[str]:
+    """Stop if the tester's Result Summary conflicts with the test reports."""
+    from services.package_polish import _result_summary_checks
+
+    failures = [item for item in _result_summary_checks(doc) if not item.passed]
+    return [
+        f"Result Summary validation failed ({item.label}): {item.detail}. Assembly stopped."
+        for item in failures
+    ]
 
 
 def _is_valuation_package(source_files: list[str]) -> bool:

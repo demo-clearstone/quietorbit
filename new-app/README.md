@@ -2,9 +2,9 @@
 
 Greenfield app in `new-app/`. It does **not** use the existing POC backend or `pdf-process.py`.
 
-Phase 1: upload PDFs **or** a Valuation Package folder path → assemble in TEST23 SOP order → extract a Plan Profile → preview keep/remove rules → add bookmarks → save `{PlanNumber}_{BeginningPlanYear}-Valuation.pdf`.
+Workflow: upload PDFs and the Val Assembly Excel **or** a Valuation Package folder path → assemble in TEST23 SOP order → extract a Plan Profile → preview keep/remove rules → add bookmarks → save `{PlanNumber}_{BeginningPlanYear}-Valuation.pdf`. Required identity, result-summary, missing-report, SSN, and final-order checks stop saving by default when they fail.
 
-The preview editor supports manual page rotation, reordering, deletion and insertion; crop and page-canvas sizing; text search; bookmark add/rename/delete/validation; undo/redo; text replacement/insertion; notes, stamps, shapes, drawn signatures and highlights; and permanent redaction. Preview edits use a working copy, leaving the assembled original untouched; choose **Save edited copy** to download a separate edited PDF. Search uses the PDF text layer (scanned-image pages need OCR), page-size changes adjust the canvas without scaling the page content, and drawn signatures are visual annotations rather than cryptographic signatures. Automatic rule-driven page removal, SSN scanning and Outlook integration are not applied yet.
+The preview editor supports manual page rotation, reordering, deletion and insertion; crop and page-canvas sizing; text search; bookmark add/rename/delete/validation; undo/redo; text replacement/insertion; notes, stamps, shapes, drawn signatures and highlights; and permanent redaction. Preview edits use a working copy, leaving the assembled original untouched; choose **Save edited copy** to download a separate edited PDF. Search uses the PDF text layer (scanned-image pages need OCR), page-size changes adjust the canvas without scaling the page content, and drawn signatures are visual annotations rather than cryptographic signatures. Assembly-stop checks are enabled by default; keep them on for production assembly. The automated checks do not replace a visual review of the final package.
 
 Developer onboarding (folder map, pipeline, how to change rules): [`docs/Developer-Guide.md`](docs/Developer-Guide.md).  
 Solution architecture (for submission / handover): [`docs/Solution-Architecture.md`](docs/Solution-Architecture.md).
@@ -88,6 +88,6 @@ python -m pytest -q
 
 ## Next (do not skip)
 
-1. Tune `config/field_patterns.py` against real MOA packages when they arrive.
-2. Phase 2: SSN scan and package-order validation.
-3. Phase 4: apply rule decisions to the PDF and generate bookmarks.
+1. Verify extraction and keep/remove results against each client's actual Testing Log/workbook and PDF package.
+2. Run assembly with the default Assembly stops enabled and visually review the final PDF before sending it to the tester.
+3. OCR remains necessary for scanned-image-only reports; current extraction is based on selectable PDF text.

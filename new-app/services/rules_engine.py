@@ -62,7 +62,11 @@ def _conditions_met(keep_when: dict, profile: PlanProfile) -> tuple[bool, bool, 
         if clause.get("not_true"):
             field = clause["field"]
             actual = getattr(profile, field, None)
-            matched = actual is not True
+            if actual is None:
+                missing.append(field)
+                reasons.append(f"missing {field}")
+                continue
+            matched = actual is False
             reasons.append(f"{field} not true ({actual})")
             if not matched:
                 return False, False, "; ".join(reasons)

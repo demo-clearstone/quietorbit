@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 import fitz
 import yaml
@@ -18,6 +19,9 @@ from models.plan_profile import PlanProfile
 from models.review import ValidationItem
 from services.file_order import matched_spec
 from services.plan_config import is_457_plan, package_flags
+
+if TYPE_CHECKING:
+    from models.plan_profile import PlanProfile
 
 _MONTHS = (
     "January",
@@ -79,6 +83,8 @@ _410_LINE = re.compile(
     r"(?:\s+Ratio\s+percent\s+(\d+(?:\.\d+)?)\s*%)?",
     re.I,
 )
+_PAGE_SUMMARY_HEAD = re.compile(r"^(?:compliance testing summary of results|compliance summary|test summary)$", re.I)
+_TOP_HEAVY_HEAD = re.compile(r"^top\s*[- ]?heavy(?:\s+test)?$", re.I)
 _ABPT_PASSED = re.compile(
     r"average benefits test passed;\s*no action needed for failed\s+410\s*\(?b\)?\s*coverage test",
     re.I,
@@ -288,16 +294,145 @@ def drop_brf_pages(doc: fitz.Document) -> list[str]:
     return [f"Removed {len(drop)} BRF report page(s). The Result Summary line is enough."]
 
 
+_NUMBER_ONLY = re.compile(r"\d{1,3}")
+
+
+def renumber_footers(doc: fitz.Document) -> list[str]:
+    """Numbered packet pages keep their original numbers after pages are removed. Make them match the final page."""
+    footers: dict[int, list[fitz.Rect]] = {}
+    strays: dict[int, list[fitz.Rect]] = {}
+    for page in doc:
+        if page.number == 0:
+            continue
+        for block in page.get_text("blocks"):
+            if block[6] != 0 or not _NUMBER_ONLY.fullmatch((block[4] or "").strip()):
+                continue
+            target = footers if block[1] > page.rect.y1 - 70 else strays
+            target.setdefault(page.number, []).append(fitz.Rect(block[:4]))
+    if not footers:
+        return []
+    last = max(footers)
+    changed = 0
+    for number in range(1, last + 1):
+        page = doc[number]
+        old = footers.get(number, []) + strays.get(number, [])
+        label = str(number + 1)
+        if len(footers.get(number, [])) == 1 and not strays.get(number):
+            if page.get_textbox(old[0]).strip() == label:
+                continue
+        for rect in old:
+            page.add_redact_annot(rect + (-1, -1, 1, 1), fill=(1, 1, 1))
+        if old:
+            page.apply_redactions(images=0, graphics=0)
+        width = fitz.get_text_length(label, fontname="helv", fontsize=9)
+        page.insert_text(
+            ((page.rect.width - width) / 2, page.rect.height - 36),
+            label,
+            fontsize=9,
+            fontname="helv",
+            color=(0, 0, 0),
+        )
+        changed += 1
+    return [f"Renumbered {changed} page footer(s) to match the final page order."] if changed else []
+
+
 def package_checks(doc: fitz.Document, profile: PlanProfile) -> list[ValidationItem]:
     items = [
         _cover_date_check(doc),
         _compliance_check(doc, profile),
         _brf_check(doc, profile),
+        _assembly_order_check(doc, profile),
     ]
     items.extend(_result_summary_checks(doc))
     items.extend(_variance_checks(doc, profile))
     items.extend(_identity_checks(doc, profile))
     return items
+
+
+def _assembly_order_check(doc: fitz.Document, profile: "PlanProfile") -> ValidationItem:
+    """Check the physical report order against TEST23's substantive sections."""
+    from services.file_order import load_section_specs
+    if package_flags(profile.plan_type).get("rewrite_adp_mentions"):
+        names = [
+            "Cover Letter", "Test Summary", "Compensation Limit Failure Summary",
+            "Combined Testing Report", "Action Required", "Failed Test Notice",
+            "Variance", "PS Variance", "SHNE Variance", "Year End Recap",
+            "Compliance Reports", "Contribution Analysis", "HCE/Key", "Future HCE",
+            "ADP/ACP", "402(g)", "410(b)", "401(a)(4)",
+            "Average Benefit Percentage Test", "BRF", "414(s)", "415", "Top Heavy", "Census",
+        ]
+    else:
+        names = [
+            "Cover Letter", "Test Summary", "Compensation Limit Failure Summary",
+            "Combined Testing Report", "Action Required", "Failed Test Notice",
+            "Variance", "PS Variance", "SHNE Variance", "Year End Recap",
+            "Compliance Reports", "Valuation Reports", "Contribution Analysis",
+            "HCE/Key", "Future HCE", "ADP/ACP", "402(g)", "410(b)",
+            "401(a)(4)", "Average Benefit Percentage Test", "414(s)", "415",
+            "Top Heavy", "Census",
+        ]
+    order = {name: index for index, name in enumerate(names)}
+    order["415 Failure Information"] = order["Failed Test Notice"]
+    order["ADP/ACP Excess After 12 Months Current"] = order["Failed Test Notice"]
+    order["ADP/ACP Excess After 12 Months Prior"] = order["Failed Test Notice"]
+    order["ADP/ACP Excess Current Year"] = order["Failed Test Notice"]
+    order["ADP/ACP Failure Letter"] = order["Failed Test Notice"]
+    order["402(g) Failure Letter"] = order["Failed Test Notice"]
+    order["415 Failure Letter"] = order["Failed Test Notice"]
+    specs = load_section_specs()
+    recognized: list[tuple[int, str, int]] = []
+    for page_index, page in enumerate(doc):
+        text = page.get_text("text") or ""
+        if not text.strip() or is_compliance_overview(text):
+            continue
+        lines = [" ".join(line.split()).strip() for line in text.splitlines() if line.strip()][:6]
+        head_lines = lines[:3]
+        head = " ".join(head_lines)
+        if any(_PAGE_SUMMARY_HEAD.fullmatch(line) for line in head_lines) or re.search(r"^compliance testing summary of results\b", " ".join(head_lines), re.I):
+            recognized.append((page_index + 1, "Test Summary", order["Test Summary"]))
+            continue
+        if any(_TOP_HEAVY_HEAD.fullmatch(line) for line in head_lines):
+            recognized.append((page_index + 1, "Top Heavy", order["Top Heavy"]))
+            continue
+        action_head = any(re.search(r"(?:immediate action required|no immediate action is required)", line, re.I) for line in head_lines)
+        if action_head or (head_lines and re.fullmatch(r"annual valuation report", head_lines[0], re.I)):
+            recognized.append((page_index + 1, "Action Required", order["Action Required"]))
+            continue
+        if any(re.search(r"combined testing report", line, re.I) for line in head_lines):
+            recognized.append((page_index + 1, "Combined Testing Report", order["Combined Testing Report"]))
+            continue
+        for spec in specs:
+            name = str(spec.get("name") or "")
+            if name not in order:
+                continue
+            if name == "BRF" and not package_flags(profile.plan_type).get("keep_brf"):
+                continue
+            aliases = [str(spec.get("name") or "")] + [str(alias) for alias in (spec.get("aliases") or [])]
+            if any(
+                alias
+                and re.search(
+                    rf"(?<![a-z0-9]){re.escape(alias)}(?![a-z0-9])",
+                    head,
+                    re.I,
+                )
+                for alias in aliases
+            ):
+                recognized.append((page_index + 1, name, order[name]))
+                break
+    problems = [
+        f"{before} appears on page {page_before} before {after} on page {page_after}"
+        for (page_before, before, rank_before), (page_after, after, rank_after)
+        in zip(recognized, recognized[1:])
+        if rank_before > rank_after
+    ]
+    return ValidationItem(
+        code="package_order",
+        label="Package order (TEST23)",
+        passed=not problems,
+        detail="Report sections follow the TEST23 combine order."
+        if not problems
+        else "; ".join(problems[:6]),
+    )
 
 
 def _page_kind(text: str) -> tuple[str, int] | None:

@@ -268,9 +268,9 @@ def _next_data_row(sheet) -> int:
 def _allocation(profile: PlanProfile) -> tuple[str, str]:
     notes = profile.assembly_notes or ""
     low = notes.lower()
-    both = re.search(r"annual allocation and true-?up both", low)
-    annual_only = re.search(r"annual allocation", low) and not re.search(r"true-?up", low)
-    true_up = re.search(r"true-?up", low)
+    both = profile.annual_allocation is True and profile.true_up is True or re.search(r"annual allocation and true-?up both", low)
+    annual_only = profile.annual_allocation is True or (re.search(r"annual allocation", low) and not re.search(r"true-?up", low))
+    true_up = profile.true_up is True or bool(re.search(r"true-?up", low))
     if both:
         return "Annual-Var", ""
     if annual_only:

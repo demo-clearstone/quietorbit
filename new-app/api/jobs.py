@@ -55,7 +55,7 @@ async def create_job(
     source_path: str = Form(default=""),
     auto_order: bool = Form(default=True),
     rewrite_sources: bool = Form(default=False),
-    check_assembly_stops: bool = Form(default=False),
+    check_assembly_stops: bool = Form(default=True),
     file_order: list[str] | None = Form(default=None),
     item_name: list[str] | None = Form(default=None),
     item_page: list[int] | None = Form(default=None),
