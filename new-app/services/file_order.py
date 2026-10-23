@@ -87,6 +87,7 @@ def _best_label_section(label: str, specs: list[dict]) -> tuple[int, dict] | Non
 
 
 def matched_spec(filename: str) -> dict | None:
+    """Matching a file name to its report section."""
     found = _best_section(filename)
     return found[1] if found else None
 
@@ -238,4 +239,5 @@ def location_index(filename: str) -> int:
 
 
 def order_uploads(uploads: list[tuple[str, bytes]]) -> list[tuple[str, bytes]]:
+    """Ordering the PDFs into report sequence."""
     return sorted(uploads, key=lambda item: (sop_rank(item[0]), location_index(item[0]), item[0].lower()))

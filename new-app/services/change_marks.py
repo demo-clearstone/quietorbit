@@ -26,6 +26,7 @@ def add_mark(marks: list[dict] | None, page: int, rect: fitz.Rect, label: str) -
 
 
 def save_marks(pdf_path: Path, marks: list[dict]) -> None:
+    """Saving the highlight marks."""
     path = pdf_path.parent / "highlights.json"
     path.write_text(json.dumps(marks), encoding="utf-8")
 

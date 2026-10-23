@@ -105,16 +105,40 @@ def _block_end(page: fitz.Page, y0: float, headings: list[str]) -> float:
 
 
 def _heading_hits(page: fitz.Page, heading: str) -> list[fitz.Rect]:
-    """A heading starts the line. The same words inside a sentence are not a heading."""
-    if not heading:
+    """A heading starts a line, and may wrap onto the next lines. Words inside a sentence are not a heading."""
+    target = _squash(heading)
+    if not target:
         return []
+    lines = _page_lines(page)
     hits: list[fitz.Rect] = []
-    words = page.get_text("words") or []
-    for rect in page.search_for(heading):
-        if any(abs(word[1] - rect.y0) < 2 and word[0] < rect.x0 - 1 for word in words):
-            continue
-        hits.append(rect)
+    for start in range(len(lines)):
+        joined = ""
+        rect = fitz.Rect(lines[start][1])
+        for text, bbox in lines[start : start + 4]:
+            joined += _squash(text)
+            rect |= fitz.Rect(bbox)
+            if len(joined) >= len(target):
+                break
+        if joined.startswith(target):
+            hits.append(rect)
     return hits
+
+
+def _squash(value: str) -> str:
+    return re.sub(r"\s+", "", value or "").lower()
+
+
+def _page_lines(page: fitz.Page) -> list[tuple[str, tuple[float, float, float, float]]]:
+    lines: list[tuple[str, tuple[float, float, float, float]]] = []
+    for block in page.get_text("dict").get("blocks") or []:
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines") or []:
+            text = "".join(span.get("text") or "" for span in line.get("spans") or [])
+            if text.strip():
+                lines.append((text, tuple(line["bbox"])))
+    lines.sort(key=lambda item: (round(item[1][1]), item[1][0]))
+    return lines
 
 
 def _kept_by_other_spec(

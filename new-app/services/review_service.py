@@ -6,6 +6,7 @@ from services.action_required import inspect_compliance_failure_wording
 
 
 def validate(profile: PlanProfile, doc=None) -> ReviewResult:
+    """Checking validation on the plan profile."""
     items = [
         _present("cover_plan_number", "Plan Number", profile.plan_number),
         _present("cover_plan_name", "Plan Name", profile.plan_name),

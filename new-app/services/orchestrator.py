@@ -342,6 +342,7 @@ def process_uploads(
 
 
 def _split_uploads(uploads: list[tuple[str, bytes]]) -> tuple[list[tuple[str, bytes]], list[tuple[str, bytes]]]:
+    """Separating the uploaded PDFs from the Excel file."""
     pdfs: list[tuple[str, bytes]] = []
     excels: list[tuple[str, bytes]] = []
     for name, data in uploads:
@@ -354,6 +355,7 @@ def _split_uploads(uploads: list[tuple[str, bytes]]) -> tuple[list[tuple[str, by
 
 
 def _split_summaries(pdfs: list[tuple[str, bytes]]) -> tuple[list[tuple[str, bytes]], list[tuple[str, str]]]:
+    """Finding the compliance summary among the PDFs."""
     valuation: list[tuple[str, bytes]] = []
     summaries: list[tuple[str, str]] = []
     for name, data in pdfs:

@@ -18,6 +18,7 @@ def valuation_filename(profile: PlanProfile) -> str:
 
 
 def save_package(doc: fitz.Document, job_id: str, profile: PlanProfile, dest_dir: Path | None = None) -> Path:
+    """Saving the valuation PDF."""
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     job_dir = OUTPUT_DIR / job_id
     job_dir.mkdir(parents=True, exist_ok=True)

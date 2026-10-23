@@ -41,6 +41,7 @@ _BODY_START = re.compile(r"^(We are|Please|If you|This Valuation|Dear\s)", re.I)
 
 
 def extract_plan_profile(doc: fitz.Document) -> PlanProfile:
+    """Extracting plan data from the merged PDF."""
     cover_text = _pages_text(doc, 0, min(3, doc.page_count))
     full_text = _pages_text(doc, 0, doc.page_count)
     warnings: list[str] = []
@@ -297,6 +298,7 @@ def _load_sections() -> list[dict[str, Any]]:
 
 
 def detect_sections(doc: fitz.Document) -> list[DetectedSection]:
+    """Finding each report section after the edits."""
     return _detect_sections(doc)
 
 

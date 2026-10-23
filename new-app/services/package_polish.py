@@ -286,6 +286,7 @@ def rewrite_403b_adp_mentions(doc: fitz.Document) -> list[str]:
 
 
 def drop_brf_pages(doc: fitz.Document) -> list[str]:
+    """Removing BRF pages from the 401(k) package."""
     drop = [page.number for page in doc if _is_brf_report(page.get_text("text") or "")]
     for number in reversed(drop):
         doc.delete_page(number)
@@ -337,6 +338,7 @@ def renumber_footers(doc: fitz.Document) -> list[str]:
 
 
 def package_checks(doc: fitz.Document, profile: PlanProfile) -> list[ValidationItem]:
+    """Checking the package pages against the profile."""
     items = [
         _cover_date_check(doc),
         _compliance_check(doc, profile),

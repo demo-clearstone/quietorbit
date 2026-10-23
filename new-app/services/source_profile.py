@@ -194,6 +194,7 @@ def merge_overlays(
     warnings: list[str],
     sources: list[str] | None = None,
 ) -> PlanProfile:
+    """Applying the Excel and summary results onto the plan profile."""
     numbers = [str(item["plan_number"]) for item in overlays if item.get("plan_number")]
     if profile.plan_number:
         numbers.append(profile.plan_number)

@@ -39,6 +39,7 @@ def is_403b_plan(plan_type: str | None) -> bool:
 
 
 def is_457_plan(plan_type: str | None) -> bool:
+    """Checking whether the plan is a 457 plan."""
     return "457" in (plan_type or "").lower()
 
 
@@ -64,6 +65,7 @@ def plan_family(text: str) -> str | None:
 
 
 def package_flags(plan_type: str | None) -> dict:
+    """Loading the rules for this plan type."""
     flags = dict(_PACKAGE_DEFAULTS)
     if is_403b_plan(plan_type):
         flags.update(_load_403b().get("package") or {})

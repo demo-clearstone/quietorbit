@@ -82,6 +82,7 @@ def stop_reasons(
     cover_address: str | None = None,
     cover_pye: str | None = None,
 ) -> list[str]:
+    """Checking whether assembly must stop."""
     reasons = _content_reasons(doc)
     if not _is_valuation_package(source_files):
         return reasons

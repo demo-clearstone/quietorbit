@@ -73,6 +73,7 @@ def apply_source_rewrites(
     profile: PlanProfile,
     marks: list[dict] | None = None,
 ) -> list[str]:
+    """Rewriting dates and other source text."""
     notes: list[str] = []
     if doc.page_count:
         changed = _rewrite_cover_day(doc[0], marks)

@@ -25,6 +25,7 @@ _PLACEHOLDER = re.compile(r"<\s*xx\.xx\s*%\s*>|xx\.xx\s*%", re.I)
 
 
 def package_is_midyear(uploads: list[tuple[str, bytes]], doc: fitz.Document | None = None) -> bool:
+    """Checking whether this is a mid-year letter."""
     for name, _data in uploads:
         if _MIDYEAR.search(name):
             return True
@@ -40,6 +41,7 @@ def order_uploads(uploads: list[tuple[str, bytes]]) -> list[tuple[str, bytes]]:
 
 
 def reorder_pages(doc: fitz.Document) -> list[str]:
+    """Reordering pages in the mid-year letter."""
     if doc.page_count < 2:
         return []
     order = sorted(range(doc.page_count), key=lambda index: (_page_rank(doc[index].get_text("text") or ""), index))
