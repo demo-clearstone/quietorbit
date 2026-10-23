@@ -84,7 +84,7 @@ def bookmark_overrides(plan_type: str | None) -> dict[str, str]:
 
 
 def rules_for(plan_type: str | None) -> dict:
-    rules = list(_load_yaml("rules.yaml").get("rules") or [])
+    rules = _action_required_rules(plan_type) + list(_load_yaml("rules.yaml").get("rules") or [])
     extra: list[dict] = []
     if is_403b_plan(plan_type):
         extra = list(_load_403b().get("rules") or [])
@@ -101,7 +101,8 @@ def rules_for(plan_type: str | None) -> dict:
 
 
 def paragraphs_for(plan_type: str | None) -> dict:
-    base = _load_yaml("paragraphs.yaml")
+    base = dict(_load_yaml("paragraphs.yaml"))
+    base["action_required_headings"] = _action_required_headings(plan_type)
     overlay: dict = {}
     if is_403b_plan(plan_type):
         overlay = _load_403b().get("paragraphs") or {}
@@ -122,6 +123,61 @@ def paragraphs_for(plan_type: str | None) -> dict:
         ]
         merged[key] = kept + extra
     return merged
+
+
+def _action_required_items(plan_type: str | None) -> list[dict]:
+    data = _load_yaml("action_required.yaml")
+    items = [item for item in (data.get("paragraphs") or []) if isinstance(item, dict)]
+    overlay = [item for item in (data.get("403b") or []) if isinstance(item, dict)] if is_403b_plan(plan_type) else []
+    replacements = {str(item.get("id")): item for item in overlay}
+    chosen: list[dict] = []
+    replaced: set[str] = set()
+    for item in items:
+        rule_id = str(item.get("id"))
+        if rule_id in replacements:
+            if rule_id not in replaced:
+                chosen.append(replacements[rule_id])
+                replaced.add(rule_id)
+            continue
+        chosen.append(item)
+    for item in overlay:
+        if str(item.get("id")) not in replaced:
+            chosen.append(item)
+    return chosen
+
+
+def _action_required_rules(plan_type: str | None) -> list[dict]:
+    rules: list[dict] = []
+    seen: set[str] = set()
+    for item in _action_required_items(plan_type):
+        rule_id = str(item.get("id"))
+        if rule_id in seen:
+            continue
+        seen.add(rule_id)
+        rules.append(
+            {
+                "id": item.get("id"),
+                "section": item.get("section"),
+                "keep_when": item.get("keep_when") or {},
+                "else": item.get("else") or "remove",
+            }
+        )
+    return rules
+
+
+def _action_required_headings(plan_type: str | None) -> list[dict]:
+    headings: list[dict] = []
+    for item in _action_required_items(plan_type):
+        blocks = item.get("headings") or [item]
+        for block in blocks:
+            if not isinstance(block, dict) or not block.get("heading"):
+                continue
+            spec = {"id": item.get("id"), "heading": block.get("heading")}
+            for key in ("variant", "block_excludes", "block_contains", "must_include", "extra"):
+                if block.get(key) is not None:
+                    spec[key] = block[key]
+            headings.append(spec)
+    return headings
 
 
 def _load_403b() -> dict:

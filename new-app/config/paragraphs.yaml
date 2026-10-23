@@ -1,42 +1,5 @@
-# Real Action Required / notice headings from MOA package plan 800643 (Deerfield).
-# Used to find keep/remove blocks once source PDFs have selectable text.
-
-action_required_headings:
-  - id: A
-    heading: IMMEDIATE ACTION REQUIRED - COMPLIANCE TEST FAILURE
-    must_include:
-      - Contribution refunds to participants are required to correct compliance testing failures
-      - Excess Summary
-      - Form W-4R
-  - id: B
-    heading: IMMEDIATE ACTION REQUIRED - ADP/ACP TEST FAILURE
-    variant: PRIOR
-    block_excludes: unless QNEC
-    must_include:
-      - Contribution refunds to participants are required to correct ADP/ACP testing failures
-      - ADP/ACP Correction Method summary
-      - Form W-4R
-  - id: C
-    heading: IMMEDIATE ACTION REQUIRED - ADP/ACP TEST FAILURE
-    variant: CURRENT
-    block_contains: unless QNEC
-    must_include:
-      - unless QNEC contributions will be made
-      - Form W-4R
-  - id: D
-    heading: IMMEDIATE ACTION REQUIRED - ADP/ACP CURRENT METHOD TEST FAILURE - AFTER 12-MONTHS
-  - id: E
-    heading: IMMEDIATE ACTION REQUIRED - ADP/ACP PRIOR METHOD TEST FAILURE - AFTER 12-MONTHS
-  - id: F
-    heading: IMMEDIATE ACTION REQUIRED - TOP HEAVY
-  - id: F
-    heading: ATTENTION REQUIRED - TOP HEAVY DETERMINATION
-  - id: G
-    heading: NO IMMEDIATE ACTION IS REQUIRED AT THIS TIME
-  - id: H
-    heading: IMMEDIATE ACTION REQUIRED - VARIANCE
-  - id: M
-    heading: IMMEDIATE ACTION REQUIRED - CONTRIBUTIONS
+# Notice, sample letter, Excess Summary, and recap headings.
+# Action Required headings are in config/action_required.yaml.
 
 notices:
   - id: I

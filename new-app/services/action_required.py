@@ -3,9 +3,8 @@ from __future__ import annotations
 import re
 
 import fitz
-import yaml
 
-from config.settings import CONFIG_DIR
+from services.plan_config import paragraphs_for
 
 _HEADING_A = "IMMEDIATE ACTION REQUIRED - COMPLIANCE TEST FAILURE"
 _PHRASES_A = [
@@ -39,7 +38,7 @@ def inspect_compliance_failure_wording(doc: fitz.Document) -> dict[str, object]:
 
 
 def _rule_a_spec() -> dict:
-    data = yaml.safe_load((CONFIG_DIR / "paragraphs.yaml").read_text(encoding="utf-8")) or {}
+    data = paragraphs_for(None)
     for item in data.get("action_required_headings") or []:
         if str(item.get("id")) == "A":
             return item

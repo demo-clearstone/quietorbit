@@ -1,4 +1,5 @@
 # 403(b) Editing/Review. Loaded only when the plan type is 403(b).
+# Action Required paragraphs for 403(b) are in config/action_required.yaml.
 # A 401(k) package keeps using config/rules.yaml and config/paragraphs.yaml.
 
 package:
@@ -15,62 +16,8 @@ bookmarks:
   BRF: Benefits, Rights and Features test
 
 # Rule ids listed here replace the 401(k) rule with the same id.
-# Every other rule is copied from rules.yaml and is not edited here.
+# Action Required replacements are in config/action_required.yaml.
 rules:
-  - id: B
-    section: PRIOR ACP Wording
-    keep_when:
-      all:
-        - field: testing_method
-          equals: PRIOR
-        - field: returns_required
-          equals: true
-        - field: acp_failed
-          equals: true
-        - field: adp_reclassified
-          not_true: true
-    else: remove
-
-  - id: C
-    section: CURRENT ACP Wording
-    keep_when:
-      all:
-        - field: testing_method
-          equals: CURRENT
-        - field: returns_required
-          equals: true
-        - field: acp_failed
-          equals: true
-    else: remove
-
-  - id: D
-    section: After 12 Months Current Wording
-    keep_when:
-      all:
-        - field: testing_method
-          equals: CURRENT
-        - field: after_12_months
-          equals: true
-        - field: returns_required
-          equals: true
-        - field: acp_failed
-          equals: true
-    else: remove
-
-  - id: E
-    section: After 12 Months Prior Wording
-    keep_when:
-      all:
-        - field: testing_method
-          equals: PRIOR
-        - field: after_12_months
-          equals: true
-        - field: returns_required
-          equals: true
-        - field: acp_failed
-          equals: true
-    else: remove
-
   - id: I
     section: ACP Failure Notice (CURRENT)
     keep_when:
@@ -103,26 +50,6 @@ rules:
 
 # Heading specs listed here replace every 401(k) spec with the same id.
 paragraphs:
-  action_required_headings:
-    - id: B
-      heading: IMMEDIATE ACTION REQUIRED - ACP TEST FAILURE
-      variant: PRIOR
-      block_excludes: unless QNEC
-    - id: C
-      heading: IMMEDIATE ACTION REQUIRED - ACP TEST FAILURE
-      variant: CURRENT
-      block_contains: unless QNEC
-      must_include:
-        - unless QNEC contributions will be made
-        - Excess Summary
-        - Form W-4P
-    - id: D
-      heading: IMMEDIATE ACTION REQUIRED - ACP CURRENT METHOD TEST FAILURE - AFTER 12-MONTHS
-    - id: E
-      heading: IMMEDIATE ACTION REQUIRED - ACP PRIOR METHOD TEST FAILURE - AFTER 12-MONTHS
-    - id: E
-      heading: IMMEDIATE ACTION REQUIRED - ACP PRIOR METHOD TEST FAILURE
-
   notices:
     - id: I
       heading: Failed Compliance Testing

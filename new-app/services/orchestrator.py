@@ -1,3 +1,16 @@
+"""Assembly procedure. Read process_uploads from top to bottom.
+
+1. Sort uploads into PDFs, Excel, and the compliance summary.
+2. Drop a 401(k) BRF file, order the PDFs, and merge them.
+3. Read the plan from the PDF, then overlay Excel and the summary.
+4. Validate and decide which Action Required paragraphs to keep.
+5. Edit the PDF: paragraphs, recap bullets, QNEC, wording, dates, overview.
+6. Add bookmarks, scan for an SSN, and stop if a required check fails.
+7. Save the PDF, the highlight marks, the email draft, and the assembly log.
+
+The other files in this folder do one of those jobs. This file is the order.
+"""
+
 from __future__ import annotations
 
 import re
@@ -54,9 +67,13 @@ def process_uploads(
     started = time.perf_counter()
     warnings = list(extra_warnings or [])
     highlights: list[dict] = []
+
+    # 1. Sort the uploads.
     pdfs, excels = _split_uploads(uploads)
     valuation, summary_texts = _split_summaries(pdfs)
     excel_profiles = [(name, source_profile.parse_excel(data)) for name, data in excels]
+
+    # 2. Choose the package type, drop BRF when required, then merge.
     is_403b = package_polish.package_is_403b(valuation) or any(
         str(parsed.get("plan_type") or "").lower().startswith("403")
         for _name, parsed in excel_profiles
@@ -84,6 +101,8 @@ def process_uploads(
             is_midyear = True
             warnings.extend(midyear.reorder_pages(doc))
         warnings.extend(package_polish.reorder_inner_pages(doc))
+
+        # 3. Read the plan, then let Excel and the summary override it.
         profile = pdf_extractor.extract_plan_profile(doc)
         profile.extra["field_sources"] = {
             key: "PDF package text"
@@ -176,6 +195,8 @@ def process_uploads(
                 if getattr(profile, key, None) in (None, ""):
                     setattr(profile, key, value)
         profile = plan_profile_service.finalize_profile(profile)
+
+        # 4. Check the profile and decide keep or remove.
         review = review_service.validate(profile, doc=doc)
         decisions = rules_engine.evaluate(profile)
         profile_debug_path = str(
@@ -190,6 +211,7 @@ def process_uploads(
                 phase="before_business_rule_edits",
             )
         )
+        # 5. Edit the PDF.
         removed = pdf_modifier.apply_decisions(doc, decisions, profile.plan_type)
         recap_removed = pdf_modifier.apply_recap_bullets(doc, decisions, profile.plan_type)
         filled = pdf_modifier.fill_qnec_placeholders(doc, profile, highlights)
@@ -219,6 +241,7 @@ def process_uploads(
                 )
             )
         warnings.extend(package_polish.renumber_footers(doc))
+        # 6. Bookmarks, SSN scan, and assembly stops.
         profile.detected_sections = pdf_extractor.detect_sections(doc)
         profile_debug_path = str(
             profile_debug.write_profile_debug(
@@ -277,6 +300,7 @@ def process_uploads(
             )
             if reasons:
                 raise HTTPException(status_code=400, detail="Assembly stopped.\n" + "\n".join(reasons))
+        # 7. Save the package, the email draft, and the log.
         dest = save_service.testing_folder_from_source(source_folder)
         path = save_service.save_package(doc, job_id, profile, dest_dir=dest)
         change_marks.save_marks(path, highlights)
