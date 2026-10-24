@@ -12,7 +12,26 @@ _BLURB = re.compile(r"a summary of total contributions", re.I)
 
 
 def remove_contribution_overview(doc: fitz.Document) -> list[str]:
-    """Drop the Contribution Analysis description when that report is not in the package."""
+    """Drop the Contribution Analysis description when that report is not in the package.
+
+    Purpose:
+        Drop the Contribution Analysis description when that report is not in the package.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+
+    Returns:
+        list[str].
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        remove_contribution_overview(doc) returns list[str].
+
+    Side effects:
+        Changes the PDF passed in. Does not save the file by itself.
+    """
     if _has_contribution_report(doc):
         return []
     notes: list[str] = []
@@ -37,6 +56,26 @@ def remove_contribution_overview(doc: fitz.Document) -> list[str]:
 
 
 def _has_contribution_report(doc: fitz.Document) -> bool:
+    """Has contribution report.
+
+    Purpose:
+        Has contribution report.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+
+    Returns:
+        bool.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _has_contribution_report(doc) returns bool.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     for page in doc:
         text = page.get_text("text") or ""
         if not _ANALYSIS.search(text):
@@ -48,6 +87,26 @@ def _has_contribution_report(doc: fitz.Document) -> bool:
 
 
 def _without_analysis_section(text: str) -> str:
+    """Without analysis section.
+
+    Purpose:
+        Without analysis section.
+
+    Args:
+        text: Text taken from a page or a file.
+
+    Returns:
+        str.
+
+    Raises:
+        None.
+
+    Example:
+        _without_analysis_section("text") returns str.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     lines = text.splitlines()
     kept: list[str] = []
     skipping = False

@@ -3,12 +3,10 @@ from __future__ import annotations
 import re
 
 import fitz
-import yaml
 
-from config.settings import CONFIG_DIR
 from models.plan_profile import PlanProfile
 from services.file_order import load_section_specs
-from services.plan_config import bookmark_overrides, is_403b_plan, package_flags
+from services.plan_config import bookmark_overrides, is_403b_plan, load_package_order, package_flags
 
 _ADP_FILE = re.compile(r"\badp\s*test\b")
 _ACP_FILE = re.compile(r"\bacp\s*test\b")
@@ -88,7 +86,30 @@ def add_bookmarks(
     profile: PlanProfile,
     source_files: list[str] | None = None,
 ) -> int:
-    """Write SOP §O bookmarks for detected sections (TEST23.docx)."""
+    """Write the section bookmarks onto the assembled PDF.
+
+    Purpose:
+        Build the bookmark list from the pages that are actually in the package.
+
+    Args:
+        doc: Open assembled PDF. Page 1 is the cover. Must not be closed.
+        profile: Plan profile. ``plan_type`` selects 403(b) bookmark titles.
+        source_files: Uploaded file names used to tell an ADP report from an ACP report.
+            ``None`` means no file names.
+
+    Returns:
+        How many top-level bookmarks were written. Child bookmarks are not counted.
+
+    Raises:
+        None. A missing section is skipped. PyMuPDF raises if ``doc`` is closed.
+
+    Example:
+        A 403(b) profile stores the ADP/ACP bookmark as "ACP Test".
+        ``add_bookmarks(doc, profile, ["555403 ACP Test.pdf"])`` returns the number of sections found.
+
+    Side effects:
+        Replaces the outline stored on ``doc``. Does not save the file.
+    """
     titles = _bookmark_map()
     overrides = bookmark_overrides(profile.plan_type)
     keep_brf = bool(package_flags(profile.plan_type).get("keep_brf"))
@@ -120,10 +141,27 @@ def add_bookmarks(
 
 
 def is_testing_only(doc: fitz.Document) -> bool:
-    """True when the package has no allocation, variance, or other test reports.
+    """Decide whether the package is only the ADP/ACP testing set.
 
-    A line on the Test Summary does not count. Another report page means the
-    full valuation package, and the full bookmark list is used.
+    Purpose:
+        A testing-only package uses a shorter bookmark list than a full valuation.
+
+    Args:
+        doc: Open PDF. A Test Summary line by itself does not make the package a full valuation.
+
+    Returns:
+        ``True`` when no allocation, variance, or other full-valuation report page is present.
+        ``False`` when any other report page is found.
+
+    Raises:
+        None.
+
+    Example:
+        A package of cover, summary, action required, HCE, and ADP/ACP returns ``True``.
+        Adding a Top Heavy report page returns ``False``.
+
+    Side effects:
+        None. This function only reads the PDF.
     """
     from services.package_polish import is_compliance_overview
 
@@ -147,10 +185,25 @@ def is_testing_only(doc: fitz.Document) -> bool:
 
 
 def _normalize_outline_destinations(doc: fitz.Document) -> None:
-    """Use /Dest with a null zoom so a click opens that page and leaves the sidebar up.
+    """Make each bookmark open its page without closing the sidebar.
 
-    PyMuPDF writes /A << /S /GoTo /D [page /XYZ x y 0] >>. Zoom 0 is invalid, and an
-    action (instead of /Dest) makes Chrome and Safari close the bookmark panel.
+    Purpose:
+        Replace a GoTo action whose zoom is 0 with a destination the viewer accepts.
+
+    Args:
+        doc: Open PDF whose outline was just written by ``add_bookmarks``.
+
+    Returns:
+        None.
+
+    Raises:
+        None. A bookmark object that cannot be read is skipped.
+
+    Example:
+        After ``add_bookmarks``, a click on "Cover Letter" opens page 1 and leaves the sidebar open.
+
+    Side effects:
+        Rewrites outline objects inside ``doc``. Does not save the file.
     """
     for xref in range(1, doc.xref_length()):
         try:
@@ -173,7 +226,29 @@ def _normalize_outline_destinations(doc: fitz.Document) -> None:
 
 
 def _adp_children(doc: fitz.Document, start_page: int, end_page: int) -> list[tuple[str, int]]:
-    """Summary, Detail, then Corrections inside the ADP/ACP report."""
+    """Find the ADP/ACP child bookmarks.
+
+    Purpose:
+        Add Summary, Detail, and Corrections under the ADP/ACP bookmark.
+
+    Args:
+        doc: Open PDF.
+        start_page: First page to search. Page numbers start at 1.
+        end_page: First page not to search. Must be greater than ``start_page``.
+
+    Returns:
+        ``[(title, page), ...]`` in the order Summary, Detail, Corrections.
+        A child that is not on the page is omitted.
+
+    Raises:
+        None.
+
+    Example:
+        Pages headed "Summary" then "Detail" return ``[("Summary", n), ("Detail", n + 1)]``.
+
+    Side effects:
+        None. This function only reads the PDF.
+    """
     found: dict[str, int] = {}
     patterns = {
         "Summary": re.compile(r"^(?:adp\s*/\s*acp\s+)?(?:adp\s*/\s*acp\s+)?summary$", re.I),
@@ -195,7 +270,26 @@ def _adp_children(doc: fitz.Document, start_page: int, end_page: int) -> list[tu
 
 
 def _heading_lines(page: fitz.Page) -> list[str]:
-    """Return the page's printed headings, excluding body-text mentions."""
+    """Read the heading lines at the top of one page.
+
+    Purpose:
+        Give the bookmark search the printed headings, not words inside a paragraph.
+
+    Args:
+        page: One PDF page.
+
+    Returns:
+        Up to the first 14 non-empty lines, with extra spaces removed.
+
+    Raises:
+        None.
+
+    Example:
+        A page whose first line is "Top Heavy Test" returns a list starting with that line.
+
+    Side effects:
+        None.
+    """
     return [
         re.sub(r"\s+", " ", line).strip(" \t\r\n:·")
         for line in (page.get_text("text") or "").splitlines()[:14]
@@ -204,6 +298,28 @@ def _heading_lines(page: fitz.Page) -> list[str]:
 
 
 def _find_section_page(doc: fitz.Document, section_name: str) -> int | None:
+    """Find the page where a report section starts.
+
+    Purpose:
+        Point a bookmark at the page whose heading matches that section.
+
+    Args:
+        doc: Open PDF. An empty document has no pages.
+        section_name: A name from the SOP section list, such as "Top Heavy" or "Cover Letter".
+
+    Returns:
+        The page number, starting at 1. ``None`` when the heading is not in the document.
+        "Cover Letter" returns 1 when the document has at least one page.
+
+    Raises:
+        None.
+
+    Example:
+        ``_find_section_page(doc, "Cover Letter")`` returns ``1`` for a non-empty PDF.
+
+    Side effects:
+        None.
+    """
     if section_name == "Cover Letter":
         return 1 if doc.page_count else None
     pattern = _SECTION_HEADINGS.get(section_name)
@@ -218,6 +334,27 @@ def _find_section_page(doc: fitz.Document, section_name: str) -> int | None:
 
 
 def _is_summary_or_overview(page: fitz.Page) -> bool:
+    """Tell a summary or overview page from a real report page.
+
+    Purpose:
+        Stop a heading mentioned on the summary from being treated as the report itself.
+
+    Args:
+        page: One PDF page.
+
+    Returns:
+        ``True`` when the page is a compliance overview or the Test Summary.
+        ``False`` for a report page.
+
+    Raises:
+        None.
+
+    Example:
+        A page headed "Compliance Testing Summary of Results" returns ``True``.
+
+    Side effects:
+        None.
+    """
     from services.package_polish import is_compliance_overview
 
     text = page.get_text("text") or ""
@@ -227,7 +364,29 @@ def _is_summary_or_overview(page: fitz.Page) -> bool:
 
 
 def _bookmark_page(doc: fitz.Document, section_name: str, detected_page: int) -> int:
-    """The cover sentence 'ADP/ACP test is included' is not the test bookmark."""
+    """Choose the page number a bookmark should open.
+
+    Purpose:
+        Keep the ADP/ACP bookmark on the test report, not on a cover sentence that mentions the test.
+
+    Args:
+        doc: Open PDF.
+        section_name: Section being bookmarked.
+        detected_page: Page number already found for that section. Must be at least 1.
+
+    Returns:
+        A page number inside the document. An ADP/ACP heading elsewhere in the PDF wins
+        over ``detected_page``.
+
+    Raises:
+        None.
+
+    Example:
+        An empty document returns ``1``. A detected page past the last page is clamped to the last page.
+
+    Side effects:
+        None.
+    """
     if section_name == "ADP/ACP":
         for index, page in enumerate(doc):
             if _TEST_HEADING.search(page.get_text("text") or ""):
@@ -242,7 +401,29 @@ def adp_acp_bookmark_title(
     doc: fitz.Document | None = None,
     source_files: list[str] | None = None,
 ) -> str:
-    """TEST23 §O: ADP Test, ACP Test, or ADP/ACP Tests from what is in the package."""
+    """Choose the ADP/ACP bookmark title.
+
+    Purpose:
+        Name the bookmark "ADP Test", "ACP Test", or "ADP/ACP Tests" from what was uploaded.
+
+    Args:
+        profile: Plan profile. A 403(b) plan uses the title from plan_403b.yaml.
+        doc: Open PDF, or ``None`` when only file names should be checked.
+        source_files: Uploaded file names. ``None`` means no file names.
+
+    Returns:
+        "ACP Test" for a 403(b) plan. Otherwise "ADP Test", "ACP Test", or "ADP/ACP Tests".
+
+    Raises:
+        None.
+
+    Example:
+        ``adp_acp_bookmark_title(profile)`` returns "ACP Test" when ``profile.plan_type`` is "403b".
+        A file named "555001 ADP Test.pdf" on a 401(k) plan returns "ADP Test".
+
+    Side effects:
+        None. Reads plan_403b.yaml when the plan is 403(b).
+    """
     override = bookmark_overrides(profile.plan_type).get("ADP/ACP")
     if override:
         return override
@@ -255,6 +436,27 @@ def adp_acp_bookmark_title(
 
 
 def _adp_acp_present(source_files: list[str], doc: fitz.Document | None) -> tuple[bool, bool]:
+    """See whether the package contains an ADP report, an ACP report, or both.
+
+    Purpose:
+        Decide which ADP/ACP bookmark title matches the uploaded files and page headings.
+
+    Args:
+        source_files: Uploaded file names. An empty list means no file names.
+        doc: Open PDF, or ``None`` to look at file names only.
+
+    Returns:
+        ``(has_adp, has_acp)``. A file or heading that names both tests sets both to ``True``.
+
+    Raises:
+        None.
+
+    Example:
+        ``_adp_acp_present(["555001 ADP Test.pdf"], None)`` returns ``(True, False)``.
+
+    Side effects:
+        None.
+    """
     blob = " ".join(_file_tokens(name) for name in source_files)
     has_adp = bool(_ADP_FILE.search(blob) or _BOTH_FILE.search(blob))
     has_acp = bool(_ACP_FILE.search(blob) or _BOTH_FILE.search(blob))
@@ -271,12 +473,53 @@ def _adp_acp_present(source_files: list[str], doc: fitz.Document | None) -> tupl
 
 
 def _file_tokens(name: str) -> str:
+    """Turn a file name into lowercase words.
+
+    Purpose:
+        Let the ADP/ACP search ignore punctuation in the file name.
+
+    Args:
+        name: A file name. An empty string is allowed.
+
+    Returns:
+        The name in lowercase, with every character that is not a letter or digit replaced by a space.
+
+    Raises:
+        None.
+
+    Example:
+        ``_file_tokens("555001 ADP-Test.pdf")`` returns ``"555001 adp test pdf"``.
+
+    Side effects:
+        None.
+    """
     return re.sub(r"[^a-z0-9]+", " ", name.lower())
 
 
 def _bookmark_map() -> dict[str, str]:
-    data = yaml.safe_load((CONFIG_DIR / "package_order.yaml").read_text(encoding="utf-8")) or {}
-    raw = data.get("bookmarks") or {}
+    """Load the default bookmark titles.
+
+    Purpose:
+        Read the bookmark title for each report section.
+
+    Args:
+        None.
+
+    Returns:
+        ``{section name: bookmark title}`` from the bookmarks block in config/package_order.yaml.
+        A list in that block is returned as ``{item: item}``.
+
+    Raises:
+        OSError: config/package_order.yaml cannot be read.
+        yaml.YAMLError: that file is not valid YAML.
+
+    Example:
+        ``_bookmark_map()["Cover Letter"]`` returns the title stored for Cover Letter.
+
+    Side effects:
+        None. This function only reads a file and returns a value.
+    """
+    raw = load_package_order().get("bookmarks") or {}
     if isinstance(raw, dict):
         return {str(key): str(value) for key, value in raw.items()}
     return {str(item): str(item) for item in raw}

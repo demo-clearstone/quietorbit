@@ -10,6 +10,26 @@ from services.pdf_pages import pdf_page_count_path, pdf_page_texts_path
 
 
 def _resolved_dir(raw_path: str) -> Path:
+    """Resolved dir.
+
+    Purpose:
+        Resolved dir.
+
+    Args:
+        raw_path: Raw path. Type: str.
+
+    Returns:
+        a Path.
+
+    Raises:
+        HTTPException: The assembly input is not usable.
+
+    Example:
+        _resolved_dir("text") returns a Path.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     path = Path(raw_path.strip()).expanduser()
     try:
         path = path.resolve()
@@ -21,6 +41,26 @@ def _resolved_dir(raw_path: str) -> Path:
 
 
 def _folder_entries(path: Path) -> tuple[list[Path], list[str]]:
+    """Folder entries.
+
+    Purpose:
+        Folder entries.
+
+    Args:
+        path: Path to a file on disk.
+
+    Returns:
+        tuple[list[Path], list[str]].
+
+    Raises:
+        None.
+
+    Example:
+        _folder_entries(path) returns tuple[list[Path], list[str]].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     skipped: list[str] = []
     source_paths: list[Path] = []
     for item in sorted(path.iterdir(), key=lambda p: p.name.lower()):
@@ -34,7 +74,26 @@ def _folder_entries(path: Path) -> tuple[list[Path], list[str]]:
 
 
 def list_folder_files(raw_path: str) -> dict:
-    """Return PDF/Excel names in a folder so the UI can show Up/Down/Remove."""
+    """Return PDF/Excel names in a folder so the UI can show Up/Down/Remove.
+
+    Purpose:
+        Return PDF/Excel names in a folder so the UI can show Up/Down/Remove.
+
+    Args:
+        raw_path: Raw path. Type: str.
+
+    Returns:
+        a dict.
+
+    Raises:
+        HTTPException: The assembly input is not usable.
+
+    Example:
+        list_folder_files("text") returns a dict.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     path = _resolved_dir(raw_path)
     source_paths, skipped = _folder_entries(path)
     files = []
@@ -59,7 +118,27 @@ def apply_file_order(
     uploads: list[tuple[str, bytes]],
     file_order: list[str],
 ) -> tuple[list[tuple[str, bytes]], list[str]]:
-    """Keep only named files, in the UI order. Missing names become warnings."""
+    """Keep only named files, in the UI order. Missing names become warnings.
+
+    Purpose:
+        Keep only named files, in the UI order. Missing names become warnings.
+
+    Args:
+        uploads: Pairs of file name and file bytes.
+        file_order: File order. Type: list[str].
+
+    Returns:
+        a tuple[list[tuple[str, bytes]], list[str]].
+
+    Raises:
+        None.
+
+    Example:
+        apply_file_order(uploads, []) returns a tuple[list[tuple[str, bytes]], list[str]].
+
+    Side effects:
+        Changes the PDF or the object passed in.
+    """
     by_name = {name: data for name, data in uploads}
     ordered: list[tuple[str, bytes]] = []
     warnings: list[str] = []
@@ -77,7 +156,26 @@ def apply_file_order(
 
 
 def load_pdfs_from_folder(raw_path: str) -> tuple[list[tuple[str, bytes]], list[str]]:
-    """Read PDFs and the Val Assembly Excel from a Valuation Package folder."""
+    """Read PDFs and the Val Assembly Excel from a Valuation Package folder.
+
+    Purpose:
+        Read PDFs and the Val Assembly Excel from a Valuation Package folder.
+
+    Args:
+        raw_path: Raw path. Type: str.
+
+    Returns:
+        a tuple[list[tuple[str, bytes]], list[str]].
+
+    Raises:
+        HTTPException: The assembly input is not usable. OSError: A file cannot be read or written.
+
+    Example:
+        load_pdfs_from_folder("text") returns a tuple[list[tuple[str, bytes]], list[str]].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     path = _resolved_dir(raw_path)
     source_paths, skipped = _folder_entries(path)
     pdf_paths = [item for item in source_paths if item.suffix.lower() == ".pdf"]

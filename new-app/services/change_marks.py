@@ -9,6 +9,29 @@ import fitz
 
 
 def add_mark(marks: list[dict] | None, page: int, rect: fitz.Rect, label: str) -> None:
+    """Add mark.
+
+    Purpose:
+        Add mark.
+
+    Args:
+        marks: Highlight rectangles already collected.
+        page: One PDF page.
+        rect: Rect. Type: fitz.Rect.
+        label: Label. Type: str.
+
+    Returns:
+        None.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        add_mark(marks, page, rect) returns None.
+
+    Side effects:
+        Changes the PDF or the object passed in.
+    """
     if marks is None:
         return
     if rect.is_empty or rect.is_infinite:
@@ -26,12 +49,52 @@ def add_mark(marks: list[dict] | None, page: int, rect: fitz.Rect, label: str) -
 
 
 def save_marks(pdf_path: Path, marks: list[dict]) -> None:
-    """Saving the highlight marks."""
+    """Saving the highlight marks.
+
+    Purpose:
+        Saving the highlight marks.
+
+    Args:
+        pdf_path: Path to a PDF on disk.
+        marks: Highlight rectangles already collected for the PDF.
+
+    Returns:
+        None.
+
+    Raises:
+        OSError: A file cannot be read or written.
+
+    Example:
+        save_marks(pdf_path, []) returns None.
+
+    Side effects:
+        Writes or changes a file on disk.
+    """
     path = pdf_path.parent / "highlights.json"
     path.write_text(json.dumps(marks), encoding="utf-8")
 
 
 def load_marks(pdf_path: Path) -> list[dict]:
+    """Load marks.
+
+    Purpose:
+        Load marks.
+
+    Args:
+        pdf_path: Path to a PDF on disk.
+
+    Returns:
+        list[dict].
+
+    Raises:
+        OSError: A file cannot be read or written.
+
+    Example:
+        load_marks(pdf_path) returns list[dict].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     path = pdf_path.parent / "highlights.json"
     if not path.is_file():
         return []
@@ -43,7 +106,27 @@ def load_marks(pdf_path: Path) -> list[dict]:
 
 
 def apply_highlights(pdf_path: Path, marks: list[dict]) -> bytes:
-    """Return a copy with yellow boxes on rewritten text. Does not write that copy to disk."""
+    """Return a copy with yellow boxes on rewritten text. Does not write that copy to disk.
+
+    Purpose:
+        Return a copy with yellow boxes on rewritten text. Does not write that copy to disk.
+
+    Args:
+        pdf_path: Path to a PDF on disk.
+        marks: Highlight rectangles already collected for the PDF.
+
+    Returns:
+        bytes.
+
+    Raises:
+        OSError: A file cannot be read or written. A closed PDF raises from PyMuPDF.
+
+    Example:
+        apply_highlights(pdf_path, []) returns bytes.
+
+    Side effects:
+        Writes or changes a file on disk.
+    """
     doc = fitz.open(pdf_path)
     try:
         for mark in marks:

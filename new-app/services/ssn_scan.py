@@ -16,7 +16,26 @@ _EIN = re.compile(r"\b\d{2}-\d{7}\b")
 
 
 def scan_ssns(doc: fitz.Document) -> list[int]:
-    """Return 1-based page numbers that contain a Social Security Number."""
+    """Return 1-based page numbers that contain a Social Security Number.
+
+    Purpose:
+        Return 1-based page numbers that contain a Social Security Number.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+
+    Returns:
+        list[int].
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        scan_ssns(doc) returns list[int].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     pages: list[int] = []
     for page in doc:
         text = page.get_text("text") or ""

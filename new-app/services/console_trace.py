@@ -84,6 +84,27 @@ _PURPOSE = {
 
 
 def summarize(value: object, *, depth: int = 0) -> object:
+    """Summarize.
+
+    Purpose:
+        Summarize.
+
+    Args:
+        value: Value. Type: object.
+        depth: Depth. Type: int.
+
+    Returns:
+        a object.
+
+    Raises:
+        None.
+
+    Example:
+        summarize(value, depth=1) returns a object.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     if value is None or isinstance(value, bool):
         return value
     if isinstance(value, (bytes, bytearray)):
@@ -130,6 +151,26 @@ def summarize(value: object, *, depth: int = 0) -> object:
 
 
 def start_trace(token: str) -> None:
+    """Start trace.
+
+    Purpose:
+        Start trace.
+
+    Args:
+        token: Id for this assembly trace.
+
+    Returns:
+        None.
+
+    Raises:
+        HTTPException: The assembly input is not usable.
+
+    Example:
+        start_trace("text") returns None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     with _LOCK:
         for key, trace in list(_TRACES.items()):
             if trace["status"] != "running" and time.monotonic() - trace["created"] > 900:
@@ -145,6 +186,27 @@ def start_trace(token: str) -> None:
 
 
 def read_trace(token: str, after: int = 0) -> dict:
+    """Read trace.
+
+    Purpose:
+        Read trace.
+
+    Args:
+        token: Id for this assembly trace.
+        after: After. Type: int.
+
+    Returns:
+        a dict.
+
+    Raises:
+        HTTPException: The assembly input is not usable.
+
+    Example:
+        read_trace("text", 1) returns a dict.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     with _LOCK:
         trace = _TRACES.get(token)
         if trace is None:
@@ -158,12 +220,54 @@ def read_trace(token: str, after: int = 0) -> dict:
 
 
 def run_traced(token: str, function, *args, **kwargs):
-    """Record one step per function the assembly procedure calls directly."""
+    """Record one step per function the assembly procedure calls directly.
+
+    Purpose:
+        Record one step per function the assembly procedure calls directly.
+
+    Args:
+        token: Id for this assembly trace.
+        function: Function. Type: unspecified.
+        *args: Args. Type: unspecified.
+        **kwargs: Kwargs. Type: unspecified.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+
+    Example:
+        run_traced("text", function) returns None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     open_calls: dict[int, tuple[dict, float]] = {}
     started = time.perf_counter()
     root_name = function.__name__
 
     def append(event: dict) -> None:
+        """Append.
+
+        Purpose:
+            Append.
+
+        Args:
+            event: Event. Type: dict.
+
+        Returns:
+            None.
+
+        Raises:
+            None.
+
+        Example:
+            append({}) returns None.
+
+        Side effects:
+            None. This function only reads data and returns a value.
+        """
         with _LOCK:
             trace = _TRACES[token]
             if len(trace["events"]) >= _MAX_EVENTS:
@@ -174,6 +278,28 @@ def run_traced(token: str, function, *args, **kwargs):
             trace["events"].append(event)
 
     def profile(frame, event, result):
+        """Profile.
+
+        Purpose:
+            Profile.
+
+        Args:
+            frame: Frame. Type: unspecified.
+            event: Event. Type: unspecified.
+            result: Result. Type: unspecified.
+
+        Returns:
+            None.
+
+        Raises:
+            None.
+
+        Example:
+            profile(frame, event, result) returns None.
+
+        Side effects:
+            None. This function only reads data and returns a value.
+        """
         if event not in {"call", "return"}:
             return
         code = frame.f_code
@@ -250,6 +376,26 @@ def run_traced(token: str, function, *args, **kwargs):
 
 
 def _is_named_blob(item: object) -> bool:
+    """Is named blob.
+
+    Purpose:
+        Is named blob.
+
+    Args:
+        item: Item. Type: object.
+
+    Returns:
+        True or False.
+
+    Raises:
+        None.
+
+    Example:
+        _is_named_blob(item) returns True or False.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     return (
         isinstance(item, tuple)
         and len(item) >= 2
@@ -259,6 +405,27 @@ def _is_named_blob(item: object) -> bool:
 
 
 def _clip(text: str, limit: int = 160) -> str:
+    """Clip.
+
+    Purpose:
+        Clip.
+
+    Args:
+        text: Text from a page or a file.
+        limit: Limit. Type: int.
+
+    Returns:
+        a str.
+
+    Raises:
+        None.
+
+    Example:
+        _clip("text", 1) returns a str.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     compact = " ".join(text.split())
     if len(compact) <= limit:
         return compact
@@ -266,6 +433,26 @@ def _clip(text: str, limit: int = 160) -> str:
 
 
 def _outer_caller(frame):
+    """Outer caller.
+
+    Purpose:
+        Outer caller.
+
+    Args:
+        frame: Frame. Type: unspecified.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+
+    Example:
+        _outer_caller(frame) returns None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     back = frame.f_back
     while back is not None and back.f_code.co_name.startswith("<"):
         back = back.f_back
@@ -273,7 +460,28 @@ def _outer_caller(frame):
 
 
 def _purpose(file_name: str, function_name: str, inputs: dict) -> str:
-    """One short action for this step, including the file or phase when that makes it distinct."""
+    """One short action for this step, including the file or phase when that makes it distinct.
+
+    Purpose:
+        One short action for this step, including the file or phase when that makes it distinct.
+
+    Args:
+        file_name: File name. Type: str.
+        function_name: Function name. Type: str.
+        inputs: Inputs. Type: dict.
+
+    Returns:
+        a str.
+
+    Raises:
+        None.
+
+    Example:
+        _purpose("text", "text", {}) returns a str.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     if function_name == "matched_spec":
         name = inputs.get("name") or inputs.get("filename")
         if isinstance(name, str) and name:

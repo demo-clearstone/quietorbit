@@ -4,7 +4,7 @@ This is the record of the assembly rules requested for the MOA valuation package
 
 The finished file is `{plan number}_{beginning year}-Valuation.pdf`, for example `900062_2025-Valuation.pdf`. When the source folder is the plan’s Valuation Package folder, a copy is also saved in the plan Testing folder above it.
 
-Check **Assembly stops** before Process when a bad address, name, Social Security number, Result Summary line, plan year end, or missing report must stop the package. With that box checked, the PDF, email draft, and log are not written until the issue is corrected.
+**Assembly stops** is on by default. A bad address, name, Social Security number, Result Summary line, plan year end, or missing report stops the package. With that box checked, the PDF, email draft, and log are not written until the issue is corrected. Turn the box off only when the package should still be saved and the problems reported on the review.
 
 ## File name and order
 
@@ -16,7 +16,7 @@ A control group is not combined by the app. The tester puts the plan name on tho
 
 ## Cover letter
 
-The cover keeps the Mutual of America stamp at the upper right. The company name, address, RE plan name, and plan year end are checked against the valuation package Excel. The letter date is rewritten to today, with no leading zero on the day.
+The cover keeps the Mutual of America stamp at the upper right. The company name, address, RE plan name, and plan year end are checked against the valuation package Excel. Every Process rewrites the letter date to today, with no leading zero on the day. Every Process also rewrites off-calendar 402(g) dates. The checkbox **Retype 402(g) dates and HCE %** rewrites the prior-year HCE percentage printed on the package. That box is off by default.
 
 The employer address must have line 1 and city, state, and ZIP. Line 2 is optional. A PO Box counts as line 1, so `PO BOX 7174` and `EDMOND, OK 73083` are a complete address. A missing street, city, state, or ZIP stops assembly.
 
@@ -28,7 +28,7 @@ The summary drives the later pages. Top heavy percentage must match the Top Heav
 
 410(b) lines mean: Standard is profit sharing and SHNE, 401(k) is salary deferral and Roth, and 401(m) is match and safe harbor match. If the plan has contributions other than deferrals and Roth, those 410(b) lines must be on the summary. A failed 410(b) with a passed average benefits test keeps the sentence “Average Benefits Test Passed; no action needed for Failed 410(b) Coverage Test”.
 
-The BRF result stays on the summary. A 401(k) package does not include a BRF report. A 403(b) package may keep it.
+The BRF result stays on the summary. A 401(k) package does not include a BRF report. A 403(b) package keeps the BRF report and bookmarks it.
 
 401(a)(4), 414(s), 402(g), 415(c), ADP, and ACP on the summary must match their reports. An unresolved “Pass/Fail” or “Plan is/is not” stops assembly.
 
@@ -44,6 +44,8 @@ Pages follow package pages 2, 3, and 4.
 - A true-up, an annual allocation, a log note to include contribution wording, or a variance client copy keeps the contributions paragraph.
 - Top heavy above 60% keeps the top-heavy paragraph.
 - If none of those apply, the page keeps only the green line “NO IMMEDIATE ACTION IS REQUIRED AT THIS TIME”.
+- A 403(b) package uses ACP wording for the prior-year, current-year, and after-12-month paragraphs.
+- A missing fact on an Action Required rule removes that paragraph. The app does not leave the paragraph because the fact was blank.
 - After a paragraph is removed, the remaining text packs up. A page left with only the heading is removed.
 
 Sample: `output/annual-valuation-action-required.pdf`.
@@ -91,7 +93,7 @@ The ADP/ACP Test Results page decides the method. “ADP TEST USING PRIOR YEAR N
 The other bullets:
 
 - Highly Compensated Employees this year and none next year keeps that bullet.
-- Catch-up stays unless the plan does not allow catch-up contributions.
+- Catch-up stays unless the plan does not allow catch-up contributions. A blank catch-up fact leaves the bullet in the package. The prior-year ADP/ACP bullet is filled with the NHCE rate and the HCE maximum during assembly. That fill does not depend on the HCE checkbox.
 - Top heavy stays when the plan is top heavy.
 - The Mutual of America combined-testing bullet always stays.
 - The per-payroll match bullet stays only when the match is calculated each payroll.
@@ -144,4 +146,4 @@ These run when **Assembly stops** is checked. The package is not saved until the
 - Send the email. The draft subject and body are written, and the To line is left blank for the reviewer.
 - Combine a control group and put the plan name on those tests before upload.
 - Fill the tester columns on the Val Assembly log: FIS, related plans, MEP, and safe harbor.
-- Turn on **Assembly stops** for the stop rules above. With the box off, the package is still built and the problems are reported on the review instead of blocking the save.
+- Leave **Assembly stops** on. It is checked by default. With the box off, the package is still built and the problems are reported on the review instead of blocking the save.

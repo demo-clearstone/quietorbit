@@ -23,6 +23,26 @@ _MIN_REPLACEMENT_FONT_SIZE = 6.0
 
 
 def outline(pdf_path: Path) -> dict:
+    """Outline.
+
+    Purpose:
+        Outline.
+
+    Args:
+        pdf_path: Path to a PDF on disk.
+
+    Returns:
+        dict.
+
+    Raises:
+        OSError: A file cannot be read or written. A closed PDF raises from PyMuPDF.
+
+    Example:
+        outline(pdf_path) returns dict.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     with _LOCK:
         doc = fitz.open(pdf_path)
         try:
@@ -41,6 +61,28 @@ def outline(pdf_path: Path) -> dict:
 
 
 def page_png(pdf_path: Path, page_number: int, scale: float = _PAGE_SCALE) -> bytes:
+    """Page png.
+
+    Purpose:
+        Page png.
+
+    Args:
+        pdf_path: Path to a PDF on disk.
+        page_number: Page number starting at 1.
+        scale: How large to draw the page image. Must be greater than 0.
+
+    Returns:
+        a bytes.
+
+    Raises:
+        OSError: A file cannot be read or written. A closed PDF raises from PyMuPDF.
+
+    Example:
+        page_png(pdf_path, 1, 1.0) returns a bytes.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     key = (str(pdf_path), pdf_path.stat().st_mtime_ns, page_number, scale)
     cached = _PNG_CACHE.get(key)
     if cached is not None:
@@ -63,6 +105,27 @@ def page_png(pdf_path: Path, page_number: int, scale: float = _PAGE_SCALE) -> by
 
 
 def page_lines(pdf_path: Path, page_number: int) -> dict:
+    """Page lines.
+
+    Purpose:
+        Page lines.
+
+    Args:
+        pdf_path: Path to a PDF on disk.
+        page_number: Page number starting at 1.
+
+    Returns:
+        a dict.
+
+    Raises:
+        OSError: A file cannot be read or written. A closed PDF raises from PyMuPDF.
+
+    Example:
+        page_lines(pdf_path, 1) returns a dict.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     with _LOCK:
         doc = fitz.open(pdf_path)
         try:
@@ -86,6 +149,27 @@ def page_lines(pdf_path: Path, page_number: int) -> dict:
 
 
 def _split_at_caret(text: str, caret: int) -> tuple[str, str]:
+    """Split at caret.
+
+    Purpose:
+        Split at caret.
+
+    Args:
+        text: Text from a page or a file.
+        caret: Character index inside the line. 0 is the start of the line.
+
+    Returns:
+        a tuple[str, str].
+
+    Raises:
+        None.
+
+    Example:
+        _split_at_caret("text", 1) returns a tuple[str, str].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     value = text or ""
     cut = max(0, min(int(caret), len(value)))
     if cut <= 0 or cut >= len(value.rstrip()):
@@ -101,7 +185,31 @@ def replace_line(
     marks: list[dict],
     copy_path: Path | None = None,
 ) -> list[dict]:
-    """Replace a line, shrinking its font as needed to stay within the original line width."""
+    """Replace a line, shrinking its font as needed to stay within the original line width.
+
+    Purpose:
+        Replace a line, shrinking its font as needed to stay within the original line width.
+
+    Args:
+        pdf_path: Path to a PDF on disk.
+        page_number: Page number starting at 1.
+        rect: Rect. Type: tuple[float, float, float, float].
+        new_text: New text. Type: str.
+        marks: Highlight rectangles already collected.
+        copy_path: Copy path. Type: Path | None.
+
+    Returns:
+        a list of dict.
+
+    Raises:
+        None.
+
+    Example:
+        replace_line(pdf_path, 1, 1.0) returns a list of dict.
+
+    Side effects:
+        Changes the PDF or the object passed in.
+    """
     return replace_lines(pdf_path, page_number, [(rect, new_text)], marks, copy_path=copy_path)
 
 
@@ -112,7 +220,30 @@ def replace_lines(
     marks: list[dict],
     copy_path: Path | None = None,
 ) -> list[dict]:
-    """Replace several lines on one page in a single save."""
+    """Replace several lines on one page in a single save.
+
+    Purpose:
+        Replace several lines on one page in a single save.
+
+    Args:
+        pdf_path: Path to a PDF on disk.
+        page_number: Page number starting at 1.
+        edits: Edits. Type: list[tuple[tuple[float, float, float, float], str]].
+        marks: Highlight rectangles already collected.
+        copy_path: Copy path. Type: Path | None.
+
+    Returns:
+        a list of dict.
+
+    Raises:
+        OSError: A file cannot be read or written. A closed PDF raises from PyMuPDF.
+
+    Example:
+        replace_lines(pdf_path, 1, 1.0) returns a list of dict.
+
+    Side effects:
+        Writes a file to disk.
+    """
     with _LOCK:
         doc = fitz.open(pdf_path)
         try:
@@ -153,7 +284,32 @@ def shift_line_down(
     marks: list[dict],
     copy_path: Path | None = None,
 ) -> list[dict]:
-    """Move text from the caret onto the next line and push the lines under it down."""
+    """Move text from the caret onto the next line and push the lines under it down.
+
+    Purpose:
+        Move text from the caret onto the next line and push the lines under it down.
+
+    Args:
+        pdf_path: Path to a PDF on disk.
+        page_number: Page number starting at 1.
+        rect: Rect. Type: tuple[float, float, float, float].
+        new_text: New text. Type: str.
+        caret: Character index inside the line. 0 is the start of the line.
+        marks: Highlight rectangles already collected.
+        copy_path: Copy path. Type: Path | None.
+
+    Returns:
+        a list of dict.
+
+    Raises:
+        OSError: A file cannot be read or written. A closed PDF raises from PyMuPDF.
+
+    Example:
+        shift_line_down(pdf_path, 1, 1.0) returns a list of dict.
+
+    Side effects:
+        Writes a file to disk.
+    """
     stay, move = _split_at_caret(new_text, caret)
     if not move:
         raise ValueError("There is no text to move onto the next line.")
@@ -243,6 +399,31 @@ def shift_line_down(
 
 
 def _insert_shifted(page: fitz.Page, point: fitz.Point, text: str, size: float, fontname: str, color: tuple[float, float, float]) -> None:
+    """Insert shifted.
+
+    Purpose:
+        Insert shifted.
+
+    Args:
+        page: One PDF page.
+        point: Point. Type: fitz.Point.
+        text: Text from a page or a file.
+        size: Size. Type: float.
+        fontname: Fontname. Type: str.
+        color: Color. Type: tuple[float, float, float].
+
+    Returns:
+        None.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _insert_shifted(page, point, "text") returns None.
+
+    Side effects:
+        Changes the PDF passed in. Does not save the file by itself.
+    """
     try:
         page.insert_text(point, text, fontsize=size, fontname=fontname, color=color)
     except Exception:
@@ -261,7 +442,34 @@ def modify_pages(
     page_size: str | None = None,
     copy_path: Path | None = None,
 ) -> tuple[int, int, list[dict]]:
-    """Rotate, move, delete, or insert pages. Pages in the API are 1-based."""
+    """Rotate, move, delete, or insert pages. Pages in the API are 1-based.
+
+    Purpose:
+        Rotate, move, delete, or insert pages. Pages in the API are 1-based.
+
+    Args:
+        pdf_path: Path to a PDF on disk.
+        action: Action. Type: str.
+        page_number: Page number starting at 1.
+        marks: Highlight rectangles already collected.
+        target_page: Target page. Type: int | None.
+        inserted_pdf: Inserted pdf. Type: bytes | None.
+        rect: Rect. Type: tuple[float, float, float, float] | None.
+        page_size: Page size. Type: str | None.
+        copy_path: Copy path. Type: Path | None.
+
+    Returns:
+        a tuple[int, int, list[dict]].
+
+    Raises:
+        OSError: A file cannot be read or written. A closed PDF raises from PyMuPDF.
+
+    Example:
+        modify_pages(pdf_path, "text", 1, target_page=1, inserted_pdf=inserted_pdf, rect=1.0, page_size="text") returns a tuple[int, int, list[dict]].
+
+    Side effects:
+        Writes a file to disk.
+    """
     with _LOCK:
         doc = fitz.open(pdf_path)
         try:
@@ -307,6 +515,26 @@ def modify_pages(
                 order.insert(new_index, moved)
                 doc.select(order)
                 def moved_index(index: int) -> int:
+                    """Moved index.
+
+                    Purpose:
+                        Moved index.
+
+                    Args:
+                        index: Index. Type: int.
+
+                    Returns:
+                        a int.
+
+                    Raises:
+                        None.
+
+                    Example:
+                        moved_index(1) returns a int.
+
+                    Side effects:
+                        None. This function only reads data and returns a value.
+                    """
                     if index == old_index:
                         return new_index
                     if old_index < new_index and old_index < index <= new_index:
@@ -348,6 +576,31 @@ def modify_pages(
 
 
 def add_text(pdf_path: Path, page_number: int, x: float, y: float, text: str, copy_path: Path | None = None) -> None:
+    """Add text.
+
+    Purpose:
+        Add text.
+
+    Args:
+        pdf_path: Path to a PDF on disk.
+        page_number: Page number starting at 1.
+        x: X. Type: float.
+        y: Y. Type: float.
+        text: Text from a page or a file.
+        copy_path: Copy path. Type: Path | None.
+
+    Returns:
+        None.
+
+    Raises:
+        OSError: A file cannot be read or written. A closed PDF raises from PyMuPDF.
+
+    Example:
+        add_text(pdf_path, 1, 1.0) returns None.
+
+    Side effects:
+        Writes a file to disk.
+    """
     value = (text or "").strip()
     if not value or len(value) > 2000:
         raise ValueError("Enter text between 1 and 2,000 characters.")
@@ -374,6 +627,29 @@ def add_highlight(
     rect: tuple[float, float, float, float],
     copy_path: Path | None = None,
 ) -> None:
+    """Add highlight.
+
+    Purpose:
+        Add highlight.
+
+    Args:
+        pdf_path: Path to a PDF on disk.
+        page_number: Page number starting at 1.
+        rect: Rect. Type: tuple[float, float, float, float].
+        copy_path: Copy path. Type: Path | None.
+
+    Returns:
+        None.
+
+    Raises:
+        OSError: A file cannot be read or written. A closed PDF raises from PyMuPDF.
+
+    Example:
+        add_highlight(pdf_path, 1, 1.0) returns None.
+
+    Side effects:
+        Writes a file to disk.
+    """
     with _LOCK:
         doc = fitz.open(pdf_path)
         try:
@@ -393,6 +669,28 @@ def add_highlight(
 
 
 def search_pdf(pdf_path: Path, query: str, limit: int = 100) -> list[dict]:
+    """Search pdf.
+
+    Purpose:
+        Search pdf.
+
+    Args:
+        pdf_path: Path to a PDF on disk.
+        query: Text to search for. An empty string returns no hits.
+        limit: Limit. Type: int.
+
+    Returns:
+        a list of dict.
+
+    Raises:
+        OSError: A file cannot be read or written. A closed PDF raises from PyMuPDF.
+
+    Example:
+        search_pdf(pdf_path, "text", 1) returns a list of dict.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     phrase = " ".join((query or "").split())
     if not phrase:
         return []
@@ -421,6 +719,31 @@ def search_pdf(pdf_path: Path, query: str, limit: int = 100) -> list[dict]:
 
 
 def update_bookmark(pdf_path: Path, action: str, *, index: int | None = None, title: str = "", page: int = 1, level: int = 1) -> list[dict]:
+    """Update bookmark.
+
+    Purpose:
+        Update bookmark.
+
+    Args:
+        pdf_path: Path to a PDF on disk.
+        action: Action. Type: str.
+        index: Index. Type: int | None.
+        title: Title. Type: str.
+        page: One PDF page.
+        level: Level. Type: int.
+
+    Returns:
+        a list of dict.
+
+    Raises:
+        OSError: A file cannot be read or written. A closed PDF raises from PyMuPDF.
+
+    Example:
+        update_bookmark(pdf_path, "text", index=1, title="text", page=page, level=1) returns a list of dict.
+
+    Side effects:
+        Writes a file to disk.
+    """
     clean_title = " ".join((title or "").split())
     if action in {"add", "rename"} and (not clean_title or len(clean_title) > 120):
         raise ValueError("Bookmark title must be between 1 and 120 characters.")
@@ -463,6 +786,26 @@ def update_bookmark(pdf_path: Path, action: str, *, index: int | None = None, ti
 
 
 def validate_bookmarks(pdf_path: Path) -> dict:
+    """Validate bookmarks.
+
+    Purpose:
+        Validate bookmarks.
+
+    Args:
+        pdf_path: Path to a PDF on disk.
+
+    Returns:
+        dict.
+
+    Raises:
+        OSError: A file cannot be read or written. A closed PDF raises from PyMuPDF.
+
+    Example:
+        validate_bookmarks(pdf_path) returns dict.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     problems: list[dict] = []
     with _LOCK:
         doc = fitz.open(pdf_path)
@@ -486,7 +829,28 @@ def validate_bookmarks(pdf_path: Path) -> dict:
 
 
 def add_secure_redaction(pdf_path: Path, page_number: int, rect: tuple[float, float, float, float]) -> int:
-    """Permanently remove text and redact touched image pixels and line art."""
+    """Permanently remove text and redact touched image pixels and line art.
+
+    Purpose:
+        Permanently remove text and redact touched image pixels and line art.
+
+    Args:
+        pdf_path: Path to a PDF on disk.
+        page_number: Page number starting at 1.
+        rect: Rect. Type: tuple[float, float, float, float].
+
+    Returns:
+        a int.
+
+    Raises:
+        OSError: A file cannot be read or written. A closed PDF raises from PyMuPDF.
+
+    Example:
+        add_secure_redaction(pdf_path, 1, 1.0) returns a int.
+
+    Side effects:
+        Writes a file to disk.
+    """
     with _LOCK:
         doc = fitz.open(pdf_path)
         try:
@@ -523,6 +887,31 @@ def add_secure_redaction(pdf_path: Path, page_number: int, rect: tuple[float, fl
 
 
 def add_annotation(pdf_path: Path, page_number: int, action: str, rect: tuple[float, float, float, float], *, text: str = "", points: list[list[float]] | None = None) -> None:
+    """Add annotation.
+
+    Purpose:
+        Add annotation.
+
+    Args:
+        pdf_path: Path to a PDF on disk.
+        page_number: Page number starting at 1.
+        action: Action. Type: str.
+        rect: Rect. Type: tuple[float, float, float, float].
+        text: Text from a page or a file.
+        points: Points. Type: list[list[float]] | None.
+
+    Returns:
+        None.
+
+    Raises:
+        OSError: A file cannot be read or written. A closed PDF raises from PyMuPDF.
+
+    Example:
+        add_annotation(pdf_path, 1, "text", text="text", points=1.0) returns None.
+
+    Side effects:
+        Writes a file to disk.
+    """
     value = (text or "").strip()
     if len(value) > 1000:
         raise ValueError("Annotation text must be 1,000 characters or fewer.")
@@ -565,10 +954,51 @@ def add_annotation(pdf_path: Path, page_number: int, action: str, rect: tuple[fl
 
 
 def _temporary_pdf_path(pdf_path: Path) -> Path:
+    """Temporary pdf path.
+
+    Purpose:
+        Temporary pdf path.
+
+    Args:
+        pdf_path: Path to a PDF on disk.
+
+    Returns:
+        Path.
+
+    Raises:
+        None.
+
+    Example:
+        _temporary_pdf_path(pdf_path) returns Path.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     return pdf_path.with_name(pdf_path.stem + ".edit" + pdf_path.suffix)
 
 
 def _sync_saved_copy(pdf_path: Path, copy_path: Path | None) -> None:
+    """Sync saved copy.
+
+    Purpose:
+        Sync saved copy.
+
+    Args:
+        pdf_path: Path to a PDF on disk.
+        copy_path: Copy path. Type: Path | None.
+
+    Returns:
+        None.
+
+    Raises:
+        OSError: A file cannot be read or written.
+
+    Example:
+        _sync_saved_copy(pdf_path, copy_path) returns None.
+
+    Side effects:
+        Writes a file to disk.
+    """
     if copy_path is None or not copy_path.parent.exists():
         return
     try:
@@ -578,12 +1008,53 @@ def _sync_saved_copy(pdf_path: Path, copy_path: Path | None) -> None:
 
 
 def _page(doc: fitz.Document, page_number: int) -> fitz.Page:
+    """Page.
+
+    Purpose:
+        Page.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+        page_number: Page number starting at 1.
+
+    Returns:
+        a fitz.Page.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _page(doc, 1) returns a fitz.Page.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     if page_number < 1 or page_number > doc.page_count:
         raise ValueError(f"Page {page_number} is not in this package.")
     return doc[page_number - 1]
 
 
 def _lines(page: fitz.Page) -> list[dict]:
+    """Lines.
+
+    Purpose:
+        Lines.
+
+    Args:
+        page: One PDF page.
+
+    Returns:
+        list[dict].
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _lines(page) returns list[dict].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     grouped: dict[tuple[int, int], list] = {}
     for word in page.get_text("words") or []:
         grouped.setdefault((int(word[5]), int(word[6])), []).append(word)
@@ -609,6 +1080,27 @@ def _lines(page: fitz.Page) -> list[dict]:
 
 
 def _spans_in(page: fitz.Page, box: fitz.Rect) -> list[dict]:
+    """Spans in.
+
+    Purpose:
+        Spans in.
+
+    Args:
+        page: One PDF page.
+        box: Box. Type: fitz.Rect.
+
+    Returns:
+        a list of dict.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _spans_in(page, box) returns a list of dict.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     found: list[dict] = []
     nearby: list[tuple[float, dict]] = []
     padded = fitz.Rect(box.x0 - 2, box.y0 - 3, box.x1 + 2, box.y1 + 3)
@@ -639,6 +1131,28 @@ def _spans_in(page: fitz.Page, box: fitz.Rect) -> list[dict]:
 
 
 def _replacement_plan(page: fitz.Page, rect: tuple[float, float, float, float], new_text: str) -> dict | None:
+    """Replacement plan.
+
+    Purpose:
+        Replacement plan.
+
+    Args:
+        page: One PDF page.
+        rect: Rect. Type: tuple[float, float, float, float].
+        new_text: New text. Type: str.
+
+    Returns:
+        a dict | None.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _replacement_plan(page, 1.0, "text") returns a dict | None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     text = " ".join((new_text or "").split())
     if len(text) > _MAX_TEXT:
         raise ValueError(f"Keep the replacement under {_MAX_TEXT} characters.")
@@ -683,6 +1197,27 @@ def _replacement_plan(page: fitz.Page, rect: tuple[float, float, float, float], 
 
 
 def _insert_replacement(page: fitz.Page, plan: dict) -> fitz.Rect | None:
+    """Insert replacement.
+
+    Purpose:
+        Insert replacement.
+
+    Args:
+        page: One PDF page.
+        plan: Plan. Type: dict.
+
+    Returns:
+        a fitz.Rect | None.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _insert_replacement(page, {}) returns a fitz.Rect | None.
+
+    Side effects:
+        Changes the PDF passed in. Does not save the file by itself.
+    """
     text = plan["text"]
     if not text:
         return None
@@ -696,6 +1231,27 @@ def _insert_replacement(page: fitz.Page, plan: dict) -> fitz.Rect | None:
 
 
 def _mostly_inside(rect: fitz.Rect, box: fitz.Rect) -> bool:
+    """Mostly inside.
+
+    Purpose:
+        Mostly inside.
+
+    Args:
+        rect: Rect. Type: fitz.Rect.
+        box: Box. Type: fitz.Rect.
+
+    Returns:
+        True or False.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _mostly_inside(rect, box) returns True or False.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     overlap = rect & box
     if overlap.is_empty or rect.height <= 0:
         return False
@@ -703,6 +1259,29 @@ def _mostly_inside(rect: fitz.Rect, box: fitz.Rect) -> bool:
 
 
 def _written_rect(span: dict, updated: str, fontname: str, size: float) -> fitz.Rect:
+    """Written rect.
+
+    Purpose:
+        Written rect.
+
+    Args:
+        span: Span. Type: dict.
+        updated: Updated. Type: str.
+        fontname: Fontname. Type: str.
+        size: Size. Type: float.
+
+    Returns:
+        a fitz.Rect.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _written_rect({}, "text", "text") returns a fitz.Rect.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     origin = span.get("origin") or (span["bbox"][0], span["bbox"][3])
     try:
         width = float(fitz.get_text_length(updated, fontname=fontname, fontsize=size))
@@ -714,7 +1293,28 @@ def _written_rect(span: dict, updated: str, fontname: str, size: float) -> fitz.
 
 
 def _replacement_width(page: fitz.Page, old: fitz.Rect, selected: list[dict]) -> float:
-    """Use available space on the line, stopping before the next text span."""
+    """Use available space on the line, stopping before the next text span.
+
+    Purpose:
+        Use available space on the line, stopping before the next text span.
+
+    Args:
+        page: One PDF page.
+        old: Old. Type: fitz.Rect.
+        selected: Selected. Type: list[dict].
+
+    Returns:
+        a float.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _replacement_width(page, old, []) returns a float.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     start_x = min(float(span["bbox"][0]) for span in selected)
     end_x = float(page.rect.x1) - 6
     selected_boxes = [fitz.Rect(span["bbox"]) for span in selected]
@@ -738,6 +1338,29 @@ def _retarget_marks(
     old: fitz.Rect,
     written: fitz.Rect | None,
 ) -> list[dict]:
+    """Retarget marks.
+
+    Purpose:
+        Retarget marks.
+
+    Args:
+        marks: Highlight rectangles already collected.
+        page_index: Page index. Type: int.
+        old: Old. Type: fitz.Rect.
+        written: Written. Type: fitz.Rect | None.
+
+    Returns:
+        a list of dict.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _retarget_marks(marks, 1, old) returns a list of dict.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     updated: list[dict] = []
     for mark in marks:
         if int(mark.get("page", -1)) != page_index:

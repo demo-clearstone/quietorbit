@@ -12,13 +12,11 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 import fitz
-import yaml
 
-from config.settings import CONFIG_DIR
 from models.plan_profile import PlanProfile
 from models.review import ValidationItem
 from services.file_order import matched_spec
-from services.plan_config import is_457_plan, package_flags
+from services.plan_config import is_457_plan, load_compliance_summary, package_flags
 
 if TYPE_CHECKING:
     from models.plan_profile import PlanProfile
@@ -96,7 +94,26 @@ _BRF_RESULT = re.compile(
 
 
 def hce_max_percent(nhce: float) -> float:
-    """Prior-year HCE maximum from the NHCE actual deferral percentage."""
+    """Prior-year HCE maximum from the NHCE actual deferral percentage.
+
+    Purpose:
+        Prior-year HCE maximum from the NHCE actual deferral percentage.
+
+    Args:
+        nhce: Nhce. Type: float.
+
+    Returns:
+        a float.
+
+    Raises:
+        None.
+
+    Example:
+        hce_max_percent(1.0) returns a float.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     if nhce < 2:
         return round(nhce * 2, 2)
     if nhce < 8:
@@ -105,6 +122,26 @@ def hce_max_percent(nhce: float) -> float:
 
 
 def cover_date_text(when: datetime | None = None) -> str:
+    """Cover date text.
+
+    Purpose:
+        Cover date text.
+
+    Args:
+        when: When. Type: datetime | None.
+
+    Returns:
+        a str.
+
+    Raises:
+        None.
+
+    Example:
+        cover_date_text(when) returns a str.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     when = when or datetime.now()
     return f"{_MONTHS[when.month - 1]} {when.day}, {when.year}"
 
@@ -113,7 +150,27 @@ _VARIANCE_SECTIONS = {"Variance", "PS Variance", "SHNE Variance"}
 
 
 def has_variance_client_copy(filenames: list[str], doc: fitz.Document) -> bool:
-    """A variance client copy in the folder keeps the contributions paragraph."""
+    """A variance client copy in the folder keeps the contributions paragraph.
+
+    Purpose:
+        A variance client copy in the folder keeps the contributions paragraph.
+
+    Args:
+        filenames: Filenames. Type: list[str].
+        doc: Open PDF. Must not be closed.
+
+    Returns:
+        True or False.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        has_variance_client_copy([], doc) returns True or False.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     for name in filenames:
         spec = matched_spec(name)
         if spec and spec.get("name") in _VARIANCE_SECTIONS:
@@ -128,7 +185,26 @@ def has_variance_client_copy(filenames: list[str], doc: fitz.Document) -> bool:
 
 
 def package_is_403b(uploads: list[tuple[str, bytes]]) -> bool:
-    """A 403(b) package keeps the BRF report and does not require a 410(b) file."""
+    """A 403(b) package keeps the BRF report and does not require a 410(b) file.
+
+    Purpose:
+        A 403(b) package keeps the BRF report and does not require a 410(b) file.
+
+    Args:
+        uploads: List of (file name, file bytes).
+
+    Returns:
+        bool.
+
+    Raises:
+        OSError: A file cannot be read or written. A closed PDF raises from PyMuPDF.
+
+    Example:
+        package_is_403b(data) returns bool.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     for name, data in uploads:
         if re.search(r"403\s*\(?\s*b\)?", name, re.I):
             return True
@@ -152,7 +228,27 @@ def exclude_brf_uploads(
     *,
     keep_brf: bool = False,
 ) -> tuple[list[tuple[str, bytes]], list[str]]:
-    """A 401(k) leaves the BRF report out. A 403(b) keeps it and bookmarks it."""
+    """A 401(k) leaves the BRF report out. A 403(b) keeps it and bookmarks it.
+
+    Purpose:
+        A 401(k) leaves the BRF report out. A 403(b) keeps it and bookmarks it.
+
+    Args:
+        uploads: Pairs of file name and file bytes.
+        keep_brf: Keep brf. Type: bool.
+
+    Returns:
+        a tuple[list[tuple[str, bytes]], list[str]].
+
+    Raises:
+        None.
+
+    Example:
+        exclude_brf_uploads(uploads, keep_brf=True) returns a tuple[list[tuple[str, bytes]], list[str]].
+
+    Side effects:
+        Changes the PDF or the object passed in.
+    """
     if keep_brf:
         return list(uploads), []
     kept: list[tuple[str, bytes]] = []
@@ -167,7 +263,26 @@ def exclude_brf_uploads(
 
 
 def reorder_inner_pages(doc: fitz.Document) -> list[str]:
-    """Put inner report pages in the order the instructions list."""
+    """Put inner report pages in the order the instructions list.
+
+    Purpose:
+        Put inner report pages in the order the instructions list.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+
+    Returns:
+        list[str].
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        reorder_inner_pages(doc) returns list[str].
+
+    Side effects:
+        Changes the PDF passed in. Does not save the file by itself.
+    """
     kinds = [_page_kind(page.get_text("text") or "") for page in doc]
     order = list(range(doc.page_count))
     changed: list[str] = []
@@ -196,7 +311,24 @@ def reorder_inner_pages(doc: fitz.Document) -> list[str]:
 def remove_disallowed_wording(doc: fitz.Document, keep_soc: bool = False) -> list[str]:
     """MOA packages do not include audited, SOC, 5500, or escalation wording.
 
-    A 457 package may keep the Statement of Contribution.
+    Purpose:
+        MOA packages do not include audited, SOC, 5500, or escalation wording.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+        keep_soc: True leaves Statement of Contribution wording in the PDF.
+
+    Returns:
+        a list of str.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        remove_disallowed_wording(doc, True) returns a list of str.
+
+    Side effects:
+        Changes the PDF passed in. Does not save the file by itself.
     """
     removed: list[str] = []
     drop: list[int] = []
@@ -221,14 +353,49 @@ _ADP_PHRASES = ("ADP/ACP", "ADP / ACP", "ADP and/or ACP", "ADP and ACP")
 
 
 def _is_recap_page(text: str) -> bool:
+    """Is recap page.
+
+    Purpose:
+        Is recap page.
+
+    Args:
+        text: Text taken from a page or a file.
+
+    Returns:
+        bool.
+
+    Raises:
+        None.
+
+    Example:
+        _is_recap_page("text") returns bool.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     return bool(re.search(r"year[- ]end recap|important information", text or "", re.I))
 
 
 def rewrite_403b_adp_mentions(doc: fitz.Document) -> list[str]:
     """403(b) packages mention ACP only.
 
-    ADP/ACP becomes ACP. A Year End Recap page stays, including the bullet that
-    says the plan is not subject to ADP/ACP testing. Other leftover ADP lines are removed.
+    Purpose:
+        403(b) packages mention ACP only. ADP/ACP becomes ACP. A Year End Recap page stays, including the bullet that says the plan is not subject to ADP/ACP testing. Other leftover ADP lines are removed.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+
+    Returns:
+        list[str].
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        rewrite_403b_adp_mentions(doc) returns list[str].
+
+    Side effects:
+        Writes or changes a file on disk.
     """
     changed = False
     for page in doc:
@@ -286,7 +453,26 @@ def rewrite_403b_adp_mentions(doc: fitz.Document) -> list[str]:
 
 
 def drop_brf_pages(doc: fitz.Document) -> list[str]:
-    """Removing BRF pages from the 401(k) package."""
+    """Removing BRF pages from the 401(k) package.
+
+    Purpose:
+        Removing BRF pages from the 401(k) package.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+
+    Returns:
+        list[str].
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        drop_brf_pages(doc) returns list[str].
+
+    Side effects:
+        Changes the PDF passed in. Does not save the file by itself.
+    """
     drop = [page.number for page in doc if _is_brf_report(page.get_text("text") or "")]
     for number in reversed(drop):
         doc.delete_page(number)
@@ -299,7 +485,26 @@ _NUMBER_ONLY = re.compile(r"\d{1,3}")
 
 
 def renumber_footers(doc: fitz.Document) -> list[str]:
-    """Numbered packet pages keep their original numbers after pages are removed. Make them match the final page."""
+    """Numbered packet pages keep their original numbers after pages are removed. Make them match the final page.
+
+    Purpose:
+        Numbered packet pages keep their original numbers after pages are removed. Make them match the final page.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+
+    Returns:
+        list[str].
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        renumber_footers(doc) returns list[str].
+
+    Side effects:
+        Changes the PDF passed in. Does not save the file by itself.
+    """
     footers: dict[int, list[fitz.Rect]] = {}
     strays: dict[int, list[fitz.Rect]] = {}
     for page in doc:
@@ -338,7 +543,27 @@ def renumber_footers(doc: fitz.Document) -> list[str]:
 
 
 def package_checks(doc: fitz.Document, profile: PlanProfile) -> list[ValidationItem]:
-    """Checking the package pages against the profile."""
+    """Checking the package pages against the profile.
+
+    Purpose:
+        Checking the package pages against the profile.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+        profile: Plan profile collected from the PDF, Excel, and summary.
+
+    Returns:
+        list[ValidationItem].
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        package_checks(doc, profile) returns list[ValidationItem].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     items = [
         _cover_date_check(doc),
         _compliance_check(doc, profile),
@@ -352,7 +577,27 @@ def package_checks(doc: fitz.Document, profile: PlanProfile) -> list[ValidationI
 
 
 def _assembly_order_check(doc: fitz.Document, profile: "PlanProfile") -> ValidationItem:
-    """Check the physical report order against TEST23's substantive sections."""
+    """Check the physical report order against TEST23's substantive sections.
+
+    Purpose:
+        Check the physical report order against TEST23's substantive sections.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+        profile: Plan profile collected from the PDF, Excel, and summary.
+
+    Returns:
+        ValidationItem.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _assembly_order_check(doc, profile) returns ValidationItem.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     from services.file_order import load_section_specs
     if package_flags(profile.plan_type).get("rewrite_adp_mentions"):
         names = [
@@ -438,6 +683,26 @@ def _assembly_order_check(doc: fitz.Document, profile: "PlanProfile") -> Validat
 
 
 def _page_kind(text: str) -> tuple[str, int] | None:
+    """Page kind.
+
+    Purpose:
+        Page kind.
+
+    Args:
+        text: Text taken from a page or a file.
+
+    Returns:
+        tuple[str, int] | None.
+
+    Raises:
+        None.
+
+    Example:
+        _page_kind("text") returns tuple[str, int] | None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     head = _head(text)
     if not head or _KEEP_PAGE.search(head):
         return None
@@ -462,6 +727,26 @@ def _page_kind(text: str) -> tuple[str, int] | None:
 
 
 def _abpt_rank(head: str) -> int | None:
+    """Abpt rank.
+
+    Purpose:
+        Abpt rank.
+
+    Args:
+        head: Head. Type: str.
+
+    Returns:
+        a int | None.
+
+    Raises:
+        None.
+
+    Example:
+        _abpt_rank("text") returns a int | None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     order = (
         (r"401\s*a\s*1|401a1", 1),
         (r"gateway", 2),
@@ -474,6 +759,27 @@ def _abpt_rank(head: str) -> int | None:
 
 
 def _ranked(head: str, pairs: tuple[tuple[str, int], ...]) -> int | None:
+    """Ranked.
+
+    Purpose:
+        Ranked.
+
+    Args:
+        head: Head. Type: str.
+        pairs: Pairs. Type: tuple[tuple[str, int], ...].
+
+    Returns:
+        a int | None.
+
+    Raises:
+        None.
+
+    Example:
+        _ranked("text", "text") returns a int | None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     for pattern, rank in pairs:
         if re.search(pattern, head, re.I):
             return rank
@@ -481,17 +787,78 @@ def _ranked(head: str, pairs: tuple[tuple[str, int], ...]) -> int | None:
 
 
 def _head(text: str) -> str:
+    """Head.
+
+    Purpose:
+        Head.
+
+    Args:
+        text: Text taken from a page or a file.
+
+    Returns:
+        str.
+
+    Raises:
+        None.
+
+    Example:
+        _head("text") returns str.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     return " ".join(lines[:4])
 
 
 def _is_brf_report(text: str) -> bool:
+    """Is brf report.
+
+    Purpose:
+        Is brf report.
+
+    Args:
+        text: Text taken from a page or a file.
+
+    Returns:
+        bool.
+
+    Raises:
+        None.
+
+    Example:
+        _is_brf_report("text") returns bool.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     if _KEEP_PAGE.search(text):
         return False
     return bool(_BRF_REPORT.search(_head(text)))
 
 
 def _redact_matching_lines(page: fitz.Page, keep_soc: bool = False) -> bool:
+    """Redact matching lines.
+
+    Purpose:
+        Redact matching lines.
+
+    Args:
+        page: One PDF page.
+        keep_soc: True leaves Statement of Contribution wording in the PDF.
+
+    Returns:
+        True or False.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _redact_matching_lines(page, True) returns True or False.
+
+    Side effects:
+        Changes the PDF passed in. Does not save the file by itself.
+    """
     pattern = _DISALLOWED_EXCEPT_SOC if keep_soc else _DISALLOWED_LINE
     boxes: list[fitz.Rect] = []
     for block in page.get_text("dict").get("blocks") or []:
@@ -510,6 +877,26 @@ def _redact_matching_lines(page: fitz.Page, keep_soc: bool = False) -> bool:
 
 
 def _cover_date_check(doc: fitz.Document) -> ValidationItem:
+    """Cover date check.
+
+    Purpose:
+        Cover date check.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+
+    Returns:
+        ValidationItem.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _cover_date_check(doc) returns ValidationItem.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     today = cover_date_text()
     if not doc.page_count:
         return ValidationItem(
@@ -544,11 +931,50 @@ def _cover_date_check(doc: fitz.Document) -> ValidationItem:
 
 
 def is_compliance_overview(text: str) -> bool:
-    """One of the three Compliance and Administrative Reports overview pages."""
+    """One of the three Compliance and Administrative Reports overview pages.
+
+    Purpose:
+        One of the three Compliance and Administrative Reports overview pages.
+
+    Args:
+        text: Text taken from a page or a file.
+
+    Returns:
+        bool.
+
+    Raises:
+        None.
+
+    Example:
+        is_compliance_overview("text") returns bool.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     return _overview_kind(text) is not None
 
 
 def _overview_kind(text: str) -> str | None:
+    """Overview kind.
+
+    Purpose:
+        Overview kind.
+
+    Args:
+        text: Text taken from a page or a file.
+
+    Returns:
+        str | None.
+
+    Raises:
+        None.
+
+    Example:
+        _overview_kind("text") returns str | None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     blob = text or ""
     if re.search(r"compliance and administrative|overview and descriptions", blob, re.I):
         return "intro"
@@ -564,6 +990,27 @@ def _overview_kind(text: str) -> str | None:
 
 
 def _compliance_check(doc: fitz.Document, profile: PlanProfile) -> ValidationItem:
+    """Compliance check.
+
+    Purpose:
+        Compliance check.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+        profile: Plan profile collected from the PDF, Excel, and summary.
+
+    Returns:
+        ValidationItem.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _compliance_check(doc, profile) returns ValidationItem.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     if profile.midyear or is_457_plan(profile.plan_type):
         return ValidationItem(
             code="compliance_three_pages",
@@ -585,6 +1032,27 @@ def _compliance_check(doc: fitz.Document, profile: PlanProfile) -> ValidationIte
 
 
 def _brf_check(doc: fitz.Document, profile: PlanProfile) -> ValidationItem:
+    """Brf check.
+
+    Purpose:
+        Brf check.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+        profile: Plan profile collected from the PDF, Excel, and summary.
+
+    Returns:
+        ValidationItem.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _brf_check(doc, profile) returns ValidationItem.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     left = [page.number + 1 for page in doc if _is_brf_report(page.get_text("text") or "")]
     if package_flags(profile.plan_type).get("keep_brf"):
         return ValidationItem(
@@ -606,6 +1074,26 @@ def _brf_check(doc: fitz.Document, profile: PlanProfile) -> ValidationItem:
 
 
 def _result_summary_checks(doc: fitz.Document) -> list[ValidationItem]:
+    """Result summary checks.
+
+    Purpose:
+        Result summary checks.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+
+    Returns:
+        list[ValidationItem].
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _result_summary_checks(doc) returns list[ValidationItem].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     summary = "\n".join(
         page.get_text("text") or "" for page in doc if _SUMMARY.search(page.get_text("text") or "")
     )
@@ -624,12 +1112,50 @@ def _result_summary_checks(doc: fitz.Document) -> list[ValidationItem]:
 
 
 def summary_test_record() -> list[dict]:
-    """What each Compliance Testing Summary line means. Later pages are checked against it."""
-    data = yaml.safe_load((CONFIG_DIR / "compliance_summary.yaml").read_text(encoding="utf-8")) or {}
-    return [row for row in data.get("tests") or [] if isinstance(row, dict)]
+    """Input: none. Calls load_compliance_summary. Output: [{code, name, means}, ...] from compliance_summary.yaml.
+
+    Purpose:
+        Input: none. Calls load_compliance_summary. Output: [{code, name, means}, ...] from compliance_summary.yaml.
+
+    Args:
+        None.
+
+    Returns:
+        list[dict].
+
+    Raises:
+        yaml.YAMLError: A YAML file is not valid.
+
+    Example:
+        summary_test_record() returns list[dict].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
+    return load_compliance_summary()
 
 
 def _means(code: str) -> str:
+    """Means.
+
+    Purpose:
+        Means.
+
+    Args:
+        code: Code. Type: str.
+
+    Returns:
+        a str.
+
+    Raises:
+        None.
+
+    Example:
+        _means("text") returns a str.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     for row in summary_test_record():
         if row.get("code") == code:
             return " ".join(str(row.get("means") or "").split())
@@ -637,6 +1163,27 @@ def _means(code: str) -> str:
 
 
 def _top_heavy_check(doc: fitz.Document, summary: str) -> ValidationItem:
+    """Top heavy check.
+
+    Purpose:
+        Top heavy check.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+        summary: Summary. Type: str.
+
+    Returns:
+        a ValidationItem.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _top_heavy_check(doc, "text") returns a ValidationItem.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     shown = re.search(r"top\s*heavy[\s\S]{0,80}?(\d+(?:\.\d+)?)\s*%", summary, re.I)
     if not shown:
         return ValidationItem(
@@ -677,6 +1224,27 @@ def _top_heavy_check(doc: fitz.Document, summary: str) -> ValidationItem:
 
 
 def _pass_fail_checks(doc: fitz.Document, summary: str) -> list[ValidationItem]:
+    """Pass fail checks.
+
+    Purpose:
+        Pass fail checks.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+        summary: Summary. Type: str.
+
+    Returns:
+        a list of ValidationItem.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _pass_fail_checks(doc, "text") returns a list of ValidationItem.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     items: list[ValidationItem] = []
     for label, pattern, code in _PASS_FAIL:
         summary_result = _result_near(summary, pattern)
@@ -728,6 +1296,27 @@ _410_LABELS = (
 
 
 def _coverage_item(doc: fitz.Document, summary: str) -> ValidationItem | None:
+    """Coverage item.
+
+    Purpose:
+        Coverage item.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+        summary: Summary. Type: str.
+
+    Returns:
+        a ValidationItem | None.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _coverage_item(doc, "text") returns a ValidationItem | None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     summary_lines = _410_lines(summary)
     report_lines = _410_report_lines(doc)
     report_text = _report_text(doc)
@@ -789,6 +1378,26 @@ def _coverage_item(doc: fitz.Document, summary: str) -> ValidationItem | None:
 
 
 def _brf_summary_item(summary: str) -> ValidationItem | None:
+    """Brf summary item.
+
+    Purpose:
+        Brf summary item.
+
+    Args:
+        summary: Summary. Type: str.
+
+    Returns:
+        a ValidationItem | None.
+
+    Raises:
+        None.
+
+    Example:
+        _brf_summary_item("text") returns a ValidationItem | None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     match = _BRF_RESULT.search(summary)
     if not match:
         return None
@@ -810,6 +1419,26 @@ def _brf_summary_item(summary: str) -> ValidationItem | None:
 
 
 def _410_lines(text: str) -> dict[str, dict]:
+    """410 lines.
+
+    Purpose:
+        410 lines.
+
+    Args:
+        text: Text taken from a page or a file.
+
+    Returns:
+        dict[str, dict].
+
+    Raises:
+        None.
+
+    Example:
+        _410_lines("text") returns dict[str, dict].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     found: dict[str, dict] = {}
     for match in _410_LINE.finditer(text):
         compact = re.sub(r"\s+", "", match.group(1)).lower()
@@ -823,6 +1452,26 @@ def _410_lines(text: str) -> dict[str, dict]:
 
 
 def _410_report_lines(doc: fitz.Document) -> dict[str, dict]:
+    """410 report lines.
+
+    Purpose:
+        410 report lines.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+
+    Returns:
+        dict[str, dict].
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _410_report_lines(doc) returns dict[str, dict].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     found: dict[str, dict] = {}
     for page in doc:
         text = page.get_text("text") or ""
@@ -834,12 +1483,53 @@ def _410_report_lines(doc: fitz.Document) -> dict[str, dict]:
 
 
 def _report_text(doc: fitz.Document) -> str:
+    """Report text.
+
+    Purpose:
+        Report text.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+
+    Returns:
+        str.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _report_text(doc) returns str.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     return "\n".join(
         page.get_text("text") or "" for page in doc if not _SUMMARY.search(page.get_text("text") or "")
     )
 
 
 def _report_result(doc: fitz.Document, pattern: str) -> str | None:
+    """Report result.
+
+    Purpose:
+        Report result.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+        pattern: Pattern. Type: str.
+
+    Returns:
+        a str | None.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _report_result(doc, "text") returns a str | None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     for page in doc:
         text = page.get_text("text") or ""
         if _SUMMARY.search(text) or is_compliance_overview(text):
@@ -851,6 +1541,27 @@ def _report_result(doc: fitz.Document, pattern: str) -> str | None:
 
 
 def _result_near(text: str, pattern: str) -> str | None:
+    """Result near.
+
+    Purpose:
+        Result near.
+
+    Args:
+        text: Text from a page or a file.
+        pattern: Pattern. Type: str.
+
+    Returns:
+        a str | None.
+
+    Raises:
+        None.
+
+    Example:
+        _result_near("text", "text") returns a str | None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     match = re.search(r"(?:" + pattern + r").{0,80}?\b(Pass|Fail)\b", text, re.I | re.S)
     if not match:
         return None
@@ -861,6 +1572,27 @@ def _result_near(text: str, pattern: str) -> str | None:
 
 
 def _report_percent(doc: fitz.Document, label: str) -> float | None:
+    """Report percent.
+
+    Purpose:
+        Report percent.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+        label: Label. Type: str.
+
+    Returns:
+        a float | None.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _report_percent(doc, "text") returns a float | None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     for page in doc:
         text = page.get_text("text") or ""
         if _SUMMARY.search(text) or is_compliance_overview(text):
@@ -872,6 +1604,27 @@ def _report_percent(doc: fitz.Document, label: str) -> float | None:
 
 
 def _variance_checks(doc: fitz.Document, profile: PlanProfile) -> list[ValidationItem]:
+    """Variance checks.
+
+    Purpose:
+        Variance checks.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+        profile: Plan profile collected from the PDF, Excel, and summary.
+
+    Returns:
+        list[ValidationItem].
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _variance_checks(doc, profile) returns list[ValidationItem].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     pages = [
         page
         for page in doc
@@ -920,6 +1673,26 @@ def _variance_checks(doc: fitz.Document, profile: PlanProfile) -> list[Validatio
 
 
 def _bad_zero(text: str) -> bool:
+    """Bad zero.
+
+    Purpose:
+        Bad zero.
+
+    Args:
+        text: Text taken from a page or a file.
+
+    Returns:
+        bool.
+
+    Raises:
+        None.
+
+    Example:
+        _bad_zero("text") returns bool.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     for match in _BAD_ZERO.finditer(text):
         token = match.group(1)
         if token != "0.00":
@@ -928,6 +1701,26 @@ def _bad_zero(text: str) -> bool:
 
 
 def _mixed_font(page: fitz.Page) -> bool:
+    """Mixed font.
+
+    Purpose:
+        Mixed font.
+
+    Args:
+        page: One PDF page.
+
+    Returns:
+        bool.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _mixed_font(page) returns bool.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     sizes: set[float] = set()
     for block in page.get_text("dict").get("blocks") or []:
         if block.get("type") != 0:
@@ -941,6 +1734,26 @@ def _mixed_font(page: fitz.Page) -> bool:
 
 
 def _cut_off(page: fitz.Page) -> bool:
+    """Cut off.
+
+    Purpose:
+        Cut off.
+
+    Args:
+        page: One PDF page.
+
+    Returns:
+        bool.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _cut_off(page) returns bool.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     limit = page.rect.x1 - 4
     for block in page.get_text("dict").get("blocks") or []:
         if block.get("type") != 0:
@@ -953,7 +1766,27 @@ def _cut_off(page: fitz.Page) -> bool:
 
 
 def _plan_year_present(text: str, plan_year_end: str) -> bool:
-    """Accept 12/31/2025 and the notice header 'December 31, 2025'."""
+    """Accept 12/31/2025 and the notice header 'December 31, 2025'.
+
+    Purpose:
+        Accept 12/31/2025 and the notice header 'December 31, 2025'.
+
+    Args:
+        text: Text from a page or a file.
+        plan_year_end: Plan year end. Type: str.
+
+    Returns:
+        True or False.
+
+    Raises:
+        None.
+
+    Example:
+        _plan_year_present("text", "text") returns True or False.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     if plan_year_end in text:
         return True
     match = re.fullmatch(r"(\d{1,2})/(\d{1,2})/(\d{4})", plan_year_end.strip())
@@ -967,6 +1800,27 @@ def _plan_year_present(text: str, plan_year_end: str) -> bool:
 
 
 def _identity_checks(doc: fitz.Document, profile: PlanProfile) -> list[ValidationItem]:
+    """Identity checks.
+
+    Purpose:
+        Identity checks.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+        profile: Plan profile collected from the PDF, Excel, and summary.
+
+    Returns:
+        list[ValidationItem].
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _identity_checks(doc, profile) returns list[ValidationItem].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     if not profile.plan_number and not profile.plan_name:
         return [
             ValidationItem(

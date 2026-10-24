@@ -1,29 +1,105 @@
 from __future__ import annotations
 
 import re
-from pathlib import Path
 
-import yaml
-
-from config.settings import CONFIG_DIR
+from services.plan_config import load_package_order
 
 
 def load_section_specs() -> list[dict]:
-    data = yaml.safe_load((CONFIG_DIR / "package_order.yaml").read_text(encoding="utf-8")) or {}
-    return list(data.get("expected_order") or [])
+    """Input: none. Calls load_package_order. Output: the expected_order list from package_order.yaml.
+
+    Purpose:
+        Input: none. Calls load_package_order. Output: the expected_order list from package_order.yaml.
+
+    Args:
+        None.
+
+    Returns:
+        list[dict].
+
+    Raises:
+        yaml.YAMLError: A YAML file is not valid.
+
+    Example:
+        load_section_specs() returns list[dict].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
+    return list(load_package_order().get("expected_order") or [])
 
 
 def _norm(value: str) -> str:
+    """Norm.
+
+    Purpose:
+        Norm.
+
+    Args:
+        value: Value. Type: str.
+
+    Returns:
+        a str.
+
+    Raises:
+        None.
+
+    Example:
+        _norm("text") returns a str.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     return "".join(ch for ch in value.lower() if ch.isalnum())
 
 
 def _spec_aliases(spec: dict) -> list[str]:
+    """Spec aliases.
+
+    Purpose:
+        Spec aliases.
+
+    Args:
+        spec: Spec. Type: dict.
+
+    Returns:
+        a list of str.
+
+    Raises:
+        None.
+
+    Example:
+        _spec_aliases({}) returns a list of str.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     return [str(spec.get("name") or "")] + [str(a) for a in (spec.get("aliases") or [])]
 
 
 def _rank(spec: dict, fallback: int) -> int:
-    data = yaml.safe_load((CONFIG_DIR / "package_order.yaml").read_text(encoding="utf-8")) or {}
-    order = [str(name) for name in (data.get("combine_order") or [])]
+    """Input: one expected_order entry. Output: its index in combine_order from package_order.yaml.
+
+    Purpose:
+        Input: one expected_order entry. Output: its index in combine_order from package_order.yaml.
+
+    Args:
+        spec: Spec. Type: dict.
+        fallback: Fallback. Type: int.
+
+    Returns:
+        a int.
+
+    Raises:
+        yaml.YAMLError: A YAML file is not valid.
+
+    Example:
+        _rank({}, 1) returns a int.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
+    order = [str(name) for name in (load_package_order().get("combine_order") or [])]
     name = str(spec.get("name") or "")
     try:
         return order.index(name)
@@ -32,7 +108,26 @@ def _rank(spec: dict, fallback: int) -> int:
 
 
 def _best_section(filename: str) -> tuple[int, dict] | None:
-    """Longest keyword match wins so SHMaVar is not treated as MaVar, 401a4 is not 401k, etc."""
+    """Longest keyword match wins so SHMaVar is not treated as MaVar, 401a4 is not 401k, etc.
+
+    Purpose:
+        Longest keyword match wins so SHMaVar is not treated as MaVar, 401a4 is not 401k, etc.
+
+    Args:
+        filename: File name, including the extension.
+
+    Returns:
+        tuple[int, dict] | None.
+
+    Raises:
+        None.
+
+    Example:
+        _best_section("text") returns tuple[int, dict] | None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     name = _norm(filename)
     specs = load_section_specs()
     paged = re.search(r"_p0*(\d+)(?:\.[^.]+)?$", filename, re.I)
@@ -70,6 +165,27 @@ def _best_section(filename: str) -> tuple[int, dict] | None:
 
 
 def _best_label_section(label: str, specs: list[dict]) -> tuple[int, dict] | None:
+    """Best label section.
+
+    Purpose:
+        Best label section.
+
+    Args:
+        label: Label. Type: str.
+        specs: Specs. Type: list[dict].
+
+    Returns:
+        a tuple[int, dict] | None.
+
+    Raises:
+        None.
+
+    Example:
+        _best_label_section("text", []) returns a tuple[int, dict] | None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     name = _norm(label)
     best: tuple[int, int, dict] | None = None
     for index, spec in enumerate(specs):
@@ -87,13 +203,51 @@ def _best_label_section(label: str, specs: list[dict]) -> tuple[int, dict] | Non
 
 
 def matched_spec(filename: str) -> dict | None:
-    """Matching a file name to its report section."""
+    """Matching a file name to its report section.
+
+    Purpose:
+        Matching a file name to its report section.
+
+    Args:
+        filename: File name, including the extension.
+
+    Returns:
+        dict | None.
+
+    Raises:
+        None.
+
+    Example:
+        matched_spec("text") returns dict | None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     found = _best_section(filename)
     return found[1] if found else None
 
 
 def sop_rank(filename: str) -> int:
-    """Lower rank = earlier in TEST23 combine order. Unknown files stay last."""
+    """Lower rank = earlier in TEST23 combine order. Unknown files stay last.
+
+    Purpose:
+        Lower rank = earlier in TEST23 combine order. Unknown files stay last.
+
+    Args:
+        filename: File name, including the extension.
+
+    Returns:
+        int.
+
+    Raises:
+        None.
+
+    Example:
+        sop_rank("text") returns int.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     found = _best_section(filename)
     if found:
         return found[0]
@@ -101,6 +255,27 @@ def sop_rank(filename: str) -> int:
 
 
 def should_split_pages(filename: str, pages: int) -> bool:
+    """Should split pages.
+
+    Purpose:
+        Should split pages.
+
+    Args:
+        filename: File name, including the extension.
+        pages: Pages. Type: int.
+
+    Returns:
+        True or False.
+
+    Raises:
+        None.
+
+    Example:
+        should_split_pages("text", 1) returns True or False.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     if not filename.lower().endswith(".pdf") or pages <= 1:
         return False
     spec = matched_spec(filename)
@@ -127,7 +302,28 @@ COVER_PACKET_PAGE_LABELS = [
 
 
 def display_label(filename: str, page: int = 0, page_count: int = 1) -> str:
-    """UI name after upload/split (packet outline titles, not the raw filename)."""
+    """UI name after upload/split (packet outline titles, not the raw filename).
+
+    Purpose:
+        UI name after upload/split (packet outline titles, not the raw filename).
+
+    Args:
+        filename: File name, including the extension.
+        page: One PDF page.
+        page_count: Page count. Type: int.
+
+    Returns:
+        a str.
+
+    Raises:
+        None.
+
+    Example:
+        display_label("text", page, 1) returns a str.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     spec = matched_spec(filename)
     if spec:
         base = str(spec.get("label") or spec.get("name") or filename)
@@ -145,7 +341,27 @@ def display_label(filename: str, page: int = 0, page_count: int = 1) -> str:
 
 
 def rank_for_label(label: str, fallback: int) -> int:
-    """Place a split page by its section title, not by the parent PDF name."""
+    """Place a split page by its section title, not by the parent PDF name.
+
+    Purpose:
+        Place a split page by its section title, not by the parent PDF name.
+
+    Args:
+        label: Label. Type: str.
+        fallback: Fallback. Type: int.
+
+    Returns:
+        a int.
+
+    Raises:
+        None.
+
+    Example:
+        rank_for_label("text", 1) returns a int.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     found = _best_section(label)
     if not found:
         return fallback
@@ -153,7 +369,27 @@ def rank_for_label(label: str, fallback: int) -> int:
 
 
 def page_label_from_text(text: str, fallback: str) -> str:
-    """Recognize key packet pages instead of relying only on physical position."""
+    """Recognize key packet pages instead of relying only on physical position.
+
+    Purpose:
+        Recognize key packet pages instead of relying only on physical position.
+
+    Args:
+        text: Text from a page or a file.
+        fallback: Fallback. Type: str.
+
+    Returns:
+        a str.
+
+    Raises:
+        None.
+
+    Example:
+        page_label_from_text("text", "text") returns a str.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     lines = [re.sub(r"\s+", " ", line).strip() for line in (text or "").splitlines() if line.strip()]
     body = " ".join(lines[:12])
     if not body:
@@ -202,6 +438,29 @@ def list_file_meta(
     pages: int,
     page_texts: list[str] | None = None,
 ) -> dict:
+    """List file meta.
+
+    Purpose:
+        List file meta.
+
+    Args:
+        name: File name or section name.
+        size: Size. Type: int.
+        pages: Pages. Type: int.
+        page_texts: Page texts. Type: list[str] | None.
+
+    Returns:
+        a dict.
+
+    Raises:
+        None.
+
+    Example:
+        list_file_meta("text", 1, 1) returns a dict.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     split = should_split_pages(name, pages)
     labels = (
         [display_label(name, page=page, page_count=pages) for page in range(1, pages + 1)]
@@ -233,11 +492,49 @@ _LOCATION = re.compile(r"loc(?:ation)?[\s._-]*0*(\d+)", re.I)
 
 
 def location_index(filename: str) -> int:
-    """Loc 1 before Loc 2. A file with no location stays first in its section."""
+    """Loc 1 before Loc 2. A file with no location stays first in its section.
+
+    Purpose:
+        Loc 1 before Loc 2. A file with no location stays first in its section.
+
+    Args:
+        filename: File name, including the extension.
+
+    Returns:
+        int.
+
+    Raises:
+        None.
+
+    Example:
+        location_index("text") returns int.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     match = _LOCATION.search(filename or "")
     return int(match.group(1)) if match else 0
 
 
 def order_uploads(uploads: list[tuple[str, bytes]]) -> list[tuple[str, bytes]]:
-    """Ordering the PDFs into report sequence."""
+    """Ordering the PDFs into report sequence.
+
+    Purpose:
+        Ordering the PDFs into report sequence.
+
+    Args:
+        uploads: List of (file name, file bytes).
+
+    Returns:
+        list[tuple[str, bytes]].
+
+    Raises:
+        None.
+
+    Example:
+        order_uploads(data) returns list[tuple[str, bytes]].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     return sorted(uploads, key=lambda item: (sop_rank(item[0]), location_index(item[0]), item[0].lower()))

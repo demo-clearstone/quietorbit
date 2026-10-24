@@ -9,6 +9,7 @@
 7. Save the PDF, the highlight marks, the email draft, and the assembly log.
 
 The other files in this folder do one of those jobs. This file is the order.
+YAML is read in plan_config.py. Each function there records its input file and its output.
 """
 
 from __future__ import annotations
@@ -58,10 +59,33 @@ def process_uploads(
     rewrite_sources: bool = False,
     check_assembly_stops: bool = False,
 ) -> JobResult:
-    """
-    TEST23 pipeline:
-    assemble valuation PDFs → overlay Excel + summary pass/fail → keep/remove
-    Action Required paragraphs → bookmarks → save named PDF.
+    """Assemble one valuation package from the uploaded files.
+
+    Purpose:
+        Sort the uploads, merge the PDFs, read the plan and Excel, keep or
+        remove paragraphs, edit the PDF, add bookmarks, and save the package.
+
+    Args:
+        uploads: Pairs of file name and file bytes.
+        auto_order: True sorts the PDFs into report order before they are merged.
+        extra_warnings: Messages to include on the result. None means none.
+        source_folder: Folder the PDFs were loaded from. None when the user uploaded files.
+        rewrite_sources: True rewrites dates and other source text inside the PDF.
+        check_assembly_stops: True stops assembly when a required check fails.
+
+    Returns:
+        The saved package, warnings, and highlight rectangles.
+
+    Raises:
+        HTTPException: The assembly input is not usable.
+        OSError: A PDF or the output folder cannot be read or written.
+
+    Example:
+        process_uploads([("555001 ADP-Test.pdf", data)], auto_order=True)
+        returns a JobResult.
+
+    Side effects:
+        Writes the valuation PDF, the email draft, and the assembly log.
     """
     job_id = uuid.uuid4().hex[:12]
     started = time.perf_counter()
@@ -366,7 +390,26 @@ def process_uploads(
 
 
 def _split_uploads(uploads: list[tuple[str, bytes]]) -> tuple[list[tuple[str, bytes]], list[tuple[str, bytes]]]:
-    """Separating the uploaded PDFs from the Excel file."""
+    """Separating the uploaded PDFs from the Excel file.
+
+    Purpose:
+        Separating the uploaded PDFs from the Excel file.
+
+    Args:
+        uploads: List of (file name, file bytes).
+
+    Returns:
+        tuple[list[tuple[str, bytes]], list[tuple[str, bytes]]].
+
+    Raises:
+        None.
+
+    Example:
+        _split_uploads(data) returns tuple[list[tuple[str, bytes]], list[tuple[str, bytes]]].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     pdfs: list[tuple[str, bytes]] = []
     excels: list[tuple[str, bytes]] = []
     for name, data in uploads:
@@ -379,7 +422,26 @@ def _split_uploads(uploads: list[tuple[str, bytes]]) -> tuple[list[tuple[str, by
 
 
 def _split_summaries(pdfs: list[tuple[str, bytes]]) -> tuple[list[tuple[str, bytes]], list[tuple[str, str]]]:
-    """Finding the compliance summary among the PDFs."""
+    """Finding the compliance summary among the PDFs.
+
+    Purpose:
+        Finding the compliance summary among the PDFs.
+
+    Args:
+        pdfs: Pdfs. Type: list[tuple[str, bytes]].
+
+    Returns:
+        a tuple[list[tuple[str, bytes]], list[tuple[str, str]]].
+
+    Raises:
+        None.
+
+    Example:
+        _split_summaries([]) returns a tuple[list[tuple[str, bytes]], list[tuple[str, str]]].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     valuation: list[tuple[str, bytes]] = []
     summaries: list[tuple[str, str]] = []
     for name, data in pdfs:
@@ -404,6 +466,26 @@ def _split_summaries(pdfs: list[tuple[str, bytes]]) -> tuple[list[tuple[str, byt
 
 
 def _pdf_text(data: bytes) -> str:
+    """Pdf text.
+
+    Purpose:
+        Pdf text.
+
+    Args:
+        data: Raw file bytes.
+
+    Returns:
+        str.
+
+    Raises:
+        OSError: A file cannot be read or written. A closed PDF raises from PyMuPDF.
+
+    Example:
+        _pdf_text(data) returns str.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     doc = fitz.open(stream=data, filetype="pdf")
     try:
         return "\n".join((page.get_text("text") or "") for page in doc)

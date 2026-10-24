@@ -25,7 +25,27 @@ _PLACEHOLDER = re.compile(r"<\s*xx\.xx\s*%\s*>|xx\.xx\s*%", re.I)
 
 
 def package_is_midyear(uploads: list[tuple[str, bytes]], doc: fitz.Document | None = None) -> bool:
-    """Checking whether this is a mid-year letter."""
+    """Checking whether this is a mid-year letter.
+
+    Purpose:
+        Checking whether this is a mid-year letter.
+
+    Args:
+        uploads: List of (file name, file bytes).
+        doc: Open PDF. Must not be closed.
+
+    Returns:
+        bool.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        package_is_midyear(data, doc) returns bool.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     for name, _data in uploads:
         if _MIDYEAR.search(name):
             return True
@@ -36,12 +56,50 @@ def package_is_midyear(uploads: list[tuple[str, bytes]], doc: fitz.Document | No
 
 
 def order_uploads(uploads: list[tuple[str, bytes]]) -> list[tuple[str, bytes]]:
-    """Mid-year letter, then ADP Summary, then ADP Detail."""
+    """Mid-year letter, then ADP Summary, then ADP Detail.
+
+    Purpose:
+        Mid-year letter, then ADP Summary, then ADP Detail.
+
+    Args:
+        uploads: List of (file name, file bytes).
+
+    Returns:
+        list[tuple[str, bytes]].
+
+    Raises:
+        None.
+
+    Example:
+        order_uploads(data) returns list[tuple[str, bytes]].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     return sorted(uploads, key=lambda item: (_file_rank(item[0]), item[0].lower()))
 
 
 def reorder_pages(doc: fitz.Document) -> list[str]:
-    """Reordering pages in the mid-year letter."""
+    """Reordering pages in the mid-year letter.
+
+    Purpose:
+        Reordering pages in the mid-year letter.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+
+    Returns:
+        list[str].
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        reorder_pages(doc) returns list[str].
+
+    Side effects:
+        Changes the PDF passed in. Does not save the file by itself.
+    """
     if doc.page_count < 2:
         return []
     order = sorted(range(doc.page_count), key=lambda index: (_page_rank(doc[index].get_text("text") or ""), index))
@@ -52,7 +110,26 @@ def reorder_pages(doc: fitz.Document) -> list[str]:
 
 
 def read_letter_facts(doc: fitz.Document) -> dict[str, object]:
-    """Plan year end, pass/fail, and the HCE maximum printed on the mid-year test."""
+    """Plan year end, pass/fail, and the HCE maximum printed on the mid-year test.
+
+    Purpose:
+        Plan year end, pass/fail, and the HCE maximum printed on the mid-year test.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+
+    Returns:
+        dict[str, object].
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        read_letter_facts(doc) returns dict[str, object].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     facts: dict[str, object] = {}
     failed: bool | None = None
     for page in doc:
@@ -78,7 +155,27 @@ def read_letter_facts(doc: fitz.Document) -> dict[str, object]:
 
 
 def apply_letter(doc: fitz.Document, profile: PlanProfile) -> list[str]:
-    """Keep the pass or fail paragraph, and the current-method alternative only when the test fails."""
+    """Keep the pass or fail paragraph, and the current-method alternative only when the test fails.
+
+    Purpose:
+        Keep the pass or fail paragraph, and the current-method alternative only when the test fails.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+        profile: Plan profile collected from the PDF, Excel, and summary.
+
+    Returns:
+        list[str].
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        apply_letter(doc, profile) returns list[str].
+
+    Side effects:
+        Changes the PDF passed in. Does not save the file by itself.
+    """
     notes: list[str] = []
     percent = _percent_label(profile.hce_max_deferral)
     for page in doc:
@@ -125,6 +222,26 @@ def apply_letter(doc: fitz.Document, profile: PlanProfile) -> list[str]:
 
 
 def _file_rank(name: str) -> int:
+    """File rank.
+
+    Purpose:
+        File rank.
+
+    Args:
+        name: File name or section name.
+
+    Returns:
+        int.
+
+    Raises:
+        None.
+
+    Example:
+        _file_rank("text") returns int.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     folded = name.lower()
     if "detail" in folded:
         return 2
@@ -136,6 +253,26 @@ def _file_rank(name: str) -> int:
 
 
 def _page_rank(text: str) -> int:
+    """Page rank.
+
+    Purpose:
+        Page rank.
+
+    Args:
+        text: Text taken from a page or a file.
+
+    Returns:
+        int.
+
+    Raises:
+        None.
+
+    Example:
+        _page_rank("text") returns int.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     if _LETTER.search(text):
         return 0
     if re.search(r"\bdetail\b", text, re.I):
@@ -155,7 +292,26 @@ _MARKERS = (
 
 
 def _paragraphs(text: str) -> list[str]:
-    """Split on the mid-year sentences. PDF text often drops the blank lines."""
+    """Split on the mid-year sentences. PDF text often drops the blank lines.
+
+    Purpose:
+        Split on the mid-year sentences. PDF text often drops the blank lines.
+
+    Args:
+        text: Text taken from a page or a file.
+
+    Returns:
+        list[str].
+
+    Raises:
+        None.
+
+    Example:
+        _paragraphs("text") returns list[str].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     flat = re.sub(r"\s+", " ", text).strip()
     pieces: list[str] = []
     remaining = flat
@@ -178,6 +334,26 @@ def _paragraphs(text: str) -> list[str]:
 
 
 def _percent_label(value: float | None) -> str:
+    """Percent label.
+
+    Purpose:
+        Percent label.
+
+    Args:
+        value: Value. Type: float | None.
+
+    Returns:
+        a str.
+
+    Raises:
+        None.
+
+    Example:
+        _percent_label(1.0) returns a str.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     if value is None:
         return ""
     rounded = round(float(value), 2)

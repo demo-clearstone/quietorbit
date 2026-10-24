@@ -27,7 +27,26 @@ _NHCE = re.compile(r"NHCE[^%\n]{0,80}?(\d{1,2}(?:\.\d+)?)\s*%", re.I)
 
 
 def calendar_402g_year(plan_year_end: str | None) -> int | None:
-    """Off-calendar 402(g) uses the calendar year before the plan year end. Calendar plans are unchanged."""
+    """Off-calendar 402(g) uses the calendar year before the plan year end. Calendar plans are unchanged.
+
+    Purpose:
+        Off-calendar 402(g) uses the calendar year before the plan year end. Calendar plans are unchanged.
+
+    Args:
+        plan_year_end: Plan year end. Type: str | None.
+
+    Returns:
+        a int | None.
+
+    Raises:
+        None.
+
+    Example:
+        calendar_402g_year("text") returns a int | None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     if not plan_year_end:
         return None
     match = re.search(r"(\d{1,2})/(\d{1,2})/(20\d{2})", plan_year_end)
@@ -40,13 +59,53 @@ def calendar_402g_year(plan_year_end: str | None) -> int | None:
 
 
 def _format_percent(value: float) -> str:
+    """Format percent.
+
+    Purpose:
+        Format percent.
+
+    Args:
+        value: Value. Type: float.
+
+    Returns:
+        a str.
+
+    Raises:
+        None.
+
+    Example:
+        _format_percent(1.0) returns a str.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     if float(value).is_integer():
         return f"{int(value)}%"
     return f"{value:g}%"
 
 
 def apply_cover_date(doc: fitz.Document, marks: list[dict] | None = None) -> list[str]:
-    """Set the cover letter date to today. This runs on every Process."""
+    """Set the cover letter date to today. This runs on every Process.
+
+    Purpose:
+        Set the cover letter date to today. This runs on every Process.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+        marks: Highlight rectangles already collected for the PDF.
+
+    Returns:
+        list[str].
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        apply_cover_date(doc, []) returns list[str].
+
+    Side effects:
+        Changes the PDF passed in. Does not save the file by itself.
+    """
     if not doc.page_count:
         return []
     changed = _rewrite_cover_day(doc[0], marks)
@@ -63,7 +122,25 @@ def apply_402g_dates(
 ) -> list[str]:
     """Off-calendar 402(g) uses the calendar year before the plan year end.
 
-    A plan year ending 06/30/2026 uses 01/01/2025-12/31/2025 on the 402(g) report.
+    Purpose:
+        Off-calendar 402(g) uses the calendar year before the plan year end. A plan year ending 06/30/2026 uses 01/01/2025-12/31/2025 on the 402(g) report.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+        profile: Plan profile collected from the PDF, Excel, and summary.
+        marks: Highlight rectangles already collected for the PDF.
+
+    Returns:
+        list[str].
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        apply_402g_dates(doc, profile, []) returns list[str].
+
+    Side effects:
+        Changes the PDF passed in. Does not save the file by itself.
     """
     return _rewrite_402g_dates(doc, profile, marks)
 
@@ -73,7 +150,28 @@ def apply_source_rewrites(
     profile: PlanProfile,
     marks: list[dict] | None = None,
 ) -> list[str]:
-    """Rewriting dates and other source text."""
+    """Rewriting dates and other source text.
+
+    Purpose:
+        Rewriting dates and other source text.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+        profile: Plan profile collected from the PDF, Excel, and summary.
+        marks: Highlight rectangles already collected for the PDF.
+
+    Returns:
+        list[str].
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        apply_source_rewrites(doc, profile, []) returns list[str].
+
+    Side effects:
+        Changes the PDF passed in. Does not save the file by itself.
+    """
     notes: list[str] = []
     if doc.page_count:
         changed = _rewrite_cover_day(doc[0], marks)
@@ -88,12 +186,74 @@ def apply_source_rewrites(
 
 
 def _rewrite_cover_day(page: fitz.Page, marks: list[dict] | None = None, when: datetime | None = None) -> int:
+    """Rewrite cover day.
+
+    Purpose:
+        Rewrite cover day.
+
+    Args:
+        page: One PDF page.
+        marks: Highlight rectangles already collected.
+        when: When. Type: datetime | None.
+
+    Returns:
+        a int.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _rewrite_cover_day(page, marks, when) returns a int.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     today = cover_date_text(when)
 
     def transform(text: str) -> str | None:
+        """Transform.
+
+        Purpose:
+            Transform.
+
+        Args:
+            text: Text taken from a page or a file.
+
+        Returns:
+            str | None.
+
+        Raises:
+            None.
+
+        Example:
+            transform("text") returns str | None.
+
+        Side effects:
+            None. This function only reads data and returns a value.
+        """
         updated = text
 
         def _to_today(match: re.Match[str]) -> str:
+            """To today.
+
+            Purpose:
+                To today.
+
+            Args:
+                match: Match. Type: re.Match[str].
+
+            Returns:
+                a str.
+
+            Raises:
+                None.
+
+            Example:
+                _to_today("text") returns a str.
+
+            Side effects:
+                None. This function only reads data and returns a value.
+            """
             found = f"{match.group(1)} {int(match.group(2))}, {match.group(3)}"
             if found.lower() == today.lower() and match.group(0).lower() == today.lower():
                 return match.group(0)
@@ -111,6 +271,28 @@ def _rewrite_402g_dates(
     profile: PlanProfile,
     marks: list[dict] | None = None,
 ) -> list[str]:
+    """Rewrite 402g dates.
+
+    Purpose:
+        Rewrite 402g dates.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+        profile: Plan profile collected from the PDF, Excel, and summary.
+        marks: Highlight rectangles already collected for the PDF.
+
+    Returns:
+        list[str].
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _rewrite_402g_dates(doc, profile, []) returns list[str].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     year = calendar_402g_year(profile.plan_year_end)
     if year is None:
         return ["402(g) dates left as printed (calendar plan, or plan year end was not read)."]
@@ -124,6 +306,27 @@ def _rewrite_402g_dates(
             continue
 
         def transform(value: str, targets: list[str] = targets) -> str | None:
+            """Transform.
+
+            Purpose:
+                Transform.
+
+            Args:
+                value: Value. Type: str.
+                targets: Targets. Type: list[str].
+
+            Returns:
+                a str | None.
+
+            Raises:
+                None.
+
+            Example:
+                transform("text", []) returns a str | None.
+
+            Side effects:
+                None. This function only reads data and returns a value.
+            """
             updated = value
             for old in targets:
                 if old and old in updated:
@@ -143,6 +346,28 @@ def _rewrite_hce_percent(
     profile: PlanProfile,
     marks: list[dict] | None = None,
 ) -> list[str]:
+    """Rewrite hce percent.
+
+    Purpose:
+        Rewrite hce percent.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+        profile: Plan profile collected from the PDF, Excel, and summary.
+        marks: Highlight rectangles already collected for the PDF.
+
+    Returns:
+        list[str].
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _rewrite_hce_percent(doc, profile, []) returns list[str].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     if (profile.testing_method or "").upper() != "PRIOR":
         return ["HCE percentage left as printed (testing method is not PRIOR)."]
     nhce = _first_nhce_percent(doc)
@@ -157,6 +382,27 @@ def _rewrite_hce_percent(
             continue
 
         def transform(value: str, label: str = label) -> str | None:
+            """Transform.
+
+            Purpose:
+                Transform.
+
+            Args:
+                value: Value. Type: str.
+                label: Label. Type: str.
+
+            Returns:
+                a str | None.
+
+            Raises:
+                None.
+
+            Example:
+                transform("text", "text") returns a str | None.
+
+            Side effects:
+                None. This function only reads data and returns a value.
+            """
             if "NHCE" in value.upper() or "HCE" not in value.upper():
                 return None
             if not _PERCENT.search(value):
@@ -175,6 +421,26 @@ def _rewrite_hce_percent(
 
 
 def _first_nhce_percent(doc: fitz.Document) -> float | None:
+    """First nhce percent.
+
+    Purpose:
+        First nhce percent.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+
+    Returns:
+        float | None.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _first_nhce_percent(doc) returns float | None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     for page in doc:
         match = _NHCE.search(page.get_text("text") or "")
         if match:
@@ -183,6 +449,29 @@ def _first_nhce_percent(doc: fitz.Document) -> float | None:
 
 
 def _replace_spans(page: fitz.Page, transform, marks: list[dict] | None = None, label: str = "Updated") -> int:
+    """Replace spans.
+
+    Purpose:
+        Replace spans.
+
+    Args:
+        page: One PDF page.
+        transform: Transform. Type: unspecified.
+        marks: Highlight rectangles already collected.
+        label: Label. Type: str.
+
+    Returns:
+        a int.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _replace_spans(page, transform, marks) returns a int.
+
+    Side effects:
+        Changes the PDF passed in. Does not save the file by itself.
+    """
     found: list[tuple[dict, str]] = []
     for raw in page.get_text("dict").get("blocks") or []:
         if raw.get("type") != 0:
@@ -213,6 +502,29 @@ def _replace_spans(page: fitz.Page, transform, marks: list[dict] | None = None, 
 
 
 def _written_rect(span: dict, updated: str, fontname: str, size: float) -> fitz.Rect:
+    """Written rect.
+
+    Purpose:
+        Written rect.
+
+    Args:
+        span: Span. Type: dict.
+        updated: Updated. Type: str.
+        fontname: Fontname. Type: str.
+        size: Size. Type: float.
+
+    Returns:
+        a fitz.Rect.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _written_rect({}, "text", "text") returns a fitz.Rect.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     origin = span.get("origin") or (span["bbox"][0], span["bbox"][3])
     try:
         width = float(fitz.get_text_length(updated, fontname=fontname, fontsize=size))

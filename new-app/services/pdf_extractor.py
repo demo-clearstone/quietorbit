@@ -5,7 +5,6 @@ from datetime import datetime
 from typing import Any
 
 import fitz
-import yaml
 
 from config.field_patterns import (
     COVER_PATTERNS,
@@ -15,8 +14,8 @@ from config.field_patterns import (
     RETURNS_ALREADY_PROCESSED_PATTERNS,
     TEST_PATTERNS,
 )
-from config.settings import CONFIG_DIR
 from models.plan_profile import DetectedSection, PlanProfile
+from services.file_order import load_section_specs
 from services.logo_check import inspect_cover_stamp
 
 _NEXT_LABEL = re.compile(
@@ -41,7 +40,26 @@ _BODY_START = re.compile(r"^(We are|Please|If you|This Valuation|Dear\s)", re.I)
 
 
 def extract_plan_profile(doc: fitz.Document) -> PlanProfile:
-    """Extracting plan data from the merged PDF."""
+    """Extracting plan data from the merged PDF.
+
+    Purpose:
+        Extracting plan data from the merged PDF.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+
+    Returns:
+        PlanProfile.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        extract_plan_profile(doc) returns PlanProfile.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     cover_text = _pages_text(doc, 0, min(3, doc.page_count))
     full_text = _pages_text(doc, 0, doc.page_count)
     warnings: list[str] = []
@@ -135,11 +153,52 @@ def extract_plan_profile(doc: fitz.Document) -> PlanProfile:
 
 
 def beginning_plan_year(start_date: str) -> str | None:
-    """SRD §7: use the beginning plan year only."""
+    """SRD §7: use the beginning plan year only.
+
+    Purpose:
+        SRD §7: use the beginning plan year only.
+
+    Args:
+        start_date: Start date. Type: str.
+
+    Returns:
+        a str | None.
+
+    Raises:
+        None.
+
+    Example:
+        beginning_plan_year("text") returns a str | None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     return _beginning_year(start_date)
 
 
 def _pages_text(doc: fitz.Document, start: int, end: int) -> str:
+    """Pages text.
+
+    Purpose:
+        Pages text.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+        start: Start. Type: int.
+        end: End. Type: int.
+
+    Returns:
+        a str.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _pages_text(doc, 1, 1) returns a str.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     parts: list[str] = []
     for index in range(start, end):
         parts.append(doc[index].get_text("text") or "")
@@ -147,6 +206,27 @@ def _pages_text(doc: fitz.Document, start: int, end: int) -> str:
 
 
 def _first_match(text: str, patterns: list[str]) -> str | None:
+    """First match.
+
+    Purpose:
+        First match.
+
+    Args:
+        text: Text from a page or a file.
+        patterns: Patterns. Type: list[str].
+
+    Returns:
+        a str | None.
+
+    Raises:
+        None.
+
+    Example:
+        _first_match("text", []) returns a str | None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     if not text:
         return None
     for pattern in patterns:
@@ -159,7 +239,26 @@ def _first_match(text: str, patterns: list[str]) -> str | None:
 
 
 def _parse_cover_letter(text: str) -> dict[str, str | None]:
-    """TEST23 §B: company, address, and plan name from a cover-letter layout."""
+    """TEST23 §B: company, address, and plan name from a cover-letter layout.
+
+    Purpose:
+        TEST23 §B: company, address, and plan name from a cover-letter layout.
+
+    Args:
+        text: Text taken from a page or a file.
+
+    Returns:
+        dict[str, str | None].
+
+    Raises:
+        None.
+
+    Example:
+        _parse_cover_letter("text") returns dict[str, str | None].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     empty = {"company_name": None, "company_address": None, "plan_name": None}
     lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
     if not lines:
@@ -202,6 +301,26 @@ def _parse_cover_letter(text: str) -> dict[str, str | None]:
 
 
 def _clean_line(value: str | None) -> str | None:
+    """Clean line.
+
+    Purpose:
+        Clean line.
+
+    Args:
+        value: Value. Type: str | None.
+
+    Returns:
+        a str | None.
+
+    Raises:
+        None.
+
+    Example:
+        _clean_line("text") returns a str | None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     if not value:
         return None
     line = value.splitlines()[0].strip()
@@ -212,6 +331,26 @@ def _clean_line(value: str | None) -> str | None:
 
 
 def _plan_year(text: str) -> tuple[str | None, str | None]:
+    """Plan year.
+
+    Purpose:
+        Plan year.
+
+    Args:
+        text: Text taken from a page or a file.
+
+    Returns:
+        tuple[str | None, str | None].
+
+    Raises:
+        None.
+
+    Example:
+        _plan_year("text") returns tuple[str | None, str | None].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     for pattern in COVER_PATTERNS["plan_year"]:
         match = re.search(pattern, text, flags=re.IGNORECASE)
         if not match:
@@ -224,6 +363,26 @@ def _plan_year(text: str) -> tuple[str | None, str | None]:
 
 
 def _format_date(raw: str) -> str | None:
+    """Format date.
+
+    Purpose:
+        Format date.
+
+    Args:
+        raw: Raw. Type: str.
+
+    Returns:
+        a str | None.
+
+    Raises:
+        None.
+
+    Example:
+        _format_date("text") returns a str | None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     raw = (raw or "").strip()
     for fmt in ("%m/%d/%Y", "%m/%d/%y"):
         try:
@@ -234,6 +393,26 @@ def _format_date(raw: str) -> str | None:
 
 
 def _beginning_year(start_date: str | None) -> str | None:
+    """Beginning year.
+
+    Purpose:
+        Beginning year.
+
+    Args:
+        start_date: Start date. Type: str | None.
+
+    Returns:
+        a str | None.
+
+    Raises:
+        None.
+
+    Example:
+        _beginning_year("text") returns a str | None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     if not start_date:
         return None
     try:
@@ -244,6 +423,26 @@ def _beginning_year(start_date: str | None) -> str | None:
 
 
 def _testing_method(text: str) -> str | None:
+    """Testing method.
+
+    Purpose:
+        Testing method.
+
+    Args:
+        text: Text taken from a page or a file.
+
+    Returns:
+        str | None.
+
+    Raises:
+        None.
+
+    Example:
+        _testing_method("text") returns str | None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     for pattern in TEST_PATTERNS["testing_method"]:
         match = re.search(pattern, text, flags=re.IGNORECASE)
         if match:
@@ -252,6 +451,27 @@ def _testing_method(text: str) -> str | None:
 
 
 def _money_or_percent(text: str, patterns: list[str]) -> float | None:
+    """Money or percent.
+
+    Purpose:
+        Money or percent.
+
+    Args:
+        text: Text from a page or a file.
+        patterns: Patterns. Type: list[str].
+
+    Returns:
+        a float | None.
+
+    Raises:
+        None.
+
+    Example:
+        _money_or_percent("text", []) returns a float | None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     raw = _first_match(text, patterns)
     if raw is None:
         return None
@@ -263,6 +483,27 @@ def _money_or_percent(text: str, patterns: list[str]) -> float | None:
 
 
 def _flag_present(text: str, patterns: list[str]) -> bool | None:
+    """Flag present.
+
+    Purpose:
+        Flag present.
+
+    Args:
+        text: Text from a page or a file.
+        patterns: Patterns. Type: list[str].
+
+    Returns:
+        a bool | None.
+
+    Raises:
+        None.
+
+    Example:
+        _flag_present("text", []) returns a bool | None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     for pattern in patterns:
         if re.search(pattern, text, flags=re.IGNORECASE | re.DOTALL):
             return True
@@ -270,6 +511,28 @@ def _flag_present(text: str, patterns: list[str]) -> bool | None:
 
 
 def _flag_bool(text: str, true_patterns: list[str], false_patterns: list[str]) -> bool | None:
+    """Flag bool.
+
+    Purpose:
+        Flag bool.
+
+    Args:
+        text: Text from a page or a file.
+        true_patterns: True patterns. Type: list[str].
+        false_patterns: False patterns. Type: list[str].
+
+    Returns:
+        a bool | None.
+
+    Raises:
+        None.
+
+    Example:
+        _flag_bool("text", [], []) returns a bool | None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     if _flag_present(text, true_patterns):
         return True
     if _flag_present(text, false_patterns):
@@ -278,6 +541,26 @@ def _flag_bool(text: str, true_patterns: list[str], false_patterns: list[str]) -
 
 
 def _or_bools(*values: bool | None) -> bool | None:
+    """Or bools.
+
+    Purpose:
+        Or bools.
+
+    Args:
+        *values: Values. Type: bool | None.
+
+    Returns:
+        a bool | None.
+
+    Raises:
+        None.
+
+    Example:
+        _or_bools() returns a bool | None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     known = [v for v in values if v is not None]
     if not known:
         return None
@@ -285,6 +568,26 @@ def _or_bools(*values: bool | None) -> bool | None:
 
 
 def _sum_optional(*values: float | None) -> float | None:
+    """Sum optional.
+
+    Purpose:
+        Sum optional.
+
+    Args:
+        *values: Values. Type: float | None.
+
+    Returns:
+        a float | None.
+
+    Raises:
+        None.
+
+    Example:
+        _sum_optional() returns a float | None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     known = [v for v in values if v is not None]
     if not known:
         return None
@@ -292,13 +595,50 @@ def _sum_optional(*values: float | None) -> float | None:
 
 
 def _load_sections() -> list[dict[str, Any]]:
-    path = CONFIG_DIR / "package_order.yaml"
-    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    return list(data.get("expected_order") or [])
+    """Input: none. Calls load_section_specs. Output: expected_order from config/package_order.yaml.
+
+    Purpose:
+        Input: none. Calls load_section_specs. Output: expected_order from config/package_order.yaml.
+
+    Args:
+        None.
+
+    Returns:
+        list[dict[str, Any]].
+
+    Raises:
+        yaml.YAMLError: A YAML file is not valid.
+
+    Example:
+        _load_sections() returns list[dict[str, Any]].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
+    return load_section_specs()
 
 
 def detect_sections(doc: fitz.Document) -> list[DetectedSection]:
-    """Finding each report section after the edits."""
+    """Finding each report section after the edits.
+
+    Purpose:
+        Finding each report section after the edits.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+
+    Returns:
+        list[DetectedSection].
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        detect_sections(doc) returns list[DetectedSection].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     return _detect_sections(doc)
 
 
@@ -311,8 +651,23 @@ _PRIOR_NHCE_RESULTS = re.compile(
 def _adp_results_method(doc: fitz.Document) -> str | None:
     """The ADP/ACP results page says prior year when it uses prior-year NHCE percentages.
 
-    A results page without that wording is current-year testing. The recap sentence
-    "prior year data" is not the testing method.
+    Purpose:
+        The ADP/ACP results page says prior year when it uses prior-year NHCE percentages. A results page without that wording is current-year testing. The recap sentence "prior year data" is not the testing method.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+
+    Returns:
+        str | None.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _adp_results_method(doc) returns str | None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
     """
     saw_results = False
     for page in doc:
@@ -327,7 +682,26 @@ def _adp_results_method(doc: fitz.Document) -> str | None:
 
 
 def _current_when_adp_has_no_prior(text: str) -> str | None:
-    """No 'Prior Testing' on an ADP/ACP Test Results page means current-year testing."""
+    """No 'Prior Testing' on an ADP/ACP Test Results page means current-year testing.
+
+    Purpose:
+        No 'Prior Testing' on an ADP/ACP Test Results page means current-year testing.
+
+    Args:
+        text: Text taken from a page or a file.
+
+    Returns:
+        str | None.
+
+    Raises:
+        None.
+
+    Example:
+        _current_when_adp_has_no_prior("text") returns str | None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     if not re.search(r"ADP\s*/\s*ACP\s+Test\s+Results", text or "", re.I):
         return None
     if re.search(r"prior\s+testing", text or "", re.I):
@@ -336,6 +710,26 @@ def _current_when_adp_has_no_prior(text: str) -> str | None:
 
 
 def _detect_sections(doc: fitz.Document) -> list[DetectedSection]:
+    """Detect sections.
+
+    Purpose:
+        Detect sections.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+
+    Returns:
+        list[DetectedSection].
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _detect_sections(doc) returns list[DetectedSection].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     from services.package_polish import is_compliance_overview
 
     found: list[DetectedSection] = []
