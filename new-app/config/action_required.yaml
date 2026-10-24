@@ -1,7 +1,8 @@
-# Action Required paragraphs only.
+# Action Required page.
 # Each entry is one paragraph: the name shown in the app, the heading on the page,
-# and when that paragraph stays. Notices, sample letters, and recap bullets stay in
-# config/rules.yaml. A 403(b) package uses the 403b list for the paragraphs listed there.
+# and when that paragraph stays. A 403(b) package uses the 403b list for the
+# paragraphs listed there. Rules D and E also keep or remove the after-12-month
+# Excess Return Notice.
 
 paragraphs:
   - id: A
@@ -63,7 +64,7 @@ paragraphs:
           - Form W-4R
 
   - id: D
-    section: ADP/ACP test failure after 12 months, current year
+    section: Action Required and Excess Return Notice, after 12 months, current year
     keep_when:
       all:
         - field: testing_method
@@ -80,7 +81,7 @@ paragraphs:
       - heading: IMMEDIATE ACTION REQUIRED - ADP/ACP CURRENT METHOD TEST FAILURE - AFTER 12-MONTHS
 
   - id: E
-    section: ADP/ACP test failure after 12 months, prior year
+    section: Action Required and Excess Return Notice, after 12 months, prior year
     keep_when:
       all:
         - field: testing_method
@@ -178,7 +179,7 @@ paragraphs:
           - Form W-4P
 
   - id: D
-    section: ACP test failure after 12 months, current year
+    section: Action Required and Excess Return Notice, ACP after 12 months, current year
     keep_when:
       all:
         - field: testing_method
@@ -194,7 +195,7 @@ paragraphs:
       - heading: IMMEDIATE ACTION REQUIRED - ACP CURRENT METHOD TEST FAILURE - AFTER 12-MONTHS
 
   - id: E
-    section: ACP test failure after 12 months, prior year
+    section: Action Required and Excess Return Notice, ACP after 12 months, prior year
     keep_when:
       all:
         - field: testing_method

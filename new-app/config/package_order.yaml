@@ -1,4 +1,4 @@
-# TEST23 §A.2 physical report order. Missing entries are skipped.
+# Order of the pages in the valuation package. Missing pages are skipped.
 combine_order:
   - Cover Letter
   - Test Summary

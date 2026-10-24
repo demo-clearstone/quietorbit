@@ -625,7 +625,7 @@ def _result_summary_checks(doc: fitz.Document) -> list[ValidationItem]:
 
 def summary_test_record() -> list[dict]:
     """What each Compliance Testing Summary line means. Later pages are checked against it."""
-    data = yaml.safe_load((CONFIG_DIR / "summary_tests.yaml").read_text(encoding="utf-8")) or {}
+    data = yaml.safe_load((CONFIG_DIR / "compliance_summary.yaml").read_text(encoding="utf-8")) or {}
     return [row for row in data.get("tests") or [] if isinstance(row, dict)]
 
 

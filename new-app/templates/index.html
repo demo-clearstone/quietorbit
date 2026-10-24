@@ -660,6 +660,7 @@
           <label class="check"><input id="auto-order" type="checkbox" checked /> Auto-order</label>
           <label class="check"><input id="rewrite-sources" type="checkbox" /> Retype 402(g) dates and HCE %. The cover letter date is set to today on every Process.</label>
           <label class="check"><input id="assembly-stops" type="checkbox" checked /> Assembly stops (recommended; stop on missing reports or validation issues)</label>
+          <label class="check"><input id="log-steps" type="checkbox" /> Log assembly steps in the browser console</label>
           <button id="run" type="button">Process package</button>
         </div>
       </div>
@@ -1238,6 +1239,8 @@
       form.append("auto_order", document.getElementById("auto-order").checked ? "true" : "false");
       form.append("rewrite_sources", document.getElementById("rewrite-sources").checked ? "true" : "false");
       form.append("check_assembly_stops", document.getElementById("assembly-stops").checked ? "true" : "false");
+      const logSteps = document.getElementById("log-steps").checked;
+      form.append("log_steps", logSteps ? "true" : "false");
       files.forEach((item) => {
         form.append("item_name", item.name);
         form.append("item_page", item.page ? String(item.page) : "0");
@@ -1257,9 +1260,12 @@
       setStatus("Processing… " + elapsedLabel(0));
       hidePreview();
       results.classList.remove("open");
-      const traceId = "trace_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2);
-      form.append("trace_id", traceId);
-      const finishConsoleTrace = await startConsoleTrace(traceId);
+      let finishConsoleTrace = async () => {};
+      if (logSteps) {
+        const traceId = "trace_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2);
+        form.append("trace_id", traceId);
+        finishConsoleTrace = await startConsoleTrace(traceId);
+      }
       try {
         const payload = await postJson("/api/jobs", form);
         showResults(payload);

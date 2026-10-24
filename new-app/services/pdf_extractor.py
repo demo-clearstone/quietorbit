@@ -292,7 +292,7 @@ def _sum_optional(*values: float | None) -> float | None:
 
 
 def _load_sections() -> list[dict[str, Any]]:
-    path = CONFIG_DIR / "sections.yaml"
+    path = CONFIG_DIR / "package_order.yaml"
     data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     return list(data.get("expected_order") or [])
 

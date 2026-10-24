@@ -275,7 +275,7 @@ def _file_tokens(name: str) -> str:
 
 
 def _bookmark_map() -> dict[str, str]:
-    data = yaml.safe_load((CONFIG_DIR / "sections.yaml").read_text(encoding="utf-8")) or {}
+    data = yaml.safe_load((CONFIG_DIR / "package_order.yaml").read_text(encoding="utf-8")) or {}
     raw = data.get("bookmarks") or {}
     if isinstance(raw, dict):
         return {str(key): str(value) for key, value in raw.items()}

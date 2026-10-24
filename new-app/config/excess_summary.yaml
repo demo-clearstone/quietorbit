@@ -1,0 +1,14 @@
+# Excess Summary Report page.
+
+rules:
+  - id: ES
+    section: Excess Summary Report
+    keep_when:
+      all:
+        - field: keep_excess_summary
+          equals: true
+    else: remove
+
+excess_summary:
+  - id: ES
+    heading: Excess Summary Report

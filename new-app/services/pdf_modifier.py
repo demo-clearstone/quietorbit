@@ -25,6 +25,7 @@ def apply_decisions(
     """Remove Action Required blocks, pack leftover text, and drop empty pages."""
     specs = _block_specs(plan_type)
     remove_ids = {item.rule_id for item in decisions if item.action == "remove"}
+    keep_ids = {item.rule_id for item in decisions if item.action == "keep"}
     headings = [str(spec["heading"]) for spec in specs if spec.get("heading")]
     removed: list[str] = []
     touched: set[int] = set()
@@ -45,7 +46,7 @@ def apply_decisions(
                 end_y = _block_end(page, hit.y0, headings)
                 if not _block_matches(page, spec, hit.y0, end_y):
                     continue
-                if _kept_by_other_spec(page, page_text, specs, heading, hit.y0, end_y, remove_ids):
+                if _kept_by_other_spec(page, page_text, specs, heading, hit.y0, end_y, keep_ids):
                     continue
                 boxes.append(fitz.Rect(40, max(36, hit.y0 - 2), page.rect.x1 - 40, end_y))
                 if rule_id not in removed:
@@ -125,7 +126,8 @@ def _heading_hits(page: fitz.Page, heading: str) -> list[fitz.Rect]:
 
 
 def _squash(value: str) -> str:
-    return re.sub(r"\s+", "", value or "").lower()
+    """Match a heading even when the PDF uses a different dash, dot, or line break."""
+    return re.sub(r"[^a-z0-9]+", "", (value or "").lower())
 
 
 def _page_lines(page: fitz.Page) -> list[tuple[str, tuple[float, float, float, float]]]:
@@ -148,13 +150,13 @@ def _kept_by_other_spec(
     heading: str,
     y0: float,
     y1: float,
-    remove_ids: set[str],
+    keep_ids: set[str],
 ) -> bool:
-    """A combined ADP/ACP letter stays when either test still needs it."""
+    """A combined ADP/ACP letter stays when a rule that says keep still needs it."""
     for spec in specs:
         if str(spec.get("heading") or "") != heading:
             continue
-        if str(spec["id"]) in remove_ids:
+        if str(spec["id"]) not in keep_ids:
             continue
         if not _extra_matches(page_text, str(spec.get("extra") or "")):
             continue

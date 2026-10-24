@@ -1,6 +1,6 @@
-# 403(b) Editing/Review. Loaded only when the plan type is 403(b).
-# Action Required paragraphs for 403(b) are in config/action_required.yaml.
-# A 401(k) package keeps using config/rules.yaml and config/paragraphs.yaml.
+# 403(b) plan differences. Loaded only when the plan type is 403(b).
+# This is not one page. It changes the pages listed below for a 403(b) package.
+# Action Required paragraphs are in config/action_required.yaml.
 
 package:
   keep_brf: true
@@ -15,11 +15,10 @@ bookmarks:
   ADP/ACP: ACP Test
   BRF: Benefits, Rights and Features test
 
-# Rule ids listed here replace the 401(k) rule with the same id.
-# Action Required replacements are in config/action_required.yaml.
+# These replace the 401(k) rule with the same id.
 rules:
   - id: I
-    section: ACP Failure Notice (CURRENT)
+    section: Excess Return Notice, current year ACP, within 12 months
     keep_when:
       all:
         - field: testing_method
@@ -33,7 +32,7 @@ rules:
     else: remove
 
   - id: J_ADP
-    section: Sample Letter ADP
+    section: Sample letter, ADP test failure
     keep_when:
       all:
         - field: plan_type
@@ -41,14 +40,13 @@ rules:
     else: remove
 
   - id: Y10
-    section: Recap special catch-up
+    section: Year End Recap, 15-year catch-up
     keep_when:
       all:
         - field: special_catchup_disallowed
           not_true: true
     else: remove
 
-# Heading specs listed here replace every 401(k) spec with the same id.
 paragraphs:
   notices:
     - id: I

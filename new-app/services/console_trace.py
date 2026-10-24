@@ -1,12 +1,12 @@
-"""Assembly steps for the Python terminal and the browser console.
+"""Assembly steps for the browser console.
 
 Only the functions called directly by the assembly procedure are recorded.
 Nested helpers stay out of the log. PDF bytes and SSN-shaped text are omitted.
+The Python terminal is not written.
 """
 
 from __future__ import annotations
 
-import json
 import re
 import sys
 import time
@@ -162,8 +162,6 @@ def run_traced(token: str, function, *args, **kwargs):
     open_calls: dict[int, tuple[dict, float]] = {}
     started = time.perf_counter()
     root_name = function.__name__
-    print("\n========== MOA assembly flow ==========", flush=True)
-    print("Purpose and code link are on each line. Open a step in the browser console to see its input and output.", flush=True)
 
     def append(event: dict) -> None:
         with _LOCK:
@@ -174,7 +172,6 @@ def run_traced(token: str, function, *args, **kwargs):
             event["sequence"] = len(trace["events"]) + 1
             event["elapsed_ms"] = round((time.perf_counter() - started) * 1000, 2)
             trace["events"].append(event)
-        _echo(event)
 
     def profile(frame, event, result):
         if event not in {"call", "return"}:
@@ -243,13 +240,10 @@ def run_traced(token: str, function, *args, **kwargs):
         )
         with _LOCK:
             _TRACES[token]["status"] = "failed"
-        print("========== MOA assembly failed ==========\n", flush=True)
         raise
     else:
         with _LOCK:
-            count = len(_TRACES[token]["events"])
             _TRACES[token]["status"] = "completed"
-        print(f"========== MOA assembly done: {count} steps ==========\n", flush=True)
         return result
     finally:
         sys.setprofile(previous)
@@ -299,36 +293,3 @@ def _purpose(file_name: str, function_name: str, inputs: dict) -> str:
     if text:
         return text
     return function_name.replace("_", " ")
-
-
-def _echo(event: dict) -> None:
-    purpose = event.get("purpose") or "Assembly step"
-    code_link = event.get("code_link") or _code_link(event)
-    print(f"{event.get('sequence', '')}. purpose: {purpose}", flush=True)
-    print(f"   file name: {event.get('file') or ''}", flush=True)
-    print(f"   function: {event.get('function') or ''}", flush=True)
-    print(f"   code link: {code_link}", flush=True)
-    print(f"   input object: {_preview(event.get('input'))}", flush=True)
-    print(f"   output object: {_preview(event.get('output'))}", flush=True)
-
-
-def _code_link(event: dict) -> str:
-    file_name = event.get("file") or ""
-    line = event.get("line")
-    if file_name and line:
-        return f"{file_name}:{line}"
-    return file_name
-
-
-def _preview(value: object) -> str:
-    if value is None or isinstance(value, (bool, int, float)):
-        return json.dumps(value)
-    if isinstance(value, str):
-        return json.dumps(value if len(value) <= 80 else value[:80] + "…")
-    if isinstance(value, list):
-        return f"[{len(value)} items]"
-    if isinstance(value, dict):
-        keys = ", ".join(str(key) for key in list(value)[:6])
-        extra = "" if len(value) <= 6 else f", +{len(value) - 6} more"
-        return "{" + keys + extra + "}"
-    return json.dumps(value, default=str)[:80]

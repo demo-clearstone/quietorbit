@@ -1,5 +1,5 @@
-# Record of what each Compliance Testing Summary line means.
-# Later test pages are checked against this summary.
+# Compliance Testing Summary page.
+# What each line on that page means. Later test pages are checked against it.
 
 tests:
   - code: top_heavy

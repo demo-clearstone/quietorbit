@@ -1,5 +1,5 @@
-# 457 assemblies. Loaded only when the plan type is 457.
-# A 457 package follows the 401(k) rules, then these Important Information edits.
+# 457 plan differences. Loaded only when the plan type is 457.
+# A 457 package follows the 401(k) pages, then these Year End Recap edits.
 # 401(k) and 403(b) do not read this file.
 
 package:
@@ -8,7 +8,7 @@ package:
 
 rules:
   - id: Y11
-    section: Recap 457 age 50 catch-up limit
+    section: Year End Recap, 457 age 50 catch-up
     keep_when:
       all:
         - field: catchup_disallowed
@@ -16,7 +16,7 @@ rules:
     else: remove
 
   - id: Y12
-    section: Recap forfeitures reallocated
+    section: Year End Recap, forfeitures reallocated
     keep_when:
       all:
         - field: forfeitures_reallocated
@@ -24,7 +24,7 @@ rules:
     else: remove
 
   - id: Y13
-    section: Recap no forfeitures
+    section: Year End Recap, no forfeitures
     keep_when:
       all:
         - field: no_forfeitures

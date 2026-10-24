@@ -63,6 +63,7 @@ async def create_job(
     item_page: list[int] | None = Form(default=None),
     upload_id: list[str] | None = Form(default=None),
     trace_id: str = Form(default=""),
+    log_steps: bool = Form(default=False),
 ) -> JobResult:
     uploads: list[tuple[str, bytes]] = []
     warnings: list[str] = []
@@ -114,7 +115,7 @@ async def create_job(
             detail="Upload PDF files or enter a Valuation Package folder path",
         )
 
-    if trace_id and not _UPLOAD_ID.fullmatch(trace_id):
+    if log_steps and trace_id and not _UPLOAD_ID.fullmatch(trace_id):
         raise HTTPException(400, "Console trace ID is not valid")
     options = dict(
         auto_order=auto_order,
@@ -123,10 +124,13 @@ async def create_job(
         rewrite_sources=rewrite_sources,
         check_assembly_stops=check_assembly_stops,
     )
-    token = trace_id or f"term_{uuid.uuid4().hex[:12]}"
-    start_trace(token)
     try:
-        result = await asyncio.to_thread(run_traced, token, process_uploads, uploads, **options)
+        if log_steps:
+            token = trace_id or f"term_{uuid.uuid4().hex[:12]}"
+            start_trace(token)
+            result = await asyncio.to_thread(run_traced, token, process_uploads, uploads, **options)
+        else:
+            result = await asyncio.to_thread(process_uploads, uploads, **options)
     except HTTPException:
         raise
     except Exception as exc:

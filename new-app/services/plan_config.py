@@ -23,6 +23,14 @@ _PARAGRAPH_KEYS = (
     "recap_bullets",
 )
 
+# One file for each page that has keep-or-remove text. Action Required is loaded separately.
+_PAGE_FILES = (
+    "excess_return_notice.yaml",
+    "failure_letters.yaml",
+    "excess_summary.yaml",
+    "year_end_recap.yaml",
+)
+
 _PACKAGE_DEFAULTS = {
     "keep_brf": False,
     "require_410b_report": True,
@@ -84,7 +92,7 @@ def bookmark_overrides(plan_type: str | None) -> dict[str, str]:
 
 
 def rules_for(plan_type: str | None) -> dict:
-    rules = _action_required_rules(plan_type) + list(_load_yaml("rules.yaml").get("rules") or [])
+    rules = _action_required_rules(plan_type) + _page_rules()
     extra: list[dict] = []
     if is_403b_plan(plan_type):
         extra = list(_load_403b().get("rules") or [])
@@ -101,7 +109,7 @@ def rules_for(plan_type: str | None) -> dict:
 
 
 def paragraphs_for(plan_type: str | None) -> dict:
-    base = dict(_load_yaml("paragraphs.yaml"))
+    base = _page_paragraphs()
     base["action_required_headings"] = _action_required_headings(plan_type)
     overlay: dict = {}
     if is_403b_plan(plan_type):
@@ -160,32 +168,61 @@ def _action_required_rules(plan_type: str | None) -> list[dict]:
                 "section": item.get("section"),
                 "keep_when": item.get("keep_when") or {},
                 "else": item.get("else") or "remove",
+                "missing": "remove",
             }
         )
     return rules
 
 
 def _action_required_headings(plan_type: str | None) -> list[dict]:
+    """Every Action Required heading for this plan, including the other plan's wording."""
+    data = _load_yaml("action_required.yaml")
+    active_ids = {str(item.get("id")) for item in _action_required_items(plan_type)}
+    sources = [
+        item
+        for item in list(data.get("paragraphs") or []) + list(data.get("403b") or [])
+        if isinstance(item, dict) and str(item.get("id")) in active_ids
+    ]
     headings: list[dict] = []
-    for item in _action_required_items(plan_type):
-        blocks = item.get("headings") or [item]
-        for block in blocks:
+    seen: set[tuple[str, str]] = set()
+    for item in sources:
+        for block in item.get("headings") or []:
             if not isinstance(block, dict) or not block.get("heading"):
                 continue
+            key = (str(item.get("id")), str(block.get("heading")))
+            if key in seen:
+                continue
+            seen.add(key)
             spec = {"id": item.get("id"), "heading": block.get("heading")}
-            for key in ("variant", "block_excludes", "block_contains", "must_include", "extra"):
-                if block.get(key) is not None:
-                    spec[key] = block[key]
+            for field in ("variant", "block_excludes", "block_contains", "must_include", "extra"):
+                if block.get(field) is not None:
+                    spec[field] = block[field]
             headings.append(spec)
     return headings
 
 
+def _page_rules() -> list[dict]:
+    rules: list[dict] = []
+    for name in _PAGE_FILES:
+        rules.extend(item for item in (_load_yaml(name).get("rules") or []) if isinstance(item, dict))
+    return rules
+
+
+def _page_paragraphs() -> dict:
+    merged = {key: [] for key in _PARAGRAPH_KEYS if key != "action_required_headings"}
+    for name in _PAGE_FILES:
+        data = _load_yaml(name)
+        for key in merged:
+            merged[key].extend(item for item in (data.get(key) or []) if isinstance(item, dict))
+    return merged
+
+
 def _load_403b() -> dict:
-    return _load_yaml("403b.yaml")
+    return _load_yaml("plan_403b.yaml")
 
 
 def _load_457() -> dict:
-    return _load_yaml("457.yaml")
+    return _load_yaml("plan_457.yaml")
 
 
 def _load_yaml(name: str) -> dict:

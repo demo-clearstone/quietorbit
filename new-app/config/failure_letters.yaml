@@ -1,0 +1,68 @@
+# 415 failure information page, and the sample letters to participants.
+
+rules:
+  - id: J_ADP
+    section: Sample letter, ADP test failure
+    keep_when:
+      all:
+        - field: returns_required
+          equals: true
+        - field: adp_failed
+          equals: true
+    else: remove
+
+  - id: J_ACP
+    section: Sample letter, ACP test failure
+    keep_when:
+      all:
+        - field: returns_required
+          equals: true
+        - field: acp_failed
+          equals: true
+    else: remove
+
+  - id: K
+    section: Sample letter, 402(g) deferral limit
+    keep_when:
+      all:
+        - field: fail_402g
+          equals: true
+        - field: returns_required
+          equals: true
+        - field: fail_402g_after_deadline
+          not_true: true
+    else: remove
+
+  - id: L
+    section: 415 failure information and sample letter
+    keep_when:
+      all:
+        - field: fail_415
+          equals: true
+    else: remove
+
+notices:
+  - id: L
+    heading: Annual Additions (IRC 415) Test Failure Information
+
+sample_letters:
+  - id: J_ACP
+    heading: SAMPLE/DRAFT Communication to Participant
+    extra: Actual Contribution Percentage (ACP)
+  - id: J_ADP
+    heading: SAMPLE/DRAFT Communication to Participant
+    extra: Average Deferral Percentage (ADP)
+  - id: J_ADP
+    heading: SAMPLE/DRAFT Communication to Participant
+    extra: Actual Deferral Percentage (ADP)
+  - id: K
+    heading: SAMPLE/DRAFT Communication to Participant
+    extra: 402(g) Deferral Limit
+  - id: K
+    heading: 402(g) Deferral Limit
+    extra: SAMPLE/DRAFT
+  - id: L
+    heading: SAMPLE/DRAFT Communication to Participant
+    extra: Annual Additions (IRC 415) limit has been exceeded
+  - id: L
+    heading: Annual Additions (IRC 415) limit has been exceeded

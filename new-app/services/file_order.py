@@ -9,7 +9,7 @@ from config.settings import CONFIG_DIR
 
 
 def load_section_specs() -> list[dict]:
-    data = yaml.safe_load((CONFIG_DIR / "sections.yaml").read_text(encoding="utf-8")) or {}
+    data = yaml.safe_load((CONFIG_DIR / "package_order.yaml").read_text(encoding="utf-8")) or {}
     return list(data.get("expected_order") or [])
 
 
@@ -22,7 +22,7 @@ def _spec_aliases(spec: dict) -> list[str]:
 
 
 def _rank(spec: dict, fallback: int) -> int:
-    data = yaml.safe_load((CONFIG_DIR / "sections.yaml").read_text(encoding="utf-8")) or {}
+    data = yaml.safe_load((CONFIG_DIR / "package_order.yaml").read_text(encoding="utf-8")) or {}
     order = [str(name) for name in (data.get("combine_order") or [])]
     name = str(spec.get("name") or "")
     try:

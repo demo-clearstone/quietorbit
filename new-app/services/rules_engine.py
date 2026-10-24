@@ -6,7 +6,7 @@ from services.plan_config import rules_for
 
 
 def evaluate(profile: PlanProfile) -> list[RuleDecision]:
-    """Return keep/remove decisions. A 403(b) plan uses config/403b.yaml."""
+    """Return keep/remove decisions. A 403(b) plan uses config/plan_403b.yaml."""
     spec = rules_for(profile.plan_type)
     decisions: list[RuleDecision] = []
     for rule in spec.get("rules") or []:
@@ -19,6 +19,13 @@ def _apply_rule(rule: dict, profile: PlanProfile) -> RuleDecision:
     section = str(rule.get("section"))
     keep_when = rule.get("keep_when") or {}
     ok, skipped, reason = _conditions_met(keep_when, profile)
+    if skipped and str(rule.get("missing") or "") == "remove":
+        return RuleDecision(
+            rule_id=rule_id,
+            section=section,
+            action="remove",
+            reason=f"Rule {rule_id} did not match: {reason}",
+        )
     if skipped:
         return RuleDecision(
             rule_id=rule_id,
