@@ -84,6 +84,8 @@ rules:
 recap_bullets:
   - id: Y1
     match: did not have any Highly Compensated Employees
+  - id: Y1
+    match: not subject to ADP/ACP
   - id: Y2
     match: prior year data
   - id: Y2

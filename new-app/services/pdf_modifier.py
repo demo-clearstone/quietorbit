@@ -1420,23 +1420,27 @@ def apply_recap_bullets(
             continue
         header, bullets = _split_recap(original)
         kept: list[str] = []
+        dropped: list[str] = []
         for bullet in bullets:
             spec = _matching_recap(bullet, specs)
             if spec is None and re.search(r"(?:^|\s)%(?:\s|$)", bullet):
+                dropped.append(bullet)
                 continue
             if spec and str(spec["id"]) in remove_ids:
                 if spec["id"] not in removed:
                     removed.append(str(spec["id"]))
+                dropped.append(bullet)
                 continue
             if spec and str(spec["id"]) == "Y2":
                 bullet = _fill_prior_rates(bullet, nhce)
             kept.append(bullet)
+        if not dropped:
+            continue
+        if _redact_recap_paragraphs(page, dropped):
+            continue
         header_lines = [line.strip() for line in header.splitlines() if line.strip()]
         if not header_lines:
             header_lines = ["Important Information"]
-        updated_text = "\n".join(header_lines + kept)
-        if updated_text.strip() == re.sub(r"\s+", " ", original).strip():
-            continue
         _apply_redact_boxes(page, [page.rect])
         from services.package_builder import write_recap_page
 
@@ -1653,6 +1657,144 @@ def _split_recap(text: str) -> tuple[str, list[str]]:
     Side effects:
         None. This function only reads data and returns a value.
     """
+    lines = [line.strip() for line in text.splitlines() if line.strip() and not re.fullmatch(r"\d{1,3}", line.strip())]
+    first = next((index for index, line in enumerate(lines) if _recap_paragraph_start(line)), None)
+    if first is None:
+        return _split_marked_bullets(text)
+    header = lines[:first]
+    bullets: list[str] = []
+    current: list[str] = []
+    for line in lines[first:]:
+        for piece in _pieces_at_starts(line):
+            if _recap_paragraph_start(piece):
+                if current:
+                    bullets.append(" ".join(current).strip())
+                current = [piece]
+                continue
+            if current:
+                current.append(piece)
+            else:
+                header.append(piece)
+    if current:
+        bullets.append(" ".join(current).strip())
+    return "\n".join(header).strip() or "Important Information", [item for item in bullets if item]
+
+
+_RECAP_START = re.compile(
+    r"^(?:your plan is not subject to adp|"
+    r"based on the definition of highly compensated|"
+    r"your plan is designed to allow participants|"
+    r"based on the top heavy|"
+    r"your plan will be considered top heavy|"
+    r"if you sponsor a qualified retirement plan|"
+    r"the plan['\u2019]s employer match contribution)",
+    re.I,
+)
+
+
+def _recap_paragraph_start(line: str) -> bool:
+    """A Year End Recap template paragraph, with or without a bullet mark.
+
+    Purpose:
+        A Year End Recap template paragraph, with or without a bullet mark.
+
+    Args:
+        line: Line. Type: str.
+
+    Returns:
+        True or False.
+
+    Raises:
+        None.
+
+    Example:
+        _recap_paragraph_start("Your plan is not subject to ADP/ACP testing") returns True.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
+    return bool(_RECAP_START.match(_strip_recap_mark(line)))
+
+
+def _strip_recap_mark(line: str) -> str:
+    """Strip recap mark.
+
+    Purpose:
+        Strip recap mark.
+
+    Args:
+        line: Line. Type: str.
+
+    Returns:
+        a str.
+
+    Raises:
+        None.
+
+    Example:
+        _strip_recap_mark("text") returns a str.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
+    return re.sub(r"^[^A-Za-z]+", "", line or "").strip()
+
+
+def _pieces_at_starts(line: str) -> list[str]:
+    """Pieces at starts.
+
+    Purpose:
+        Pieces at starts.
+
+    Args:
+        line: Line. Type: str.
+
+    Returns:
+        list[str].
+
+    Raises:
+        None.
+
+    Example:
+        _pieces_at_starts("text") returns list[str].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
+    body = _strip_recap_mark(line)
+    matches = list(_RECAP_START.finditer(body))
+    if not matches:
+        return [body] if body else []
+    pieces: list[str] = []
+    if matches[0].start() > 0:
+        pieces.append(body[: matches[0].start()].strip())
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(body)
+        pieces.append(body[match.start() : end].strip())
+    return [piece for piece in pieces if piece]
+
+
+def _split_marked_bullets(text: str) -> tuple[str, list[str]]:
+    """Split marked bullets.
+
+    Purpose:
+        Split marked bullets.
+
+    Args:
+        text: Text taken from a page or a file.
+
+    Returns:
+        tuple[str, list[str]].
+
+    Raises:
+        None.
+
+    Example:
+        _split_marked_bullets("text") returns tuple[str, list[str]].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     lines = [line.strip() for line in text.splitlines()]
     header: list[str] = []
     bullets: list[str] = []
@@ -1678,4 +1820,64 @@ def _split_recap(text: str) -> tuple[str, list[str]]:
     if current:
         bullets.append(" ".join(current).strip())
     return "\n".join(header).strip() or "Important Information", [item for item in bullets if item]
+
+
+def _redact_recap_paragraphs(page: fitz.Page, paragraphs: list[str]) -> bool:
+    """Cover the template paragraphs that do not apply, and leave the others where they are.
+
+    Purpose:
+        Cover the template paragraphs that do not apply, and leave the others where they are.
+
+    Args:
+        page: One PDF page.
+        paragraphs: Paragraphs. Type: list[str].
+
+    Returns:
+        True when every paragraph was found and covered.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _redact_recap_paragraphs(page, []) returns True or False.
+
+    Side effects:
+        Changes the PDF passed in. Does not save the file by itself.
+    """
+    lines = _page_lines(page)
+    used: set[int] = set()
+    boxes: list[fitz.Rect] = []
+    for paragraph in paragraphs:
+        target = _squash(paragraph)
+        if not target:
+            continue
+        found = False
+        for start in range(len(lines)):
+            if start in used:
+                continue
+            joined = ""
+            rect: fitz.Rect | None = None
+            consumed: list[int] = []
+            for index in range(start, len(lines)):
+                if index in used:
+                    break
+                joined += _squash(lines[index][0])
+                line_rect = fitz.Rect(lines[index][1])
+                rect = line_rect if rect is None else rect | line_rect
+                consumed.append(index)
+                if joined.startswith(target):
+                    boxes.append(fitz.Rect(18, rect.y0 - 1, page.rect.x1 - 18, rect.y1 + 2))
+                    used.update(consumed)
+                    found = True
+                    break
+                if len(joined) > len(target):
+                    break
+            if found:
+                break
+        if not found:
+            return False
+    if not boxes:
+        return False
+    _apply_redact_boxes(page, boxes)
+    return True
 
