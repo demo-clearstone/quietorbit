@@ -21,7 +21,26 @@ _PERCENT = re.compile(r"(\d+(?:\.\d+)?)\s*%")
 
 
 def parse_excel(data: bytes) -> dict[str, Any]:
-    """Read the Val Assembly / Omnium checklist (CURRENT vs PRIOR, reclass, HCE)."""
+    """Read the Val Assembly / Omnium checklist (CURRENT vs PRIOR, reclass, HCE).
+
+    Purpose:
+        Read the Val Assembly / Omnium checklist (CURRENT vs PRIOR, reclass, HCE).
+
+    Args:
+        data: Raw file bytes.
+
+    Returns:
+        dict[str, Any].
+
+    Raises:
+        None.
+
+    Example:
+        parse_excel(data) returns dict[str, Any].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     with warnings.catch_warnings():
         warnings.filterwarnings(
             "ignore",
@@ -99,9 +118,12 @@ def parse_excel(data: bytes) -> dict[str, Any]:
         re.I,
     ):
         overlay["contributions_required"] = True
-    if _yes_no(_first(cells, "annual allocation", "true up", "true-up")) is True:
+    annual_allocation = _yes_no(_first(cells, "annual allocation"))
+    true_up = _yes_no(_first_explicit_true_up(cells))
+    if annual_allocation is True or true_up is True:
         overlay["contributions_required"] = True
-        overlay["true_up"] = True
+        overlay["true_up"] = true_up is True
+        overlay["annual_allocation"] = annual_allocation is True
     if re.search(r"safe harbor|\bSH\b", notes, re.I):
         overlay["safe_harbor"] = True
     if re.search(r"catch-?up.{0,40}not allowed", notes, re.I):
@@ -128,25 +150,61 @@ def parse_excel(data: bytes) -> dict[str, Any]:
 
 
 def parse_summary_text(text: str) -> dict[str, Any]:
-    """Read Compliance Testing Summary of Results pass/fail lines."""
-    blob = re.sub(r"\s+", " ", text or "")
+    """Read Compliance Testing Summary of Results pass/fail lines.
+
+    Purpose:
+        Read Compliance Testing Summary of Results pass/fail lines.
+
+    Args:
+        text: Text taken from a page or a file.
+
+    Returns:
+        dict[str, Any].
+
+    Raises:
+        None.
+
+    Example:
+        parse_summary_text("text") returns dict[str, Any].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
+    source = text or ""
+    lines = [line.strip() for line in source.splitlines() if line.strip()]
+    # The result summary is one section of a PDF; do not infer pass/fail from
+    # action-letter examples or sample notices that follow the summary page.
+    end = next(
+        (
+            index
+            for index, line in enumerate(lines[1:], start=1)
+            if re.match(
+                r"^(?:annual valuation report|immediate action required|attention required|year end recap|important information|compliance and administrative reports|overview and descriptions|contribution analysis|hce/?key|future hce|adp(?:/acp)?\s+(?:summary|test)|acp test|402\s*\(?g\)?\s+test|410\s*\(?b\)?\s+test|415\s+(?:limit )?test|census|sample/draft communication)",
+                line,
+                re.I,
+            )
+        ),
+        len(lines),
+    )
+    summary_text = "\n".join(lines[:end])
+    blob = re.sub(r"\s+", " ", summary_text)
     overlay: dict[str, Any] = {}
-    numbers = _PLAN_NUMBER.findall(text or "")
+    numbers = _PLAN_NUMBER.findall(summary_text)
     if numbers:
         overlay["plan_number"] = numbers[0]
-    name = _summary_plan_name(text or "")
+    name = _summary_plan_name(summary_text)
     if name:
         overlay["plan_name"] = name
-    pye = _summary_pye(text or "")
+    pye = _summary_pye(summary_text)
     if pye:
         overlay["plan_year_end"] = pye
 
-    percent = _PERCENT.search(text or "")
-    if percent and re.search(r"top\s*heavy", text or "", re.I):
+    percent = _PERCENT.search(summary_text)
+    if percent and re.search(r"top\s*heavy", summary_text, re.I):
         overlay["top_heavy_percent"] = float(percent.group(1))
-    if re.search(r"plan is not top heavy", text or "", re.I):
+    if re.search(r"plan is not top heavy", summary_text, re.I):
         overlay["top_heavy"] = False
-    elif re.search(r"plan is top heavy", text or "", re.I):
+    elif re.search(r"plan is top heavy", summary_text, re.I):
         overlay["top_heavy"] = True
 
     overlay["fail_402g"] = _tested_fail(blob, r"402\s*\(?g\)?")
@@ -162,9 +220,9 @@ def parse_summary_text(text: str) -> dict[str, Any]:
     elif overlay.get("adp_failed") or overlay.get("acp_failed") or overlay.get("fail_402g") or overlay.get("fail_415"):
         if re.search(r"excess returns|returns are required|refunds", blob, re.I):
             overlay["returns_required"] = True
-    if "compliance testing summary of results" in blob.lower():
-        overlay["after_12_months"] = bool(re.search(r"after\s+12[- ]month", blob, re.I))
-        overlay["variance_report"] = bool(re.search(r"(?<!no )variance report", blob, re.I))
+    if re.search(r"compliance testing summary of results", summary_text, re.I):
+        overlay["after_12_months"] = bool(re.search(r"after\s+12[- ]month", summary_text, re.I))
+        overlay["variance_report"] = bool(re.search(r"(?<!no )variance report", summary_text, re.I))
     return {key: value for key, value in overlay.items() if value not in (None, "")}
 
 
@@ -174,6 +232,29 @@ def merge_overlays(
     warnings: list[str],
     sources: list[str] | None = None,
 ) -> PlanProfile:
+    """Applying the Excel and summary results onto the plan profile.
+
+    Purpose:
+        Applying the Excel and summary results onto the plan profile.
+
+    Args:
+        profile: Plan profile collected from the PDF, Excel, and the compliance summary.
+        overlays: Overlays. Type: list[dict[str, Any]].
+        warnings: Messages already collected for this assembly.
+        sources: Sources. Type: list[str] | None.
+
+    Returns:
+        a PlanProfile.
+
+    Raises:
+        None.
+
+    Example:
+        merge_overlays(profile, [], []) returns a PlanProfile.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     numbers = [str(item["plan_number"]) for item in overlays if item.get("plan_number")]
     if profile.plan_number:
         numbers.append(profile.plan_number)
@@ -194,6 +275,27 @@ def merge_overlays(
 
 
 def _tested_fail(blob: str, name: str) -> bool | None:
+    """Tested fail.
+
+    Purpose:
+        Tested fail.
+
+    Args:
+        blob: Blob. Type: str.
+        name: File name or section name.
+
+    Returns:
+        a bool | None.
+
+    Raises:
+        None.
+
+    Example:
+        _tested_fail("text", "text") returns a bool | None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     match = re.search(
         r"(?:" + name + r").{0,100}?"
         r"(?:Test(?:ed)?|Result)?\s*[:=\-]?\s*(Pass|Fail)\b",
@@ -206,6 +308,26 @@ def _tested_fail(blob: str, name: str) -> bool | None:
 
 
 def _summary_plan_name(text: str) -> str | None:
+    """Summary plan name.
+
+    Purpose:
+        Summary plan name.
+
+    Args:
+        text: Text taken from a page or a file.
+
+    Returns:
+        str | None.
+
+    Raises:
+        None.
+
+    Example:
+        _summary_plan_name("text") returns str | None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     for line in text.splitlines():
         cleaned = re.sub(r"\s+", " ", line).strip()
         if re.search(r"401\s*\(?k\)?|403\s*\(?b\)?|savings plan", cleaned, re.I) and not re.search(
@@ -216,6 +338,26 @@ def _summary_plan_name(text: str) -> str | None:
 
 
 def _summary_pye(text: str) -> str | None:
+    """Summary pye.
+
+    Purpose:
+        Summary pye.
+
+    Args:
+        text: Text taken from a page or a file.
+
+    Returns:
+        str | None.
+
+    Raises:
+        None.
+
+    Example:
+        _summary_pye("text") returns str | None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     match = re.search(r"Plan Year End:\s*(.+)", text, flags=re.I)
     raw = match.group(1).strip() if match else ""
     month = _MONTH_DATE.search(raw or text)
@@ -228,14 +370,82 @@ def _summary_pye(text: str) -> str | None:
 
 
 def _column(cells: dict[str, str], name: str) -> str:
-    """Read a header cell, not a longer question that merely contains the word."""
+    """Read a header cell, not a longer question that merely contains the word.
+
+    Purpose:
+        Read a header cell, not a longer question that merely contains the word.
+
+    Args:
+        cells: Cells. Type: dict[str, str].
+        name: File name or section name.
+
+    Returns:
+        a str.
+
+    Raises:
+        None.
+
+    Example:
+        _column({}, "text") returns a str.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     for key, value in cells.items():
         if key == name or key.startswith(name + " "):
             return value
     return ""
 
 
+def _first_explicit_true_up(cells: dict[str, str]) -> str:
+    """Do not treat the combined annual-allocation question as proof of a true-up.
+
+    Purpose:
+        Do not treat the combined annual-allocation question as proof of a true-up.
+
+    Args:
+        cells: Cells. Type: dict[str, str].
+
+    Returns:
+        a str.
+
+    Raises:
+        None.
+
+    Example:
+        _first_explicit_true_up({}) returns a str.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
+    for key, value in cells.items():
+        if key.strip() in {"true up", "true-up", "true-up?", "true up?"}:
+            return value
+    return ""
+
+
 def _first(cells: dict[str, str], *needles: str) -> str:
+    """First.
+
+    Purpose:
+        First.
+
+    Args:
+        cells: Cells. Type: dict[str, str].
+        *needles: Needles. Type: str.
+
+    Returns:
+        a str.
+
+    Raises:
+        None.
+
+    Example:
+        _first({}) returns a str.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     for key, value in cells.items():
         if any(needle in key for needle in needles) and value:
             return value
@@ -243,6 +453,26 @@ def _first(cells: dict[str, str], *needles: str) -> str:
 
 
 def _cell_str(value: object) -> str:
+    """Cell str.
+
+    Purpose:
+        Cell str.
+
+    Args:
+        value: Value. Type: object.
+
+    Returns:
+        a str.
+
+    Raises:
+        None.
+
+    Example:
+        _cell_str(value) returns a str.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     if value is None:
         return ""
     if isinstance(value, datetime):
@@ -251,11 +481,51 @@ def _cell_str(value: object) -> str:
 
 
 def _digits(value: str) -> str | None:
+    """Digits.
+
+    Purpose:
+        Digits.
+
+    Args:
+        value: Value. Type: str.
+
+    Returns:
+        a str | None.
+
+    Raises:
+        None.
+
+    Example:
+        _digits("text") returns a str | None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     match = _PLAN_NUMBER.search(value or "")
     return match.group(1) if match else None
 
 
 def _method(value: str) -> str | None:
+    """Method.
+
+    Purpose:
+        Method.
+
+    Args:
+        value: Value. Type: str.
+
+    Returns:
+        a str | None.
+
+    Raises:
+        None.
+
+    Example:
+        _method("text") returns a str | None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     text = (value or "").upper()
     if "PRIOR" in text:
         return "PRIOR"
@@ -265,6 +535,26 @@ def _method(value: str) -> str | None:
 
 
 def _yes_no(value: str) -> bool | None:
+    """Yes no.
+
+    Purpose:
+        Yes no.
+
+    Args:
+        value: Value. Type: str.
+
+    Returns:
+        a bool | None.
+
+    Raises:
+        None.
+
+    Example:
+        _yes_no("text") returns a bool | None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     text = (value or "").strip().lower()
     if text in {"yes", "y", "true"}:
         return True
@@ -274,6 +564,26 @@ def _yes_no(value: str) -> bool | None:
 
 
 def _plan_type(value: str) -> str | None:
+    """Plan type.
+
+    Purpose:
+        Plan type.
+
+    Args:
+        value: Value. Type: str.
+
+    Returns:
+        a str | None.
+
+    Raises:
+        None.
+
+    Example:
+        _plan_type("text") returns a str | None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     text = (value or "").lower()
     if "457" in text:
         return "457"
@@ -285,6 +595,26 @@ def _plan_type(value: str) -> str | None:
 
 
 def _non_governmental(cells: dict[str, str]) -> bool | None:
+    """Non governmental.
+
+    Purpose:
+        Non governmental.
+
+    Args:
+        cells: Cells. Type: dict[str, str].
+
+    Returns:
+        a bool | None.
+
+    Raises:
+        None.
+
+    Example:
+        _non_governmental({}) returns a bool | None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     for key, value in cells.items():
         if "non-governmental" in key or "non governmental" in key:
             return _yes_no(value)
@@ -292,6 +622,26 @@ def _non_governmental(cells: dict[str, str]) -> bool | None:
 
 
 def _forfeitures_reallocated(cells: dict[str, str]) -> bool | None:
+    """Forfeitures reallocated.
+
+    Purpose:
+        Forfeitures reallocated.
+
+    Args:
+        cells: Cells. Type: dict[str, str].
+
+    Returns:
+        a bool | None.
+
+    Raises:
+        None.
+
+    Example:
+        _forfeitures_reallocated({}) returns a bool | None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     for key, value in cells.items():
         if "forfeit" not in key:
             continue
@@ -301,6 +651,26 @@ def _forfeitures_reallocated(cells: dict[str, str]) -> bool | None:
 
 
 def _no_forfeitures(cells: dict[str, str]) -> bool | None:
+    """No forfeitures.
+
+    Purpose:
+        No forfeitures.
+
+    Args:
+        cells: Cells. Type: dict[str, str].
+
+    Returns:
+        a bool | None.
+
+    Raises:
+        None.
+
+    Example:
+        _no_forfeitures({}) returns a bool | None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     for key, value in cells.items():
         if "forfeit" not in key:
             continue
@@ -312,6 +682,26 @@ def _no_forfeitures(cells: dict[str, str]) -> bool | None:
 
 
 def _normalize_date(value: str) -> str | None:
+    """Normalize date.
+
+    Purpose:
+        Normalize date.
+
+    Args:
+        value: Value. Type: str.
+
+    Returns:
+        a str | None.
+
+    Raises:
+        None.
+
+    Example:
+        _normalize_date("text") returns a str | None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     if not value:
         return None
     match = _DATE.search(value)

@@ -22,9 +22,31 @@ def apply_decisions(
     decisions: list[RuleDecision],
     plan_type: str | None = None,
 ) -> list[str]:
-    """Remove Action Required blocks, pack leftover text, and drop empty pages."""
+    """Remove Action Required blocks, pack leftover text, and drop empty pages.
+
+    Purpose:
+        Remove Action Required blocks, pack leftover text, and drop empty pages.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+        decisions: Keep, remove, or skipped results from the rules.
+        plan_type: Plan type: "401k", "403b", "457", or empty.
+
+    Returns:
+        list[str].
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        apply_decisions(doc, [], "text") returns list[str].
+
+    Side effects:
+        Changes the PDF passed in. Does not save the file by itself.
+    """
     specs = _block_specs(plan_type)
     remove_ids = {item.rule_id for item in decisions if item.action == "remove"}
+    keep_ids = {item.rule_id for item in decisions if item.action == "keep"}
     headings = [str(spec["heading"]) for spec in specs if spec.get("heading")]
     removed: list[str] = []
     touched: set[int] = set()
@@ -45,7 +67,7 @@ def apply_decisions(
                 end_y = _block_end(page, hit.y0, headings)
                 if not _block_matches(page, spec, hit.y0, end_y):
                     continue
-                if _kept_by_other_spec(page, page_text, specs, heading, hit.y0, end_y, remove_ids):
+                if _kept_by_other_spec(page, page_text, specs, heading, hit.y0, end_y, keep_ids):
                     continue
                 boxes.append(fitz.Rect(40, max(36, hit.y0 - 2), page.rect.x1 - 40, end_y))
                 if rule_id not in removed:
@@ -65,10 +87,50 @@ def apply_decisions(
 
 
 def _extra_matches(page_text: str, extra: str) -> bool:
-    """'For current-method testing' also matches the notice line 'Current method testing:'."""
+    """'For current-method testing' also matches the notice line 'Current method testing:'.
+
+    Purpose:
+        'For current-method testing' also matches the notice line 'Current method testing:'.
+
+    Args:
+        page_text: Page text. Type: str.
+        extra: Extra. Type: str.
+
+    Returns:
+        True or False.
+
+    Raises:
+        None.
+
+    Example:
+        _extra_matches("text", "text") returns True or False.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     if not extra:
         return True
     def fold(value: str) -> str:
+        """Fold.
+
+        Purpose:
+            Fold.
+
+        Args:
+            value: Value. Type: str.
+
+        Returns:
+            a str.
+
+        Raises:
+            None.
+
+        Example:
+            fold("text") returns a str.
+
+        Side effects:
+            None. This function only reads data and returns a value.
+        """
         return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
     haystack = fold(page_text)
     needle = fold(extra)
@@ -80,7 +142,29 @@ def _extra_matches(page_text: str, extra: str) -> bool:
 
 
 def _covered_by_longer_heading(page: fitz.Page, hit, heading: str, headings: list[str]) -> bool:
-    """'Failed Compliance Testing' is the start of the after-12-month heading."""
+    """'Failed Compliance Testing' is the start of the after-12-month heading.
+
+    Purpose:
+        'Failed Compliance Testing' is the start of the after-12-month heading.
+
+    Args:
+        page: One PDF page.
+        hit: Hit. Type: unspecified.
+        heading: Heading. Type: str.
+        headings: Headings. Type: list[str].
+
+    Returns:
+        True or False.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _covered_by_longer_heading(page, hit, "text") returns True or False.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     for other in headings:
         if not other.startswith(heading) or len(other) <= len(heading):
             continue
@@ -91,7 +175,28 @@ def _covered_by_longer_heading(page: fitz.Page, hit, heading: str, headings: lis
 
 
 def _block_end(page: fitz.Page, y0: float, headings: list[str]) -> float:
-    """Stop at the next heading, including another copy of this same heading."""
+    """Stop at the next heading, including another copy of this same heading.
+
+    Purpose:
+        Stop at the next heading, including another copy of this same heading.
+
+    Args:
+        page: One PDF page.
+        y0: Y0. Type: float.
+        headings: Headings. Type: list[str].
+
+    Returns:
+        a float.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _block_end(page, 1.0, []) returns a float.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     end_y = page.rect.y1 - 36
     seen: set[str] = set()
     for heading in headings:
@@ -105,16 +210,100 @@ def _block_end(page: fitz.Page, y0: float, headings: list[str]) -> float:
 
 
 def _heading_hits(page: fitz.Page, heading: str) -> list[fitz.Rect]:
-    """A heading starts the line. The same words inside a sentence are not a heading."""
-    if not heading:
+    """A heading starts a line, and may wrap onto the next lines. Words inside a sentence are not a heading.
+
+    Purpose:
+        A heading starts a line, and may wrap onto the next lines. Words inside a sentence are not a heading.
+
+    Args:
+        page: One PDF page.
+        heading: Heading. Type: str.
+
+    Returns:
+        a list of fitz.Rect.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _heading_hits(page, "text") returns a list of fitz.Rect.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
+    target = _squash(heading)
+    if not target:
         return []
+    lines = _page_lines(page)
     hits: list[fitz.Rect] = []
-    words = page.get_text("words") or []
-    for rect in page.search_for(heading):
-        if any(abs(word[1] - rect.y0) < 2 and word[0] < rect.x0 - 1 for word in words):
-            continue
-        hits.append(rect)
+    for start in range(len(lines)):
+        joined = ""
+        rect = fitz.Rect(lines[start][1])
+        for text, bbox in lines[start : start + 4]:
+            joined += _squash(text)
+            rect |= fitz.Rect(bbox)
+            if len(joined) >= len(target):
+                break
+        if joined.startswith(target):
+            hits.append(rect)
     return hits
+
+
+def _squash(value: str) -> str:
+    """Match a heading even when the PDF uses a different dash, dot, or line break.
+
+    Purpose:
+        Match a heading even when the PDF uses a different dash, dot, or line break.
+
+    Args:
+        value: Value. Type: str.
+
+    Returns:
+        a str.
+
+    Raises:
+        None.
+
+    Example:
+        _squash("text") returns a str.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
+    return re.sub(r"[^a-z0-9]+", "", (value or "").lower())
+
+
+def _page_lines(page: fitz.Page) -> list[tuple[str, tuple[float, float, float, float]]]:
+    """Page lines.
+
+    Purpose:
+        Page lines.
+
+    Args:
+        page: One PDF page.
+
+    Returns:
+        list[tuple[str, tuple[float, float, float, float]]].
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _page_lines(page) returns list[tuple[str, tuple[float, float, float, float]]].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
+    lines: list[tuple[str, tuple[float, float, float, float]]] = []
+    for block in page.get_text("dict").get("blocks") or []:
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines") or []:
+            text = "".join(span.get("text") or "" for span in line.get("spans") or [])
+            if text.strip():
+                lines.append((text, tuple(line["bbox"])))
+    lines.sort(key=lambda item: (round(item[1][1]), item[1][0]))
+    return lines
 
 
 def _kept_by_other_spec(
@@ -124,13 +313,38 @@ def _kept_by_other_spec(
     heading: str,
     y0: float,
     y1: float,
-    remove_ids: set[str],
+    keep_ids: set[str],
 ) -> bool:
-    """A combined ADP/ACP letter stays when either test still needs it."""
+    """A combined ADP/ACP letter stays when a rule that says keep still needs it.
+
+    Purpose:
+        A combined ADP/ACP letter stays when a rule that says keep still needs it.
+
+    Args:
+        page: One PDF page.
+        page_text: Page text. Type: str.
+        specs: Specs. Type: list[dict].
+        heading: Heading. Type: str.
+        y0: Y0. Type: float.
+        y1: Y1. Type: float.
+        keep_ids: Keep ids. Type: set[str].
+
+    Returns:
+        True or False.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _kept_by_other_spec(page, "text", []) returns True or False.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     for spec in specs:
         if str(spec.get("heading") or "") != heading:
             continue
-        if str(spec["id"]) in remove_ids:
+        if str(spec["id"]) not in keep_ids:
             continue
         if not _extra_matches(page_text, str(spec.get("extra") or "")):
             continue
@@ -140,7 +354,29 @@ def _kept_by_other_spec(
 
 
 def _block_matches(page: fitz.Page, spec: dict, y0: float, y1: float) -> bool:
-    """Prior and Current share one heading. The Current block says 'unless QNEC'."""
+    """Prior and Current share one heading. The Current block says 'unless QNEC'.
+
+    Purpose:
+        Prior and Current share one heading. The Current block says 'unless QNEC'.
+
+    Args:
+        page: One PDF page.
+        spec: Spec. Type: dict.
+        y0: Y0. Type: float.
+        y1: Y1. Type: float.
+
+    Returns:
+        True or False.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _block_matches(page, {}, 1.0) returns True or False.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     contains = str(spec.get("block_contains") or "").lower()
     excludes = str(spec.get("block_excludes") or "").lower()
     if not contains and not excludes:
@@ -157,7 +393,27 @@ def _block_matches(page: fitz.Page, spec: dict, y0: float, y1: float) -> bool:
 
 
 def _restack_pages(doc: fitz.Document, touched: set[int]) -> None:
-    """Shift leftover text up, keeping font/size/color. Images stay put."""
+    """Shift leftover text up, keeping font/size/color. Images stay put.
+
+    Purpose:
+        Shift leftover text up, keeping font/size/color. Images stay put.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+        touched: Touched. Type: set[int].
+
+    Returns:
+        None.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _restack_pages(doc, touched) returns None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     for page in doc:
         if page.number not in touched:
             continue
@@ -187,11 +443,52 @@ def _restack_pages(doc: fitz.Document, touched: set[int]) -> None:
 
 
 def _is_page_number_block(page: fitz.Page, block: dict) -> bool:
+    """Is page number block.
+
+    Purpose:
+        Is page number block.
+
+    Args:
+        page: One PDF page.
+        block: Block. Type: dict.
+
+    Returns:
+        True or False.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _is_page_number_block(page, {}) returns True or False.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     text = " ".join(span["text"] for span in block["spans"]).strip()
     return bool(re.fullmatch(r"\d{1,3}", text)) and block["bbox"].y0 > page.rect.y1 - 70
 
 
 def _text_blocks(page: fitz.Page) -> list[dict]:
+    """Text blocks.
+
+    Purpose:
+        Text blocks.
+
+    Args:
+        page: One PDF page.
+
+    Returns:
+        list[dict].
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _text_blocks(page) returns list[dict].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     blocks: list[dict] = []
     for raw in page.get_text("dict").get("blocks") or []:
         if raw.get("type") != 0:
@@ -221,6 +518,26 @@ def _text_blocks(page: fitz.Page) -> list[dict]:
 
 
 def _image_bands(page: fitz.Page) -> tuple[float, float]:
+    """Image bands.
+
+    Purpose:
+        Image bands.
+
+    Args:
+        page: One PDF page.
+
+    Returns:
+        tuple[float, float].
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _image_bands(page) returns tuple[float, float].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     header = 54.0
     footer = page.rect.y1 - 36.0
     mid = page.rect.y0 + page.rect.height * 0.4
@@ -237,6 +554,28 @@ def _image_bands(page: fitz.Page) -> tuple[float, float]:
 
 
 def _write_span(page: fitz.Page, span: dict, delta: float) -> None:
+    """Write span.
+
+    Purpose:
+        Write span.
+
+    Args:
+        page: One PDF page.
+        span: Span. Type: dict.
+        delta: Delta. Type: float.
+
+    Returns:
+        None.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _write_span(page, {}, 1.0) returns None.
+
+    Side effects:
+        Changes the PDF passed in. Does not save the file by itself.
+    """
     point = fitz.Point(span["origin"].x, span["origin"].y + delta)
     fontname = _base_font(span["font"], span["flags"])
     try:
@@ -260,6 +599,27 @@ def _write_span(page: fitz.Page, span: dict, delta: float) -> None:
 
 
 def _base_font(font: str, flags: int) -> str:
+    """Base font.
+
+    Purpose:
+        Base font.
+
+    Args:
+        font: Font. Type: str.
+        flags: Flags. Type: int.
+
+    Returns:
+        a str.
+
+    Raises:
+        None.
+
+    Example:
+        _base_font("text", 1) returns a str.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     name = (font or "").lower()
     bold = bool(flags & 16) or "bold" in name
     italic = bool(flags & 2) or "italic" in name or "oblique" in name
@@ -273,6 +633,26 @@ def _base_font(font: str, flags: int) -> str:
 
 
 def _rgb(color: object) -> tuple[float, float, float]:
+    """Rgb.
+
+    Purpose:
+        Rgb.
+
+    Args:
+        color: Color. Type: object.
+
+    Returns:
+        a tuple[float, float, float].
+
+    Raises:
+        None.
+
+    Example:
+        _rgb(color) returns a tuple[float, float, float].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     if isinstance(color, (tuple, list)) and len(color) >= 3:
         values = [float(item) for item in color[:3]]
         if max(values) > 1:
@@ -289,22 +669,102 @@ _KEPT_ACTION = re.compile(
 
 
 def _is_recap_text(text: str) -> bool:
+    """Is recap text.
+
+    Purpose:
+        Is recap text.
+
+    Args:
+        text: Text taken from a page or a file.
+
+    Returns:
+        bool.
+
+    Raises:
+        None.
+
+    Example:
+        _is_recap_text("text") returns bool.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     return bool(re.search(r"year[- ]end recap|important information", text or "", re.I))
 
 
 def _is_noise_text(text: str) -> bool:
-    """A page number or a stray letter such as 'i' is not a paragraph."""
+    """A page number or a stray letter such as 'i' is not a paragraph.
+
+    Purpose:
+        A page number or a stray letter such as 'i' is not a paragraph.
+
+    Args:
+        text: Text taken from a page or a file.
+
+    Returns:
+        bool.
+
+    Raises:
+        None.
+
+    Example:
+        _is_noise_text("text") returns bool.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     words = re.findall(r"[A-Za-z0-9]+", text or "")
     return not any(len(word) >= 2 and re.search(r"[A-Za-z]", word) for word in words)
 
 
 def _pad_rect(rect: fitz.Rect, page: fitz.Page) -> fitz.Rect:
-    """Cover the dot on a narrow glyph. Redaction otherwise leaves the letter i."""
+    """Cover the dot on a narrow glyph. Redaction otherwise leaves the letter i.
+
+    Purpose:
+        Cover the dot on a narrow glyph. Redaction otherwise leaves the letter i.
+
+    Args:
+        rect: Rect. Type: fitz.Rect.
+        page: One PDF page.
+
+    Returns:
+        a fitz.Rect.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _pad_rect(rect, page) returns a fitz.Rect.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     # Extend upward to cover the dot on i. Keep the bottom tight so the next line stays.
     return (fitz.Rect(rect) + (-1, -3, 1, 1)) & page.rect
 
 
 def _apply_redact_boxes(page: fitz.Page, boxes: list[fitz.Rect]) -> None:
+    """Apply redact boxes.
+
+    Purpose:
+        Apply redact boxes.
+
+    Args:
+        page: One PDF page.
+        boxes: Boxes. Type: list[fitz.Rect].
+
+    Returns:
+        None.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _apply_redact_boxes(page, []) returns None.
+
+    Side effects:
+        Changes the PDF passed in. Does not save the file by itself.
+    """
     rects = [rect for box in boxes if (rect := _pad_rect(box, page)) and not rect.is_empty]
     if not rects:
         return
@@ -326,7 +786,26 @@ def _apply_redact_boxes(page: fitz.Page, boxes: list[fitz.Rect]) -> None:
 
 
 def _action_blocks_to_move(page: fitz.Page) -> list[dict]:
-    """The kept action line and its body. Skip the page number and the Year End Recap."""
+    """The kept action line and its body. Skip the page number and the Year End Recap.
+
+    Purpose:
+        The kept action line and its body. Skip the page number and the Year End Recap.
+
+    Args:
+        page: One PDF page.
+
+    Returns:
+        list[dict].
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _action_blocks_to_move(page) returns list[dict].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     blocks: list[dict] = []
     started = False
     for block in _text_blocks(page):
@@ -350,6 +829,27 @@ def _action_blocks_to_move(page: fitz.Page) -> list[dict]:
 
 
 def _write_action_heading(page: fitz.Page, cursor: float) -> float:
+    """Write action heading.
+
+    Purpose:
+        Write action heading.
+
+    Args:
+        page: One PDF page.
+        cursor: Cursor. Type: float.
+
+    Returns:
+        a float.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _write_action_heading(page, 1.0) returns a float.
+
+    Side effects:
+        Changes the PDF passed in. Does not save the file by itself.
+    """
     page.insert_text((54, cursor), "ACTION REQUIRED", fontsize=11, fontname="hebo", color=(0, 0, 0))
     width = fitz.get_text_length("ACTION REQUIRED", fontname="hebo", fontsize=11)
     page.draw_line(
@@ -362,7 +862,26 @@ def _write_action_heading(page: fitz.Page, cursor: float) -> float:
 
 
 def _pull_kept_action_forward(doc: fitz.Document) -> None:
-    """When every item on the Action Required page is removed, move the green line up under the header."""
+    """When every item on the Action Required page is removed, move the green line up under the header.
+
+    Purpose:
+        When every item on the Action Required page is removed, move the green line up under the header.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+
+    Returns:
+        None.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _pull_kept_action_forward(doc) returns None.
+
+    Side effects:
+        Changes the PDF passed in. Does not save the file by itself.
+    """
     anchor = None
     later: list[fitz.Page] = []
     for page in doc:
@@ -399,7 +918,26 @@ def _pull_kept_action_forward(doc: fitz.Document) -> None:
 
 
 def _redraw_action_rules(page: fitz.Page) -> None:
-    """Put the header rule and heading underlines back after the text is packed."""
+    """Put the header rule and heading underlines back after the text is packed.
+
+    Purpose:
+        Put the header rule and heading underlines back after the text is packed.
+
+    Args:
+        page: One PDF page.
+
+    Returns:
+        None.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _redraw_action_rules(page) returns None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     lines: dict[int, list[tuple]] = {}
     for word in page.get_text("words") or []:
         lines.setdefault(round(word[1]), []).append(word)
@@ -432,6 +970,26 @@ def _redraw_action_rules(page: fitz.Page) -> None:
 
 
 def _drop_empty_pages(doc: fitz.Document) -> None:
+    """Drop empty pages.
+
+    Purpose:
+        Drop empty pages.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+
+    Returns:
+        None.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _drop_empty_pages(doc) returns None.
+
+    Side effects:
+        Changes the PDF passed in. Does not save the file by itself.
+    """
     drop: list[int] = []
     for page in doc:
         if page.number == 0:
@@ -459,7 +1017,26 @@ _PAGE_NUMBER = re.compile(r"^(?:page\s*)?\d{1,3}$", re.I)
 
 
 def _is_header_only_page(page: fitz.Page) -> bool:
-    """A heading with no paragraph left is an empty page."""
+    """A heading with no paragraph left is an empty page.
+
+    Purpose:
+        A heading with no paragraph left is an empty page.
+
+    Args:
+        page: One PDF page.
+
+    Returns:
+        bool.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _is_header_only_page(page) returns bool.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     text = page.get_text("text") or ""
     if _is_recap_text(text):
         return False
@@ -478,12 +1055,51 @@ def _is_header_only_page(page: fitz.Page) -> bool:
 
 
 def _is_empty_text(text: str) -> bool:
+    """Is empty text.
+
+    Purpose:
+        Is empty text.
+
+    Args:
+        text: Text taken from a page or a file.
+
+    Returns:
+        bool.
+
+    Raises:
+        None.
+
+    Example:
+        _is_empty_text("text") returns bool.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     cleaned = re.sub(r"\s+", " ", text).strip()
     return not cleaned or bool(_TITLE_ONLY.match(cleaned) or _PAGE_NUMBER.match(cleaned))
 
 
 def _footer_only(page: fitz.Page) -> bool:
-    """A page number at the bottom is not a paragraph. The page is blank."""
+    """A page number at the bottom is not a paragraph. The page is blank.
+
+    Purpose:
+        A page number at the bottom is not a paragraph. The page is blank.
+
+    Args:
+        page: One PDF page.
+
+    Returns:
+        bool.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _footer_only(page) returns bool.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     words = page.get_text("words") or []
     if not words:
         return True
@@ -498,7 +1114,25 @@ def fill_qnec_placeholders(
 ) -> list[str]:
     """Write QNEC amounts on the current-year Excess Return Notice.
 
-    The first ADP/ACP amount is the ADP QNEC plus the ACP QNEC. The ADP and ACP lines follow it.
+    Purpose:
+        Write QNEC amounts on the current-year Excess Return Notice. The first ADP/ACP amount is the ADP QNEC plus the ACP QNEC. The ADP and ACP lines follow it.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+        profile: Plan profile collected from the PDF, Excel, and summary.
+        marks: Highlight rectangles already collected for the PDF.
+
+    Returns:
+        list[str].
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        fill_qnec_placeholders(doc, profile, []) returns list[str].
+
+    Side effects:
+        Changes the PDF passed in. Does not save the file by itself.
     """
     filled: list[str] = []
     both = [value for value in (profile.adp_qnec, profile.acp_qnec) if value is not None]
@@ -534,7 +1168,27 @@ _NOTICE_LABELS = {
 
 
 def _fill_notice_amounts(page: fitz.Page, amounts: dict[str, float | None]) -> list[tuple[str, float | None]]:
-    """Replace each $X,XXX,XXX.XX in place. A missing amount takes its label with it."""
+    """Replace each $X,XXX,XXX.XX in place. A missing amount takes its label with it.
+
+    Purpose:
+        Replace each $X,XXX,XXX.XX in place. A missing amount takes its label with it.
+
+    Args:
+        page: One PDF page.
+        amounts: Amounts. Type: dict[str, float | None].
+
+    Returns:
+        a list of tuple[str, float | None].
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _fill_notice_amounts(page, 1.0) returns a list of tuple[str, float | None].
+
+    Side effects:
+        Changes the PDF passed in. Does not save the file by itself.
+    """
     done: list[tuple[str, float | None]] = []
     while True:
         hits = page.search_for("$X,XXX,XXX.XX")
@@ -565,6 +1219,27 @@ def _fill_notice_amounts(page: fitz.Page, amounts: dict[str, float | None]) -> l
 
 
 def _notice_placeholder(words: list[tuple], hit: fitz.Rect) -> tuple[str, list[tuple], tuple | None]:
+    """Notice placeholder.
+
+    Purpose:
+        Notice placeholder.
+
+    Args:
+        words: Words. Type: list[tuple].
+        hit: Hit. Type: fitz.Rect.
+
+    Returns:
+        a tuple[str, list[tuple], tuple | None].
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _notice_placeholder([], hit) returns a tuple[str, list[tuple], tuple | None].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     ordered = sorted(words, key=lambda word: (word[1], word[0]))
     index = next(
         (
@@ -600,10 +1275,50 @@ def _notice_placeholder(words: list[tuple], hit: fitz.Rect) -> tuple[str, list[t
 
 
 def _money(value: float) -> str:
+    """Money.
+
+    Purpose:
+        Money.
+
+    Args:
+        value: Value. Type: float.
+
+    Returns:
+        a str.
+
+    Raises:
+        None.
+
+    Example:
+        _money(1.0) returns a str.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     return f"${value:,.2f}"
 
 
 def _block_specs(plan_type: str | None = None) -> list[dict]:
+    """Input: plan type. Calls paragraphs_for. Output: Action Required, notice, letter, and Excess Summary headings.
+
+    Purpose:
+        Input: plan type. Calls paragraphs_for. Output: Action Required, notice, letter, and Excess Summary headings.
+
+    Args:
+        plan_type: Plan type: "401k", "403b", "457", or empty.
+
+    Returns:
+        list[dict].
+
+    Raises:
+        None.
+
+    Example:
+        _block_specs("text") returns list[dict].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     data = paragraphs_for(plan_type)
     specs = list(data.get("action_required_headings") or [])
     specs.extend(data.get("notices") or [])
@@ -624,7 +1339,28 @@ def apply_recap_bullets(
     decisions: list[RuleDecision],
     plan_type: str | None = None,
 ) -> list[str]:
-    """TEST23 §I: drop unused Important Information bullets and pack the page."""
+    """TEST23 §I: drop unused Important Information bullets and pack the page.
+
+    Purpose:
+        TEST23 §I: drop unused Important Information bullets and pack the page.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+        decisions: Keep, remove, or skipped results from the rules.
+        plan_type: Plan type: "401k", "403b", "457", or empty.
+
+    Returns:
+        list[str].
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        apply_recap_bullets(doc, [], "text") returns list[str].
+
+    Side effects:
+        Changes the PDF passed in. Does not save the file by itself.
+    """
     specs = _recap_specs(plan_type)
     if not specs:
         return []
@@ -661,11 +1397,52 @@ def apply_recap_bullets(
 
 
 def _recap_specs(plan_type: str | None = None) -> list[dict]:
+    """Input: plan type. Calls paragraphs_for. Output: the Year End Recap bullet matches.
+
+    Purpose:
+        Input: plan type. Calls paragraphs_for. Output: the Year End Recap bullet matches.
+
+    Args:
+        plan_type: Plan type: "401k", "403b", "457", or empty.
+
+    Returns:
+        list[dict].
+
+    Raises:
+        None.
+
+    Example:
+        _recap_specs("text") returns list[dict].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     data = paragraphs_for(plan_type)
     return list(data.get("recap_bullets") or [])
 
 
 def _matching_recap(bullet: str, specs: list[dict]) -> dict | None:
+    """Matching recap.
+
+    Purpose:
+        Matching recap.
+
+    Args:
+        bullet: Bullet. Type: str.
+        specs: Specs. Type: list[dict].
+
+    Returns:
+        a dict | None.
+
+    Raises:
+        None.
+
+    Example:
+        _matching_recap("text", []) returns a dict | None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     text = bullet.lower()
     hits = [
         spec
@@ -682,6 +1459,26 @@ def _matching_recap(bullet: str, specs: list[dict]) -> dict | None:
 
 
 def _adp_nhce_percent(doc: fitz.Document) -> float | None:
+    """Adp nhce percent.
+
+    Purpose:
+        Adp nhce percent.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+
+    Returns:
+        float | None.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _adp_nhce_percent(doc) returns float | None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     for page in doc:
         match = _ADP_NHCE.search(page.get_text("text") or "")
         if match:
@@ -690,7 +1487,27 @@ def _adp_nhce_percent(doc: fitz.Document) -> float | None:
 
 
 def _fill_prior_rates(bullet: str, nhce: float | None) -> str:
-    """Write the NHCE rate and the HCE maximum into the prior-year recap bullet."""
+    """Write the NHCE rate and the HCE maximum into the prior-year recap bullet.
+
+    Purpose:
+        Write the NHCE rate and the HCE maximum into the prior-year recap bullet.
+
+    Args:
+        bullet: Bullet. Type: str.
+        nhce: Nhce. Type: float | None.
+
+    Returns:
+        a str.
+
+    Raises:
+        None.
+
+    Example:
+        _fill_prior_rates("text", 1.0) returns a str.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     if nhce is None:
         return bullet
     hce_label = _percent_label(hce_max_percent(nhce))
@@ -713,6 +1530,26 @@ def _fill_prior_rates(bullet: str, nhce: float | None) -> str:
 
 
 def _percent_label(value: float) -> str:
+    """Percent label.
+
+    Purpose:
+        Percent label.
+
+    Args:
+        value: Value. Type: float.
+
+    Returns:
+        a str.
+
+    Raises:
+        None.
+
+    Example:
+        _percent_label(1.0) returns a str.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     rounded = round(float(value), 2)
     if rounded == int(rounded):
         return f"{int(rounded)}%"
@@ -720,6 +1557,26 @@ def _percent_label(value: float) -> str:
 
 
 def _recap_page_number(text: str) -> int | None:
+    """Recap page number.
+
+    Purpose:
+        Recap page number.
+
+    Args:
+        text: Text taken from a page or a file.
+
+    Returns:
+        int | None.
+
+    Raises:
+        None.
+
+    Example:
+        _recap_page_number("text") returns int | None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     if lines and re.fullmatch(r"\d{1,3}", lines[-1]):
         return int(lines[-1])
@@ -727,6 +1584,26 @@ def _recap_page_number(text: str) -> int | None:
 
 
 def _split_recap(text: str) -> tuple[str, list[str]]:
+    """Split recap.
+
+    Purpose:
+        Split recap.
+
+    Args:
+        text: Text taken from a page or a file.
+
+    Returns:
+        tuple[str, list[str]].
+
+    Raises:
+        None.
+
+    Example:
+        _split_recap("text") returns tuple[str, list[str]].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     lines = [line.strip() for line in text.splitlines()]
     header: list[str] = []
     bullets: list[str] = []

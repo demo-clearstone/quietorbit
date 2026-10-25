@@ -9,8 +9,23 @@ from models.plan_profile import PlanProfile
 def email_subject(profile: PlanProfile) -> str:
     """Subject starts with MOA, then plan number, name, and PYE.
 
-    Rework and Rush come from the valuation package Excel. Yes on either one
-    is named in the subject. Both Yes is Rush Rework.
+    Purpose:
+        Subject starts with MOA, then plan number, name, and PYE. Rework and Rush come from the valuation package Excel. Yes on either one is named in the subject. Both Yes is Rush Rework.
+
+    Args:
+        profile: Plan profile collected from the PDF, Excel, and summary.
+
+    Returns:
+        str.
+
+    Raises:
+        None.
+
+    Example:
+        email_subject(profile) returns str.
+
+    Side effects:
+        None. This function only reads data and returns a value.
     """
     number = (profile.plan_number or "UNKNOWN").strip()
     name = (profile.plan_name or "UNKNOWN").strip()
@@ -30,7 +45,28 @@ def email_subject(profile: PlanProfile) -> str:
 
 
 def write_draft(path: Path, profile: PlanProfile, filename: str) -> Path:
-    """Write an Outlook-ready .eml the tester can open and send."""
+    """Write an Outlook-ready .eml the tester can open and send.
+
+    Purpose:
+        Write an Outlook-ready .eml the tester can open and send.
+
+    Args:
+        path: Path to a file on disk.
+        profile: Plan profile collected from the PDF, Excel, and summary.
+        filename: File name, including the extension.
+
+    Returns:
+        Path.
+
+    Raises:
+        OSError: A file cannot be read or written.
+
+    Example:
+        write_draft(path, profile, "text") returns Path.
+
+    Side effects:
+        Writes or changes a file on disk.
+    """
     subject = email_subject(profile)
     message = EmailMessage()
     message["Subject"] = subject

@@ -4,14 +4,25 @@ import fitz
 
 
 def inspect_cover_stamp(page: fitz.Page) -> dict[str, object]:
-    """
-    TEST23 §A: Mutual of America stamp is on the upper right of the cover.
-    The company stamp is a graphic (wording is often not selectable PDF text).
-    Pass if cover text + a graphic are present, or if an upper-right image
-    itself has the red + navy mark from the stamp.
+    """TEST23 §A: Mutual of America stamp is on the upper right of the cover.
 
-    This does **not** prove Mutual of America is the only named entity.
-    Other TPA names on the cover remain a manual reviewer check.
+    Purpose:
+        TEST23 §A: Mutual of America stamp is on the upper right of the cover. The company stamp is a graphic (wording is often not selectable PDF text). Pass if cover text + a graphic are present, or if an upper-right image itself has the red + navy mark from the stamp. This does **not** prove Mutual of America is the only named entity. Other TPA names on the cover remain a manual reviewer check.
+
+    Args:
+        page: One PDF page.
+
+    Returns:
+        dict[str, object].
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        inspect_cover_stamp(page) returns dict[str, object].
+
+    Side effects:
+        None. This function only reads data and returns a value.
     """
     text = (page.get_text("text") or "").lower()
     has_name = "mutual of america" in text
@@ -49,6 +60,26 @@ def inspect_cover_stamp(page: fitz.Page) -> dict[str, object]:
 
 
 def _image_in_upper_right(page: fitz.Page) -> bool:
+    """Image in upper right.
+
+    Purpose:
+        Image in upper right.
+
+    Args:
+        page: One PDF page.
+
+    Returns:
+        bool.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _image_in_upper_right(page) returns bool.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     width, height = float(page.rect.width), float(page.rect.height)
     if width <= 0 or height <= 0:
         return False
@@ -67,7 +98,26 @@ def _image_in_upper_right(page: fitz.Page) -> bool:
 
 
 def _brand_colors_in_upper_right(page: fitz.Page) -> bool:
-    """MOA mark uses a red chevron and a dark navy wordmark."""
+    """MOA mark uses a red chevron and a dark navy wordmark.
+
+    Purpose:
+        MOA mark uses a red chevron and a dark navy wordmark.
+
+    Args:
+        page: One PDF page.
+
+    Returns:
+        bool.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _brand_colors_in_upper_right(page) returns bool.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     clip = fitz.Rect(
         page.rect.width * 0.50,
         page.rect.y0,
@@ -84,7 +134,26 @@ def _brand_colors_in_upper_right(page: fitz.Page) -> bool:
 
 
 def _brand_colors_in_upper_right_images(page: fitz.Page) -> bool:
-    """Inspect embedded images so the stamp is not washed out by page whitespace."""
+    """Inspect embedded images so the stamp is not washed out by page whitespace.
+
+    Purpose:
+        Inspect embedded images so the stamp is not washed out by page whitespace.
+
+    Args:
+        page: One PDF page.
+
+    Returns:
+        bool.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _brand_colors_in_upper_right_images(page) returns bool.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     width, height = float(page.rect.width), float(page.rect.height)
     if width <= 0 or height <= 0 or page.parent is None:
         return False
@@ -111,6 +180,27 @@ def _brand_colors_in_upper_right_images(page: fitz.Page) -> bool:
 
 
 def _pixmap_from_xref(doc: fitz.Document, xref: int) -> fitz.Pixmap | None:
+    """Pixmap from xref.
+
+    Purpose:
+        Pixmap from xref.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+        xref: Xref. Type: int.
+
+    Returns:
+        a fitz.Pixmap | None.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _pixmap_from_xref(doc, 1) returns a fitz.Pixmap | None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     try:
         extracted = doc.extract_image(xref)
         pix = fitz.Pixmap(extracted["image"])
@@ -124,6 +214,26 @@ def _pixmap_from_xref(doc: fitz.Document, xref: int) -> fitz.Pixmap | None:
 
 
 def _pixmap_has_brand_colors(pix: fitz.Pixmap) -> bool:
+    """Pixmap has brand colors.
+
+    Purpose:
+        Pixmap has brand colors.
+
+    Args:
+        pix: Pix. Type: fitz.Pixmap.
+
+    Returns:
+        True or False.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _pixmap_has_brand_colors(pix) returns True or False.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     raw = pix.samples
     channels = pix.n
     reds = 0

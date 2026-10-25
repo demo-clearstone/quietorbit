@@ -32,7 +32,26 @@ Tested: Fail - Excess returns have already been processed
 
 
 def build_assembly_excel() -> bytes:
-    """Val Assembly checklist in the layout of the attached Excel screenshot."""
+    """Val Assembly checklist in the layout of the attached Excel screenshot.
+
+    Purpose:
+        Val Assembly checklist in the layout of the attached Excel screenshot.
+
+    Args:
+        None.
+
+    Returns:
+        bytes.
+
+    Raises:
+        OSError: A file cannot be read or written. A closed PDF raises from PyMuPDF.
+
+    Example:
+        build_assembly_excel() returns bytes.
+
+    Side effects:
+        Writes or changes a file on disk.
+    """
     book = Workbook()
     sheet = book.active
     sheet.title = "Val Assembly"
@@ -89,6 +108,26 @@ def build_assembly_excel() -> bytes:
 
 
 def build_summary_pdf() -> bytes:
+    """Build summary pdf.
+
+    Purpose:
+        Build summary pdf.
+
+    Args:
+        None.
+
+    Returns:
+        bytes.
+
+    Raises:
+        OSError: A file cannot be read or written. A closed PDF raises from PyMuPDF.
+
+    Example:
+        build_summary_pdf() returns bytes.
+
+    Side effects:
+        Changes one of the objects passed in.
+    """
     doc = fitz.open()
     page = doc.new_page()
     page.insert_textbox(fitz.Rect(54, 54, 558, 738), SUMMARY_TEXT, fontsize=11, fontname="helv")

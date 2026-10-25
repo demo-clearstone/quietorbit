@@ -6,6 +6,26 @@ import fitz
 
 
 def pdf_page_count(data: bytes) -> int:
+    """Pdf page count.
+
+    Purpose:
+        Pdf page count.
+
+    Args:
+        data: Raw file bytes.
+
+    Returns:
+        int.
+
+    Raises:
+        OSError: A file cannot be read or written. A closed PDF raises from PyMuPDF.
+
+    Example:
+        pdf_page_count(data) returns int.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     doc = fitz.open(stream=data, filetype="pdf")
     try:
         return max(1, int(doc.page_count or 1))
@@ -14,6 +34,26 @@ def pdf_page_count(data: bytes) -> int:
 
 
 def pdf_page_count_path(path: Path) -> int:
+    """Pdf page count path.
+
+    Purpose:
+        Pdf page count path.
+
+    Args:
+        path: Path to a file on disk.
+
+    Returns:
+        int.
+
+    Raises:
+        OSError: A file cannot be read or written. A closed PDF raises from PyMuPDF.
+
+    Example:
+        pdf_page_count_path(path) returns int.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     if path.suffix.lower() != ".pdf":
         return 1
     try:
@@ -27,6 +67,26 @@ def pdf_page_count_path(path: Path) -> int:
 
 
 def pdf_page_texts(data: bytes) -> list[str]:
+    """Pdf page texts.
+
+    Purpose:
+        Pdf page texts.
+
+    Args:
+        data: Raw file bytes.
+
+    Returns:
+        list[str].
+
+    Raises:
+        OSError: A file cannot be read or written. A closed PDF raises from PyMuPDF.
+
+    Example:
+        pdf_page_texts(data) returns list[str].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     doc = fitz.open(stream=data, filetype="pdf")
     try:
         return [(page.get_text("text") or "") for page in doc]
@@ -35,6 +95,26 @@ def pdf_page_texts(data: bytes) -> list[str]:
 
 
 def pdf_page_texts_path(path: Path) -> list[str]:
+    """Pdf page texts path.
+
+    Purpose:
+        Pdf page texts path.
+
+    Args:
+        path: Path to a file on disk.
+
+    Returns:
+        list[str].
+
+    Raises:
+        OSError: A file cannot be read or written. A closed PDF raises from PyMuPDF.
+
+    Example:
+        pdf_page_texts_path(path) returns list[str].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     if path.suffix.lower() != ".pdf":
         return []
     try:
@@ -48,7 +128,27 @@ def pdf_page_texts_path(path: Path) -> list[str]:
 
 
 def extract_pdf_page(data: bytes, page: int) -> bytes:
-    """Return a one-page PDF. page is 1-based."""
+    """Return a one-page PDF. page is 1-based.
+
+    Purpose:
+        Return a one-page PDF. page is 1-based.
+
+    Args:
+        data: Raw file bytes.
+        page: One PDF page.
+
+    Returns:
+        bytes.
+
+    Raises:
+        OSError: A file cannot be read or written. A closed PDF raises from PyMuPDF.
+
+    Example:
+        extract_pdf_page(data, page) returns bytes.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     doc = fitz.open(stream=data, filetype="pdf")
     try:
         index = page - 1
@@ -62,6 +162,27 @@ def extract_pdf_page(data: bytes, page: int) -> bytes:
 
 
 def paged_filename(name: str, page: int) -> str:
+    """Paged filename.
+
+    Purpose:
+        Paged filename.
+
+    Args:
+        name: File name or section name.
+        page: One PDF page.
+
+    Returns:
+        str.
+
+    Raises:
+        None.
+
+    Example:
+        paged_filename("text", page) returns str.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     path = Path(name)
     return f"{path.stem}_p{page:02d}{path.suffix}"
 
@@ -71,7 +192,28 @@ def expand_uploads_by_page(
     names: list[str],
     pages: list[int],
 ) -> tuple[list[tuple[str, bytes]], list[str]]:
-    """Build the merge list from UI rows. page <= 0 means the whole file."""
+    """Build the merge list from UI rows. page <= 0 means the whole file.
+
+    Purpose:
+        Build the merge list from UI rows. page <= 0 means the whole file.
+
+    Args:
+        uploads: Pairs of file name and file bytes.
+        names: Names. Type: list[str].
+        pages: Pages. Type: list[int].
+
+    Returns:
+        a tuple[list[tuple[str, bytes]], list[str]].
+
+    Raises:
+        None.
+
+    Example:
+        expand_uploads_by_page(uploads, [], []) returns a tuple[list[tuple[str, bytes]], list[str]].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     by_name = {name: data for name, data in uploads}
     ordered: list[tuple[str, bytes]] = []
     warnings: list[str] = []

@@ -1,0 +1,33 @@
+# Excess Return Notice page.
+# "Failed Compliance Testing" and the after-12-month notices.
+# The after-12-month keep-or-remove decision is rule D or E in config/action_required.yaml.
+
+rules:
+  - id: I
+    section: Excess Return Notice, current year, within 12 months
+    keep_when:
+      all:
+        - field: testing_method
+          equals: CURRENT
+        - field: returns_required
+          equals: true
+        - any_true: [adp_failed, acp_failed]
+        - field: after_12_months
+          not_true: true
+    else: remove
+
+notices:
+  - id: I
+    heading: Failed Compliance Testing
+    extra: For current-method testing
+    must_include:
+      - Excess Return Notice
+      - Qualified Non-Elective Contribution
+      - ADP/ACP test is
+      - Form W-4R
+  - id: D
+    heading: Failed Compliance Testing - After 12-months
+    extra: Current method testing
+  - id: E
+    heading: Failed Compliance Testing - After 12-months
+    extra: Prior method testing

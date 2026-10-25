@@ -1,7 +1,7 @@
 # Application Progress Report
 
 **Product:** MOA Valuation Package Automation  
-**Date:** 5 October 2026  
+**Date:** 24 October 2026  
 **For:** Manager review  
 **Compared with:** the requirements document (manual assembly and 401(k) review), including the updated instructions and the assembly-log column sheet
 
@@ -39,9 +39,9 @@ Claiming the plan on the Testing Log, converting non-PDFs, and sending the live 
 | Area | Progress | Meaning |
 |---|---|---|
 | Collect files and combine | 100% | Upload or folder path, merge, keyword order, location order, named save |
-| Keep / remove and amounts | 100% | Action Required, notices, letters, Excess Summary, recap, QNEC and refunds, BRF report left out, audited / SOC / 5500 / escalation wording removed |
+| Keep / remove and amounts | 100% | Action Required, notices, letters, Excess Summary, recap, QNEC and refunds. A 401(k) BRF report is left out. A 403(b) BRF report stays. Audited, 5500, and escalation wording are removed. A 457 package keeps the Statement of Contribution |
 | Bookmarks and cover checks | 88% | Bookmarks, cover fields, and the cover-date check are done. “Only Mutual of America” is still partly visual |
-| Dates and HCE % on the pages | 100% | Optional. The reviewer checks “Retype cover date to today, 402(g) dates, and HCE %”. Preview can highlight those spots. The download stays clean |
+| Dates and HCE % on the pages | 100% | Every Process sets the cover date to today and rewrites off-calendar 402(g) dates. The prior-year HCE % changes only when “Retype 402(g) dates and HCE %” is checked. Preview can highlight those spots. The download stays clean |
 | Email and assembly log | 75% | The log row is written in the client columns. The email is still a draft the reviewer sends |
 | Steps outside the PDF | 33% | Inner test pages are ordered from headings. The Testing Log and non-PDF conversion are not done |
 
@@ -65,16 +65,16 @@ Claiming the plan on the Testing Log, converting non-PDFs, and sending the live 
 | 12 | 415 failure information and 415 letter | Done | 100 |
 | 13 | Excess Summary (including partially vested ADP/ACP) | Done | 100 |
 | 14 | Year End Recap bullets | Done | 100 |
-| 15 | Bookmarks, including 403(b) HCE and ADP Test / ACP Test. A BRF report is not bookmarked | Done | 100 |
+| 15 | Bookmarks, including 403(b) HCE and ADP Test / ACP Test. A 401(k) BRF report is not bookmarked. A 403(b) BRF report is kept and bookmarked | Done | 100 |
 | 16 | Cover company, address, plan name, and plan year end | Done | 100 |
 | 17 | Mutual of America is the only entity on the cover | Partial | 50 |
 | 18 | Reorder inner ADP/ACP, 410(b), and component benefit-test pages | Done | 100 |
-| 19 | Cover letter date is today’s date | Done | 100 |
+| 19 | Cover letter date is today’s date, set on every Process | Done | 100 |
 | 20 | Email the tester | Partial | 50 |
 | 21 | Update the Val Assembly Log in the client column sheet | Done | 100 |
 | 22 | Claim the plan on the Testing Log | Not done | 0 |
 | 23 | Convert non-PDF files to PDF | Not done | 0 |
-| 24 | Prior-year HCE % and off-calendar 402(g) dates | Done | 100 |
+| 24 | Prior-year HCE % when the box is checked, and off-calendar 402(g) dates on every Process | Done | 100 |
 
 Partial items:
 
@@ -84,20 +84,20 @@ Partial items:
 Done since the last report:
 
 - **Inner pages.** When the headings are on the page, ADP/ACP is ordered Summary, Detail, Excluded, Corrections. 410(b) is ordered Detail, Excludable, Includable, Summary. A component Average Benefit Percentage test is ordered Average Benefit Percentage, 401a1 Comp, Gateway, Overall Comp, Rate Group, then Sum Comp.
-- **BRF.** A BRF report file or page is left out. The Result Summary line stays. BRF is not bookmarked.
-- **Wording MOA packages do not use.** Audited wording, Statement of Contribution, 5500 wording, and escalation wording are removed.
+- **BRF.** A 401(k) BRF report file or page is left out and is not bookmarked. The Result Summary line stays. A 403(b) package keeps the BRF report and bookmarks it.
+- **Wording MOA packages do not use.** Audited wording, Statement of Contribution, 5500 wording, and escalation wording are removed. A 457 package keeps the Statement of Contribution.
 - **Valuation package log Excel.** PRIOR YEAR / CURRENT YEAR sets the testing method. Future HCE, current HCE, and the allocation answer are read. Annual allocation Yes, or a note that says include contributions, keeps the contributions wording.
-- **Cover date.** With **Retype cover date to today, 402(g) dates, and HCE %** checked, the cover letter date is set to today. The box is off by default. The Checks tab flags a cover date that is not today.
-- **Prior-year HCE %** still uses the table (under 2% → ×2; 2% to 7.99% → +2; 8% or more → ×1.25), and only when the testing method is PRIOR and an NHCE % is on the package.
-- **402(g) dates** still change only on an off-calendar plan, and only when those plan-year dates are printed on a 402(g) page.
+- **Cover date.** Every Process sets the cover letter date to today. If no letter date is found, it stays as printed and the Notes say so.
+- **Prior-year HCE %** uses the table (under 2% → ×2; 2% to 7.99% → +2; 8% or more → ×1.25), and only when **Retype 402(g) dates and HCE %** is checked, the testing method is PRIOR, and an NHCE % is on the package. That box is off by default.
+- **402(g) dates** are rewritten on every Process, only on an off-calendar plan, and only when those plan-year dates are printed on a 402(g) page.
 - **Highlight changes** on the preview stays optional. Yellow marks show the rewritten words. Download PDF never includes the marks.
-- **Checks.** Result Summary top-heavy percent (including 0.00% and Plan is / is not Top Heavy) and pass/fail for 410(b), 401(a)(4), 414(s), 402(g), 415, ADP, and ACP. A failed 410(b) also looks for the Average Benefit Percentage wording. The three Compliance and Administrative Report pages are flagged if they are missing; they are not created. The client variance copy is checked for plan identity, Social Security numbers, 0.00 zeroes, one font size, Last-First name order, and text at the page edge. Plan number and plan name are checked on each report, and plan year end on the excess notice.
+- **Checks.** Result Summary top-heavy percent (including 0.00% and Plan is / is not Top Heavy; top heavy only when the percent is greater than 60) and pass/fail for 410(b), 401(a)(4), 414(s), 402(g), 415, ADP, and ACP. A failed 410(b) also looks for the Average Benefit Percentage wording. The three Compliance and Administrative Report pages are flagged if they are missing; they are not created. The client variance copy is checked for plan identity, Social Security numbers, 0.00 zeroes, one font size, Last-First name order, and text at the page edge. Plan number and plan name are checked on each report, and plan year end on the excess notice. **Assembly stops** is on by default. A failed required check does not save the PDF, the email draft, or the log.
 - **Val Assembly Log.** One row is appended in the client columns: Omni Plan Number and Plan Name from the Result Summary; Future HCE and current-year HCE as Yes or No; allocation as Variance, Annual, or Annual-Var (a true-up with no variance is Variance, with a cell note of 0.00 variance); ADP/ACP, 402(g), 410(b), ABP, 414(s), 401(a)(4), 415, and BRF as P, F, or N/A; Top Heavy as Yes or No; Failed Comp Limit always N/A. FIS, related plans, MEP, and safe harbor are left blank for the tester.
 
 Not done:
 
 - **Claiming the plan on the Testing Log.** This is the shared workbook a reviewer opens before assembly and types their name into, so other people can see that plan is already being worked. The requirements point at files such as the 2023 testing log and the off-calendar testing log, on the assembly tab under the testing folders. The application does not open those shared workbooks. It does not know which year’s log or which row is the plan being picked up, and it does not have the reviewer’s name to write into that sheet. The Val Assembly Log that Process writes is a separate file. That one records the finished package. Filling it does not claim the plan.
-- **Converting Word, Excel, or image files into PDF.** Those files are skipped with a warning. Scanned PDFs that are only pictures also cannot be read, so rules, bookmarks, the filename, and the log stay empty on those packages.
+- **Converting Word, Excel, or image files into PDF.** A folder load skips a non-PDF and warns. Dropping a file that is not a PDF or the valuation Excel stops Process. Scanned PDFs that are only pictures also cannot be read, so rules, bookmarks, the filename, and the log stay empty on those packages.
 
 ---
 
@@ -105,10 +105,10 @@ Not done:
 
 - Upload PDFs or a Valuation Package folder path.
 - Auto-order, location order, and a reorder list.
-- Process: keep/remove, filled amounts, bookmarks, BRF report left out, disallowed wording removed.
-- Optional retype of the cover date to today, the prior-year HCE %, and off-calendar 402(g) dates.
+- Process: keep/remove, filled amounts, bookmarks, a 401(k) BRF report left out, a 403(b) BRF report kept, and disallowed wording removed.
+- Cover date and off-calendar 402(g) dates on every Process. Prior-year HCE % only when **Retype 402(g) dates and HCE %** is checked.
 - Preview with optional highlights on the rewritten words, and a download of the named valuation PDF without those highlights.
-- Checks for the Result Summary, the three compliance pages, the client variance copy, and plan identity on the reports.
+- Checks for the Result Summary, the three compliance pages, the client variance copy, and plan identity on the reports. Assembly stops blocks the save when a required check fails.
 - Outlook draft and an assembly-log row in the client columns.
 
 ---
@@ -118,4 +118,4 @@ Not done:
 The application covers the manual PDF assembly and review rules at about **98%** of those editing steps (19 of 20 PDF items are done; one is partial).  
 Across the **whole** reviewer job in the requirements, progress is **88%** (was 83% on 1 October).
 
-The remaining work is a visual check for other company names on the cover, sending the email, claiming the plan on the Testing Log, and converting non-PDF files. A package with no matching date or percentage will look unchanged even with the retype box checked; the notes on the result say what was left as printed.
+The remaining work is a visual check for other company names on the cover, sending the email, claiming the plan on the Testing Log, and converting non-PDF files. The cover date is set on every Process. If no letter date, HCE percentage, or 402(g) date is found, that line stays as printed and the Notes say so.

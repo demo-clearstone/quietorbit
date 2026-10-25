@@ -4,16 +4,18 @@
   "warnings": [
     "Read Val Assembly Excel: Val Assembly.xlsx",
     "Read Compliance Testing Summary: 555002 2025 ResultSumm.pdf",
-    "Cover letter date set to October 21, 2026 (2 place(s)). Check the letterhead spacing.",
+    "Cover letter date set to October 22, 2026 (2 place(s)). Check the letterhead spacing.",
     "402(g) dates left as printed (calendar plan, or plan year end was not read).",
     "Added 3 Compliance and Administrative Reports page(s).",
+    "Renumbered 8 page footer(s) to match the final page order.",
     "Files were ordered using the TEST23 combine sequence.",
     "Removed Action Required paragraph(s): A, B, M, ES, D, E, F, G, L, K",
     "Removed Year End Recap bullet(s): Y1, Y2, Y4, Y5, Y7",
     "Filled Excess Return Notice QNEC amounts: total=$185,354.75, adp=$142,540.41, acp=$42,814.34",
     "Outlook draft subject: MOA - 555002 - NORTHWIND LOGISTICS 401(K) PLAN - PYE 12/31/2025",
-    "Retained Action Required paragraph(s): C, I, J_ADP, J_ACP, Y3, Y6, Y8",
-    "Added 11 SOP bookmark(s)."
+    "Retained Action Required paragraph(s): C, I, J_ADP, J_ACP, Y3, Y8",
+    "Added 11 SOP bookmark(s).",
+    "Some rules were skipped because extraction did not fill required fields."
   ],
   "page_count": 20
 }

@@ -1,10 +1,39 @@
-# Combine order for Auto-order (missing files are skipped).
-# Valuation package filename: Plan ID + YYYY + Plan Type + Valuation Pkg
-#   example: 123456 2025 401k Valuation Pkg
-# Cover Letter, then Result (ResultSumm), then Action Required and the other
-# cover-packet pages, then the Plan Year-End reports in this keyword order:
-# HCEKey, FYHCE, ADP, 410, MaVar, SHMaVar, PSVar, SHNEVar, 402, Contri,
-# TH or Top Heavy, 415, Census, 401a, ABPT, 414s.
+# Order of the pages in the valuation package. Missing pages are skipped.
+combine_order:
+  - Cover Letter
+  - Test Summary
+  - Compensation Limit Failure Summary
+  - Combined Testing Report
+  - Action Required
+  - ADP/ACP Excess After 12 Months Current
+  - ADP/ACP Excess After 12 Months Prior
+  - ADP/ACP Excess Current Year
+  - 415 Failure Information
+  - ADP/ACP Failure Letter
+  - 402(g) Failure Letter
+  - 415 Failure Letter
+  - Failed Test Notice
+  - Variance
+  - PS Variance
+  - SHNE Variance
+  - Year End Recap
+  - Compliance Reports
+  - Valuation Reports
+  - Summary of Compliance Test Results
+  - Test Summary
+  - Contribution Analysis
+  - HCE/Key
+  - Future HCE
+  - ADP/ACP
+  - 402(g)
+  - "410(b)"
+  - "401(a)(4)"
+  - Average Benefit Percentage Test
+  - BRF
+  - "414(s)"
+  - "415"
+  - Top Heavy
+  - Census
 
 expected_order:
   - name: Cover Letter
@@ -33,7 +62,7 @@ expected_order:
       - Compliance Report 2
       - Compliance Report 3
   - name: Test Summary
-    aliases: ["Test Summary", "Result Summary", "Compliance Summary", "ResultSumm", "Result"]
+    aliases: ["ResultSumm", "Result Summary", "Compliance Summary", "Test Summary", "Result"]
   - name: Action Required
     aliases: ["Action Required", "IMMEDIATE ACTION REQUIRED"]
     label: Action required
@@ -129,6 +158,7 @@ bookmarks:
   HCE/Key: HCE/Key
   Future HCE: Future HCE
   ADP/ACP: ADP/ACP Tests
+  BRF: Benefits, Rights and Features Test
   402(g): 402(g) Test
   410(b): 410(b) Test
   401(a)(4): 401(a)(4) Test

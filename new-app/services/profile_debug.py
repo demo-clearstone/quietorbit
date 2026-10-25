@@ -22,7 +22,31 @@ def write_profile_debug(
     source_files: list[str],
     phase: str,
 ) -> Path:
-    """Write the field values and exact keep/remove evidence for this assembly."""
+    """Write the field values and exact keep/remove evidence for this assembly.
+
+    Purpose:
+        Write the field values and exact keep/remove evidence for this assembly.
+
+    Args:
+        job_id: Short id for this assembly.
+        profile: Plan profile collected from the PDF, Excel, and the compliance summary.
+        decisions: Keep, remove, or skipped results from the rules.
+        doc: Open PDF. Must not be closed.
+        source_files: Uploaded file names. None means there are none.
+        phase: Phase. Type: str.
+
+    Returns:
+        a Path.
+
+    Raises:
+        OSError: A file cannot be read or written. A closed PDF raises from PyMuPDF.
+
+    Example:
+        write_profile_debug("text", profile, decisions, source_files=[], phase="text") returns a Path.
+
+    Side effects:
+        Writes a file to disk.
+    """
     job_dir = save_service.OUTPUT_DIR / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
     path = job_dir / "profile_debug.json"
@@ -52,6 +76,30 @@ def build_profile_debug(
     source_files: list[str],
     phase: str,
 ) -> dict[str, Any]:
+    """Build profile debug.
+
+    Purpose:
+        Build profile debug.
+
+    Args:
+        profile: Plan profile collected from the PDF, Excel, and the compliance summary.
+        decisions: Keep, remove, or skipped results from the rules.
+        doc: Open PDF. Must not be closed.
+        source_files: Uploaded file names. None means there are none.
+        phase: Phase. Type: str.
+
+    Returns:
+        a dict[str, Any].
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        build_profile_debug(profile, decisions, doc, source_files=[], phase="text") returns a dict[str, Any].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     matches = _rule_source_matches(doc, profile.plan_type)
     selected = _unique(item.section for item in decisions if item.action == "keep")
     removed = _unique(item.section for item in decisions if item.action == "remove")
@@ -115,6 +163,27 @@ def _rule_source_matches(
     doc: fitz.Document,
     plan_type: str | None,
 ) -> dict[str, list[dict[str, Any]]]:
+    """Rule source matches.
+
+    Purpose:
+        Rule source matches.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+        plan_type: Plan type: "401k", "403b", "457", or empty.
+
+    Returns:
+        dict[str, list[dict[str, Any]]].
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _rule_source_matches(doc, "text") returns dict[str, list[dict[str, Any]]].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     specs = paragraphs_for(plan_type)
     block_specs: list[dict] = []
     for key in ("action_required_headings", "notices", "sample_letters", "excess_summary"):
@@ -138,9 +207,49 @@ def _rule_source_matches(
 
 
 def _fold(value: str) -> str:
+    """Fold.
+
+    Purpose:
+        Fold.
+
+    Args:
+        value: Value. Type: str.
+
+    Returns:
+        a str.
+
+    Raises:
+        None.
+
+    Example:
+        _fold("text") returns a str.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     folded = re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
     return folded[4:] if folded.startswith("for ") else folded
 
 
 def _unique(values) -> list[str]:
+    """Unique.
+
+    Purpose:
+        Unique.
+
+    Args:
+        values: Values. Type: unspecified.
+
+    Returns:
+        a list of str.
+
+    Raises:
+        None.
+
+    Example:
+        _unique(values) returns a list of str.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     return list(dict.fromkeys(str(value) for value in values if str(value)))

@@ -113,7 +113,23 @@ PARAGRAPHS: list[tuple[str, str]] = [
 def build_valuation_with_action_paragraphs() -> fitz.Document:
     """Cover, then the Annual Valuation Report action pages from the 401(k) package.
 
-    Headings stay on one line so the keep/remove search can find them.
+    Purpose:
+        Cover, then the Annual Valuation Report action pages from the 401(k) package. Headings stay on one line so the keep/remove search can find them.
+
+    Args:
+        None.
+
+    Returns:
+        fitz.Document.
+
+    Raises:
+        OSError: A file cannot be read or written. A closed PDF raises from PyMuPDF.
+
+    Example:
+        build_valuation_with_action_paragraphs() returns fitz.Document.
+
+    Side effects:
+        None. This function only reads data and returns a value.
     """
     doc = fitz.open()
     _textbox(doc, "Cover Letter\n\n" + "\n".join(COVER_LINES))
@@ -161,7 +177,29 @@ def _action_page(
     header: bool = False,
     number: int | None = None,
 ) -> None:
-    """One Annual Valuation Report page, laid out like package pages 2–4."""
+    """One Annual Valuation Report page, laid out like package pages 2–4.
+
+    Purpose:
+        One Annual Valuation Report page, laid out like package pages 2–4.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+        blocks: Blocks. Type: list[tuple[str, tuple[str, str]]].
+        header: Header. Type: bool.
+        number: Number. Type: int | None.
+
+    Returns:
+        None.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _action_page(doc, [], header=True, number=1) returns None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     page = doc.new_page(width=595.28, height=841.89)
     y = 78.0
     if header:
@@ -190,6 +228,28 @@ def _valuation_header(
     *,
     action_required: bool = True,
 ) -> float:
+    """Valuation header.
+
+    Purpose:
+        Valuation header.
+
+    Args:
+        page: One PDF page.
+        lines: Lines. Type: tuple[tuple[str, float, str], ...] | None.
+        action_required: Action required. Type: bool.
+
+    Returns:
+        a float.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _valuation_header(page, 1.0, action_required=True) returns a float.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     y = 56.0
     rows = lines or (
         ("Annual Valuation Report", 16, "hebo"),
@@ -215,7 +275,29 @@ def _excess_notice_page(
     *,
     number: int,
 ) -> None:
-    """Annual Valuation Report header, then the Excess Return Notice body."""
+    """Annual Valuation Report header, then the Excess Return Notice body.
+
+    Purpose:
+        Annual Valuation Report header, then the Excess Return Notice body.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+        notice: Notice. Type: str.
+        identity: Identity. Type: tuple[str, str, str].
+        number: Number. Type: int.
+
+    Returns:
+        None.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _excess_notice_page(doc, "text", "text", number=1) returns None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     page = doc.new_page(width=595.28, height=841.89)
     date_line, plan_name, plan_number = identity
     y = _valuation_header(
@@ -248,6 +330,29 @@ def _excess_notice_page(
 
 
 def _center_underlined(page: fitz.Page, text: str, y: float, size: float) -> float:
+    """Center underlined.
+
+    Purpose:
+        Center underlined.
+
+    Args:
+        page: One PDF page.
+        text: Text from a page or a file.
+        y: Y. Type: float.
+        size: Size. Type: float.
+
+    Returns:
+        a float.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _center_underlined(page, "text", 1.0) returns a float.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     _center(page, text, y, size, "hebo")
     width = fitz.get_text_length(text, fontname="hebo", fontsize=size)
     x = (page.rect.width - width) / 2
@@ -256,6 +361,29 @@ def _center_underlined(page: fitz.Page, text: str, y: float, size: float) -> flo
 
 
 def _notice_paragraph(page: fitz.Page, text: str, y: float, *, bold: bool) -> float:
+    """Notice paragraph.
+
+    Purpose:
+        Notice paragraph.
+
+    Args:
+        page: One PDF page.
+        text: Text from a page or a file.
+        y: Y. Type: float.
+        bold: Bold. Type: bool.
+
+    Returns:
+        a float.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _notice_paragraph(page, "text", 1.0, bold=True) returns a float.
+
+    Side effects:
+        Changes the PDF passed in. Does not save the file by itself.
+    """
     font = "hebo" if bold else "helv"
     lead = ""
     rest = text
@@ -292,6 +420,32 @@ def _wrapped_text(
     font: str,
     size: float,
 ) -> float:
+    """Wrapped text.
+
+    Purpose:
+        Wrapped text.
+
+    Args:
+        page: One PDF page.
+        text: Text from a page or a file.
+        y: Y. Type: float.
+        x: X. Type: float.
+        width: Width. Type: float.
+        font: Font. Type: str.
+        size: Size. Type: float.
+
+    Returns:
+        a float.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _wrapped_text(page, "text", 1.0) returns a float.
+
+    Side effects:
+        Changes the PDF passed in. Does not save the file by itself.
+    """
     url = "https://www.irs.gov/pub/irs-pdf/fw4r.pdf"
     for line in _wrap(text, font, size, width):
         if url in line:
@@ -310,11 +464,58 @@ def _wrapped_text(
 
 
 def _center(page: fitz.Page, text: str, y: float, size: float, font: str) -> None:
+    """Center.
+
+    Purpose:
+        Center.
+
+    Args:
+        page: One PDF page.
+        text: Text from a page or a file.
+        y: Y. Type: float.
+        size: Size. Type: float.
+        font: Font. Type: str.
+
+    Returns:
+        None.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _center(page, "text", 1.0) returns None.
+
+    Side effects:
+        Changes the PDF passed in. Does not save the file by itself.
+    """
     width = fitz.get_text_length(text, fontname=font, fontsize=size)
     page.insert_text(((page.rect.width - width) / 2, y), text, fontsize=size, fontname=font, color=_BLACK)
 
 
 def _heading_line(page: fitz.Page, text: str, y: float, color: tuple[float, float, float]) -> float:
+    """Heading line.
+
+    Purpose:
+        Heading line.
+
+    Args:
+        page: One PDF page.
+        text: Text from a page or a file.
+        y: Y. Type: float.
+        color: Color. Type: tuple[float, float, float].
+
+    Returns:
+        a float.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _heading_line(page, "text", 1.0) returns a float.
+
+    Side effects:
+        Changes the PDF passed in. Does not save the file by itself.
+    """
     size = 10 if len(text) > 70 else 11
     page.insert_text((_HEADING_X, y), text, fontsize=size, fontname="hebo", color=color)
     width = fitz.get_text_length(text, fontname="hebo", fontsize=size)
@@ -323,6 +524,27 @@ def _heading_line(page: fitz.Page, text: str, y: float, color: tuple[float, floa
 
 
 def _page_number(page: fitz.Page, number: int) -> None:
+    """Page number.
+
+    Purpose:
+        Page number.
+
+    Args:
+        page: One PDF page.
+        number: Number. Type: int.
+
+    Returns:
+        None.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _page_number(page, 1) returns None.
+
+    Side effects:
+        Changes the PDF passed in. Does not save the file by itself.
+    """
     label = str(number)
     size = 9
     width = fitz.get_text_length(label, fontname="helv", fontsize=size)
@@ -330,6 +552,30 @@ def _page_number(page: fitz.Page, number: int) -> None:
 
 
 def _body_lines(page: fitz.Page, text: str, y: float, color: tuple[float, float, float], font: str) -> float:
+    """Body lines.
+
+    Purpose:
+        Body lines.
+
+    Args:
+        page: One PDF page.
+        text: Text from a page or a file.
+        y: Y. Type: float.
+        color: Color. Type: tuple[float, float, float].
+        font: Font. Type: str.
+
+    Returns:
+        a float.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _body_lines(page, "text", 1.0) returns a float.
+
+    Side effects:
+        Changes the PDF passed in. Does not save the file by itself.
+    """
     for paragraph in text.split("\n"):
         paragraph = paragraph.strip()
         if not paragraph:
@@ -346,6 +592,29 @@ def _body_lines(page: fitz.Page, text: str, y: float, color: tuple[float, float,
 
 
 def _wrap(text: str, font: str, size: float, width: float) -> list[str]:
+    """Wrap.
+
+    Purpose:
+        Wrap.
+
+    Args:
+        text: Text from a page or a file.
+        font: Font. Type: str.
+        size: Size. Type: float.
+        width: Width. Type: float.
+
+    Returns:
+        a list of str.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _wrap("text", "text", 1.0) returns a list of str.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     lines: list[str] = []
     current = ""
     for word in text.split():
@@ -387,7 +656,34 @@ def build_adp_acp_failure_notice_pdf(
     notice: str | None = None,
     correction_note: str | None = None,
 ) -> fitz.Document:
-    """TEST23 §C: cover + correction page + Excess Return Notice placeholders."""
+    """TEST23 §C: cover + correction page + Excess Return Notice placeholders.
+
+    Purpose:
+        TEST23 §C: cover + correction page + Excess Return Notice placeholders.
+
+    Args:
+        method: Method. Type: str.
+        adp: Adp. Type: str.
+        acp: Acp. Type: str.
+        returns: Returns. Type: str.
+        adp_qnec: Adp qnec. Type: str | None.
+        acp_qnec: Acp qnec. Type: str | None.
+        include_notice: Include notice. Type: bool.
+        notice: Notice. Type: str | None.
+        correction_note: Correction note. Type: str | None.
+
+    Returns:
+        a fitz.Document.
+
+    Raises:
+        OSError: A file cannot be read or written. A closed PDF raises from PyMuPDF.
+
+    Example:
+        build_adp_acp_failure_notice_pdf(method="text", adp="text", acp="text", returns="text") returns a fitz.Document.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     doc = fitz.open()
     cover = [
         "Cover Letter",
@@ -449,7 +745,26 @@ def build_adp_acp_failure_notice_pdf(
 
 
 def build_current_failure_notice_sample() -> fitz.Document:
-    """Within-12-month current-year Excess Return Notice, laid out like package page 7."""
+    """Within-12-month current-year Excess Return Notice, laid out like package page 7.
+
+    Purpose:
+        Within-12-month current-year Excess Return Notice, laid out like package page 7.
+
+    Args:
+        None.
+
+    Returns:
+        fitz.Document.
+
+    Raises:
+        OSError: A file cannot be read or written. A closed PDF raises from PyMuPDF.
+
+    Example:
+        build_current_failure_notice_sample() returns fitz.Document.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     doc = fitz.open()
     _excess_notice_page(
         doc,
@@ -532,7 +847,35 @@ def build_after_12_failure_notice_pdf(
     include_current_notice: bool = True,
     include_prior_notice: bool = True,
 ) -> fitz.Document:
-    """TEST23 §C.2 / C.3: after-12-months Excess Return Notices plus correction page."""
+    """TEST23 §C.2 / C.3: after-12-months Excess Return Notices plus correction page.
+
+    Purpose:
+        TEST23 §C.2 / C.3: after-12-months Excess Return Notices plus correction page.
+
+    Args:
+        method: Method. Type: str.
+        adp: Adp. Type: str.
+        acp: Acp. Type: str.
+        returns: Returns. Type: str.
+        adp_qnec: Adp qnec. Type: str | None.
+        acp_qnec: Acp qnec. Type: str | None.
+        deferral: Deferral. Type: str | None.
+        match: Match. Type: str | None.
+        include_current_notice: Include current notice. Type: bool.
+        include_prior_notice: Include prior notice. Type: bool.
+
+    Returns:
+        a fitz.Document.
+
+    Raises:
+        OSError: A file cannot be read or written. A closed PDF raises from PyMuPDF.
+
+    Example:
+        build_after_12_failure_notice_pdf(method="text", adp="text", acp="text", returns="text") returns a fitz.Document.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     doc = fitz.open()
     cover = [
         "Cover Letter",
@@ -581,7 +924,26 @@ def build_after_12_failure_notice_pdf(
 
 
 def build_package_excess_notices() -> fitz.Document:
-    """Current and prior Excess Return Notices, laid out like package pages 5 and 6."""
+    """Current and prior Excess Return Notices, laid out like package pages 5 and 6.
+
+    Purpose:
+        Current and prior Excess Return Notices, laid out like package pages 5 and 6.
+
+    Args:
+        None.
+
+    Returns:
+        fitz.Document.
+
+    Raises:
+        OSError: A file cannot be read or written. A closed PDF raises from PyMuPDF.
+
+    Example:
+        build_package_excess_notices() returns fitz.Document.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     doc = fitz.open()
     identity = (
         "July 1, 2025 - June 30, 2026",
@@ -653,7 +1015,41 @@ def build_remaining_sop_pdf(
     partially_vested: bool = False,
     include_ssn: bool = False,
 ) -> fitz.Document:
-    """TEST23 remaining items: variance, contributions, excess summary, recap, optional SSN."""
+    """TEST23 remaining items: variance, contributions, excess summary, recap, optional SSN.
+
+    Purpose:
+        TEST23 remaining items: variance, contributions, excess summary, recap, optional SSN.
+
+    Args:
+        method: Method. Type: str.
+        adp: Adp. Type: str.
+        acp: Acp. Type: str.
+        g402: G402. Type: str.
+        s415: S415. Type: str.
+        returns: Returns. Type: str.
+        variance: Variance. Type: str.
+        contributions: Contributions. Type: str.
+        hce_current: Hce current. Type: str.
+        hce_future: Hce future. Type: str.
+        safe_harbor: Safe harbor. Type: str.
+        catchup_allowed: Catchup allowed. Type: str.
+        per_payroll: Per payroll. Type: str.
+        top_heavy: Top heavy. Type: str.
+        partially_vested: Partially vested. Type: bool.
+        include_ssn: Include ssn. Type: bool.
+
+    Returns:
+        a fitz.Document.
+
+    Raises:
+        OSError: A file cannot be read or written. A closed PDF raises from PyMuPDF.
+
+    Example:
+        build_remaining_sop_pdf(method="text", adp="text", acp="text", g402="text") returns a fitz.Document.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     doc = fitz.open()
     cover = [
         "Cover Letter",
@@ -699,7 +1095,26 @@ def build_remaining_sop_pdf(
 
 
 def build_year_end_recap_sample() -> fitz.Document:
-    """Important Information page, laid out like package page 12."""
+    """Important Information page, laid out like package page 12.
+
+    Purpose:
+        Important Information page, laid out like package page 12.
+
+    Args:
+        None.
+
+    Returns:
+        fitz.Document.
+
+    Raises:
+        OSError: A file cannot be read or written. A closed PDF raises from PyMuPDF.
+
+    Example:
+        build_year_end_recap_sample() returns fitz.Document.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     doc = fitz.open()
     page = doc.new_page(width=595.28, height=841.89)
     write_recap_page(page, RECAP_HEADER, RECAP_BULLETS, number=12)
@@ -713,7 +1128,29 @@ def write_recap_page(
     *,
     number: int | None = None,
 ) -> None:
-    """Draw the Year End Recap. Header lines stay centered; bullets pack underneath."""
+    """Draw the Year End Recap. Header lines stay centered; bullets pack underneath.
+
+    Purpose:
+        Draw the Year End Recap. Header lines stay centered; bullets pack underneath.
+
+    Args:
+        page: One PDF page.
+        header_lines: Header lines. Type: list[str].
+        bullets: Bullets. Type: list[str].
+        number: Number. Type: int | None.
+
+    Returns:
+        None.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        write_recap_page(page, [], [], number=1) returns None.
+
+    Side effects:
+        Changes the PDF passed in. Does not save the file by itself.
+    """
     y = 48.0
     for raw in header_lines:
         line = raw.strip()
@@ -814,7 +1251,26 @@ _OVERVIEW_PAGE_3 = [
 
 
 def build_compliance_overview_sample() -> fitz.Document:
-    """The three overview pages, laid out like package pages 13, 14, and 15."""
+    """The three overview pages, laid out like package pages 13, 14, and 15.
+
+    Purpose:
+        The three overview pages, laid out like package pages 13, 14, and 15.
+
+    Args:
+        None.
+
+    Returns:
+        fitz.Document.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        build_compliance_overview_sample() returns fitz.Document.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     return build_compliance_overview(
         [
             "COMPLIANCE AND ADMINISTRATIVE REPORTS",
@@ -827,6 +1283,26 @@ def build_compliance_overview_sample() -> fitz.Document:
 
 
 def build_compliance_overview(header: list[str] | None = None) -> fitz.Document:
+    """Build compliance overview.
+
+    Purpose:
+        Build compliance overview.
+
+    Args:
+        header: Header. Type: list[str] | None.
+
+    Returns:
+        a fitz.Document.
+
+    Raises:
+        OSError: A file cannot be read or written. A closed PDF raises from PyMuPDF.
+
+    Example:
+        build_compliance_overview([]) returns a fitz.Document.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     doc = fitz.open()
     page = doc.new_page(width=595.28, height=841.89)
     _overview_page(page, _OVERVIEW_PAGE_1, header=header, center_title="Compliance Reports", number=13)
@@ -843,6 +1319,29 @@ def overview_header_for(
     plan_year_start: str | None,
     plan_year_end: str | None,
 ) -> list[str]:
+    """Overview header for.
+
+    Purpose:
+        Overview header for.
+
+    Args:
+        plan_name: Plan name. Type: str | None.
+        plan_number: Plan number. Type: str | None.
+        plan_year_start: Plan year start. Type: str | None.
+        plan_year_end: Plan year end. Type: str | None.
+
+    Returns:
+        a list of str.
+
+    Raises:
+        None.
+
+    Example:
+        overview_header_for("text", "text", "text") returns a list of str.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     start = _long_mdy(plan_year_start)
     end = _long_mdy(plan_year_end)
     if start and end:
@@ -868,7 +1367,30 @@ def ensure_compliance_overview(
     plan_year_start: str | None = None,
     plan_year_end: str | None = None,
 ) -> list[str]:
-    """Every 401(k) and 403(b) package includes the three overview pages."""
+    """Every 401(k) and 403(b) package includes the three overview pages.
+
+    Purpose:
+        Every 401(k) and 403(b) package includes the three overview pages.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+        plan_name: Plan name. Type: str | None.
+        plan_number: Plan number. Type: str | None.
+        plan_year_start: Plan year start. Type: str | None.
+        plan_year_end: Plan year end. Type: str | None.
+
+    Returns:
+        a list of str.
+
+    Raises:
+        OSError: A file cannot be read or written. A closed PDF raises from PyMuPDF.
+
+    Example:
+        ensure_compliance_overview(doc, plan_name="text", plan_number="text", plan_year_start="text", plan_year_end="text") returns a list of str.
+
+    Side effects:
+        Changes the PDF or the object passed in.
+    """
     kinds = {_overview_kind(page.get_text("text") or "") for page in doc}
     if {"intro", "tests", "admin"} <= kinds:
         return []
@@ -902,6 +1424,26 @@ def ensure_compliance_overview(
 
 
 def _overview_kind(text: str) -> str | None:
+    """Overview kind.
+
+    Purpose:
+        Overview kind.
+
+    Args:
+        text: Text taken from a page or a file.
+
+    Returns:
+        str | None.
+
+    Raises:
+        None.
+
+    Example:
+        _overview_kind("text") returns str | None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     if re.search(r"compliance and administrative|overview and descriptions", text or "", re.I):
         return "intro"
     if (
@@ -917,6 +1459,26 @@ def _overview_kind(text: str) -> str | None:
 
 
 def _overview_insert_at(doc: fitz.Document) -> int:
+    """Overview insert at.
+
+    Purpose:
+        Overview insert at.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+
+    Returns:
+        int.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _overview_insert_at(doc) returns int.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     recap = None
     for index, page in enumerate(doc):
         text = page.get_text("text") or ""
@@ -928,6 +1490,26 @@ def _overview_insert_at(doc: fitz.Document) -> int:
 
 
 def _long_mdy(value: str | None) -> str | None:
+    """Long mdy.
+
+    Purpose:
+        Long mdy.
+
+    Args:
+        value: Value. Type: str | None.
+
+    Returns:
+        a str | None.
+
+    Raises:
+        None.
+
+    Example:
+        _long_mdy("text") returns a str | None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     match = re.search(r"(\d{1,2})/(\d{1,2})/(20\d{2})", value or "")
     if not match:
         return None
@@ -949,6 +1531,30 @@ def _overview_page(
     center_title: str | None = None,
     number: int | None = None,
 ) -> None:
+    """Overview page.
+
+    Purpose:
+        Overview page.
+
+    Args:
+        page: One PDF page.
+        sections: Sections. Type: list[tuple[str, str]].
+        header: Header. Type: list[str] | None.
+        center_title: Center title. Type: str | None.
+        number: Number. Type: int | None.
+
+    Returns:
+        None.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _overview_page(page, [], header=[], center_title="text", number=1) returns None.
+
+    Side effects:
+        Changes the PDF passed in. Does not save the file by itself.
+    """
     y = 48.0
     for line in header or []:
         text = line.strip()
@@ -979,6 +1585,28 @@ def _overview_page(
 
 
 def _textbox(doc: fitz.Document, text: str, fontsize: int = 11) -> None:
+    """Textbox.
+
+    Purpose:
+        Textbox.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+        text: Text from a page or a file.
+        fontsize: Fontsize. Type: int.
+
+    Returns:
+        None.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _textbox(doc, "text", 1) returns None.
+
+    Side effects:
+        Changes the PDF passed in. Does not save the file by itself.
+    """
     page = doc.new_page()
     page.insert_textbox(fitz.Rect(54, 54, 558, 738), text, fontsize=fontsize, fontname="helv")
 
@@ -1119,7 +1747,38 @@ def build_sample_letters_pdf(
     include_415_notice: bool = True,
     include_415_letter: bool = True,
 ) -> fitz.Document:
-    """TEST23 sample letters (J/K) plus the 415 failure packet and letter (L)."""
+    """TEST23 sample letters (J/K) plus the 415 failure packet and letter (L).
+
+    Purpose:
+        TEST23 sample letters (J/K) plus the 415 failure packet and letter (L).
+
+    Args:
+        method: Method. Type: str.
+        adp: Adp. Type: str.
+        acp: Acp. Type: str.
+        g402: G402. Type: str.
+        s415: S415. Type: str.
+        returns: Returns. Type: str.
+        after_deadline: After deadline. Type: bool.
+        include_j: Include j. Type: bool.
+        include_j_adp: Include j adp. Type: bool | None.
+        include_j_acp: Include j acp. Type: bool | None.
+        include_k: Include k. Type: bool.
+        include_415_notice: Include 415 notice. Type: bool.
+        include_415_letter: Include 415 letter. Type: bool.
+
+    Returns:
+        a fitz.Document.
+
+    Raises:
+        OSError: A file cannot be read or written. A closed PDF raises from PyMuPDF.
+
+    Example:
+        build_sample_letters_pdf(method="text", adp="text", acp="text", g402="text") returns a fitz.Document.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     doc = fitz.open()
     cover = [
         "Cover Letter",
@@ -1155,7 +1814,26 @@ def build_sample_letters_pdf(
 
 
 def build_failure_letter_sample() -> fitz.Document:
-    """415 information and the three sample letters, laid out like package pages 8–11."""
+    """415 information and the three sample letters, laid out like package pages 8–11.
+
+    Purpose:
+        415 information and the three sample letters, laid out like package pages 8–11.
+
+    Args:
+        None.
+
+    Returns:
+        fitz.Document.
+
+    Raises:
+        OSError: A file cannot be read or written. A closed PDF raises from PyMuPDF.
+
+    Example:
+        build_failure_letter_sample() returns fitz.Document.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     doc = fitz.open()
     _styled_page(doc, NOTICE_415, number=8)
     _styled_page(doc, SAMPLE_LETTER_ADP_ACP, number=9)
@@ -1165,7 +1843,28 @@ def build_failure_letter_sample() -> fitz.Document:
 
 
 def _styled_page(doc: fitz.Document, text: str, *, number: int | None = None) -> None:
-    """A failure-information page or a sample letter, with the package headings."""
+    """A failure-information page or a sample letter, with the package headings.
+
+    Purpose:
+        A failure-information page or a sample letter, with the package headings.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+        text: Text from a page or a file.
+        number: Number. Type: int | None.
+
+    Returns:
+        None.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _styled_page(doc, "text", number=1) returns None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     page = doc.new_page(width=595.28, height=841.89)
     y = 52.0
     for raw in text.splitlines():

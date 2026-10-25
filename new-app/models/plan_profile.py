@@ -38,6 +38,7 @@ class PlanProfile(BaseModel):
     fail_415: bool | None = None
     variance_report: bool | None = None
     true_up: bool | None = None
+    annual_allocation: bool | None = None
     contributions_required: bool | None = None
     partially_vested: bool | None = None
     safe_harbor: bool | None = None

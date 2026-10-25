@@ -1,3 +1,17 @@
+"""Assembly procedure. Read process_uploads from top to bottom.
+
+1. Sort uploads into PDFs, Excel, and the compliance summary.
+2. Drop a 401(k) BRF file, order the PDFs, and merge them.
+3. Read the plan from the PDF, then overlay Excel and the summary.
+4. Validate and decide which Action Required paragraphs to keep.
+5. Edit the PDF: paragraphs, recap bullets, QNEC, wording, dates, overview.
+6. Add bookmarks, scan for an SSN, and stop if a required check fails.
+7. Save the PDF, the highlight marks, the email draft, and the assembly log.
+
+The other files in this folder do one of those jobs. This file is the order.
+YAML is read in plan_config.py. Each function there records its input file and its output.
+"""
+
 from __future__ import annotations
 
 import re
@@ -45,18 +59,49 @@ def process_uploads(
     rewrite_sources: bool = False,
     check_assembly_stops: bool = False,
 ) -> JobResult:
-    """
-    TEST23 pipeline:
-    assemble valuation PDFs → overlay Excel + summary pass/fail → keep/remove
-    Action Required paragraphs → bookmarks → save named PDF.
+    """Assemble one valuation package from the uploaded files.
+
+    Purpose:
+        Sort the uploads, merge the PDFs, read the plan and Excel, keep or
+        remove paragraphs, edit the PDF, add bookmarks, and save the package.
+
+    Args:
+        uploads: Pairs of file name and file bytes.
+        auto_order: True sorts the PDFs into report order before they are merged.
+        extra_warnings: Messages to include on the result. None means none.
+        source_folder: Folder the PDFs were loaded from. None when the user uploaded files.
+        rewrite_sources: True rewrites dates and other source text inside the PDF.
+        check_assembly_stops: True stops assembly when a required check fails.
+
+    Returns:
+        The saved package, warnings, and highlight rectangles.
+
+    Raises:
+        HTTPException: The assembly input is not usable.
+        OSError: A PDF or the output folder cannot be read or written.
+
+    Example:
+        process_uploads([("555001 ADP-Test.pdf", data)], auto_order=True)
+        returns a JobResult.
+
+    Side effects:
+        Writes the valuation PDF, the email draft, and the assembly log.
     """
     job_id = uuid.uuid4().hex[:12]
     started = time.perf_counter()
     warnings = list(extra_warnings or [])
     highlights: list[dict] = []
+
+    # 1. Sort the uploads.
     pdfs, excels = _split_uploads(uploads)
     valuation, summary_texts = _split_summaries(pdfs)
-    is_403b = package_polish.package_is_403b(valuation)
+    excel_profiles = [(name, source_profile.parse_excel(data)) for name, data in excels]
+
+    # 2. Choose the package type, drop BRF when required, then merge.
+    is_403b = package_polish.package_is_403b(valuation) or any(
+        str(parsed.get("plan_type") or "").lower().startswith("403")
+        for _name, parsed in excel_profiles
+    )
     is_midyear = midyear.package_is_midyear(valuation)
     valuation, brf_notes = package_polish.exclude_brf_uploads(valuation, keep_brf=is_403b)
     warnings.extend(brf_notes)
@@ -80,6 +125,8 @@ def process_uploads(
             is_midyear = True
             warnings.extend(midyear.reorder_pages(doc))
         warnings.extend(package_polish.reorder_inner_pages(doc))
+
+        # 3. Read the plan, then let Excel and the summary override it.
         profile = pdf_extractor.extract_plan_profile(doc)
         profile.extra["field_sources"] = {
             key: "PDF package text"
@@ -91,14 +138,13 @@ def process_uploads(
         cover_company = profile.company_name
         cover_address = profile.company_address
         cover_pye = profile.plan_year_end
-        overlays: list[dict] = []
-        overlay_sources: list[str] = []
+        excel_overlays: list[dict] = []
+        excel_sources: list[str] = []
         excel_plan_name: str | None = None
         excel_company: str | None = None
         excel_address: str | None = None
         excel_pye: str | None = None
-        for name, data in excels:
-            parsed = source_profile.parse_excel(data)
+        for name, parsed in excel_profiles:
             if parsed.get("plan_name"):
                 excel_plan_name = str(parsed["plan_name"])
             if parsed.get("company_name"):
@@ -107,14 +153,16 @@ def process_uploads(
                 excel_address = str(parsed["company_address"])
             if parsed.get("plan_year_end"):
                 excel_pye = str(parsed["plan_year_end"])
-            overlays.append(parsed)
-            overlay_sources.append(f"Excel: {name}")
+            excel_overlays.append(parsed)
+            excel_sources.append(f"Excel: {name}")
             warnings.append(f"Read Val Assembly Excel: {name}")
+        summary_overlays: list[dict] = []
+        summary_sources: list[str] = []
         for name, text in summary_texts:
-            overlays.append(source_profile.parse_summary_text(text))
-            overlay_sources.append(f"Result Summary: {name}")
+            summary_overlays.append(source_profile.parse_summary_text(text))
+            summary_sources.append(f"Result Summary: {name}")
             warnings.append(f"Read Compliance Testing Summary: {name}")
-        if not summary_texts:
+        if not summary_overlays:
             merged_text = "\n".join((page.get_text("text") or "") for page in doc)
             if re.search(
                 r"compliance testing summary of results|result summary|test summary",
@@ -123,8 +171,12 @@ def process_uploads(
             ):
                 parsed = source_profile.parse_summary_text(merged_text)
                 if parsed.get("adp_failed") is not None or parsed.get("fail_402g") is not None:
-                    overlays.append(parsed)
-                    overlay_sources.append("Result Summary embedded in PDF package")
+                    summary_overlays.append(parsed)
+                    summary_sources.append("Result Summary embedded in PDF package")
+        # Summary tests are authoritative for pass/fail. Excel remains the final
+        # overlay for fields it explicitly provides (identity, method, HCE flags).
+        overlays = summary_overlays + excel_overlays
+        overlay_sources = summary_sources + excel_sources
         explicit_contributions = any(
             "contributions_required" in overlay for overlay in overlays
         )
@@ -134,6 +186,9 @@ def process_uploads(
             warnings,
             sources=overlay_sources,
         )
+        if profile.top_heavy_percent is not None:
+            profile.top_heavy = profile.top_heavy_percent > 60
+            profile.extra.setdefault("field_sources", {})["top_heavy"] = "Top-heavy percentage; threshold is greater than 60%"
         section_names = {
             str(spec.get("name"))
             for name, _data in ordered
@@ -164,6 +219,8 @@ def process_uploads(
                 if getattr(profile, key, None) in (None, ""):
                     setattr(profile, key, value)
         profile = plan_profile_service.finalize_profile(profile)
+
+        # 4. Check the profile and decide keep or remove.
         review = review_service.validate(profile, doc=doc)
         decisions = rules_engine.evaluate(profile)
         profile_debug_path = str(
@@ -178,6 +235,7 @@ def process_uploads(
                 phase="before_business_rule_edits",
             )
         )
+        # 5. Edit the PDF.
         removed = pdf_modifier.apply_decisions(doc, decisions, profile.plan_type)
         recap_removed = pdf_modifier.apply_recap_bullets(doc, decisions, profile.plan_type)
         filled = pdf_modifier.fill_qnec_placeholders(doc, profile, highlights)
@@ -206,6 +264,8 @@ def process_uploads(
                     plan_year_end=profile.plan_year_end,
                 )
             )
+        warnings.extend(package_polish.renumber_footers(doc))
+        # 6. Bookmarks, SSN scan, and assembly stops.
         profile.detected_sections = pdf_extractor.detect_sections(doc)
         profile_debug_path = str(
             profile_debug.write_profile_debug(
@@ -264,6 +324,7 @@ def process_uploads(
             )
             if reasons:
                 raise HTTPException(status_code=400, detail="Assembly stopped.\n" + "\n".join(reasons))
+        # 7. Save the package, the email draft, and the log.
         dest = save_service.testing_folder_from_source(source_folder)
         path = save_service.save_package(doc, job_id, profile, dest_dir=dest)
         change_marks.save_marks(path, highlights)
@@ -329,6 +390,26 @@ def process_uploads(
 
 
 def _split_uploads(uploads: list[tuple[str, bytes]]) -> tuple[list[tuple[str, bytes]], list[tuple[str, bytes]]]:
+    """Separating the uploaded PDFs from the Excel file.
+
+    Purpose:
+        Separating the uploaded PDFs from the Excel file.
+
+    Args:
+        uploads: List of (file name, file bytes).
+
+    Returns:
+        tuple[list[tuple[str, bytes]], list[tuple[str, bytes]]].
+
+    Raises:
+        None.
+
+    Example:
+        _split_uploads(data) returns tuple[list[tuple[str, bytes]], list[tuple[str, bytes]]].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     pdfs: list[tuple[str, bytes]] = []
     excels: list[tuple[str, bytes]] = []
     for name, data in uploads:
@@ -341,27 +422,70 @@ def _split_uploads(uploads: list[tuple[str, bytes]]) -> tuple[list[tuple[str, by
 
 
 def _split_summaries(pdfs: list[tuple[str, bytes]]) -> tuple[list[tuple[str, bytes]], list[tuple[str, str]]]:
+    """Finding the compliance summary among the PDFs.
+
+    Purpose:
+        Finding the compliance summary among the PDFs.
+
+    Args:
+        pdfs: Pdfs. Type: list[tuple[str, bytes]].
+
+    Returns:
+        a tuple[list[tuple[str, bytes]], list[tuple[str, str]]].
+
+    Raises:
+        None.
+
+    Example:
+        _split_summaries([]) returns a tuple[list[tuple[str, bytes]], list[tuple[str, str]]].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     valuation: list[tuple[str, bytes]] = []
     summaries: list[tuple[str, str]] = []
     for name, data in pdfs:
         text = _pdf_text(data)
         named_summary = bool(re.search(r"result\s*summ|test\s*summ", name, re.I))
+        is_valuation_package = bool(re.search(r"valuation\s*(?:pkg|package)", name, re.I))
         # A valuation package mentions the summary page inside Top Heavy wording.
         # Only a document that opens with the summary is a summary sidecar.
-        opens_with_summary = "compliance testing summary of results" in text[:2000].lower()
-        if opens_with_summary or named_summary:
+        first_lines = [line.strip() for line in text.splitlines() if line.strip()][:6]
+        opens_with_summary = bool(first_lines) and bool(
+            re.match(r"^(?:compliance testing summary of results|result summary|test summary|compliance summary)\b", first_lines[0], re.I)
+        )
+        if (opens_with_summary and not is_valuation_package) or named_summary:
             summaries.append((name, text))
-            # A named Result/Test Summary is both an extraction source and a
-            # required package page. A generic compliance-summary sidecar is
-            # extraction-only for backward compatibility.
-            if named_summary:
-                valuation.append((name, data))
+            # Summary PDFs are both extraction sources and required package pages,
+            # regardless of filename. A summary embedded in a Valuation Pkg is
+            # already part of that document and therefore is not duplicated.
+            valuation.append((name, data))
         else:
             valuation.append((name, data))
     return valuation, summaries
 
 
 def _pdf_text(data: bytes) -> str:
+    """Pdf text.
+
+    Purpose:
+        Pdf text.
+
+    Args:
+        data: Raw file bytes.
+
+    Returns:
+        str.
+
+    Raises:
+        OSError: A file cannot be read or written. A closed PDF raises from PyMuPDF.
+
+    Example:
+        _pdf_text(data) returns str.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     doc = fitz.open(stream=data, filetype="pdf")
     try:
         return "\n".join((page.get_text("text") or "") for page in doc)

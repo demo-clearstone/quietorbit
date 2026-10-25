@@ -8,7 +8,26 @@ from services.plan_config import is_457_plan, package_flags
 
 
 def finalize_profile(profile: PlanProfile) -> PlanProfile:
-    """Normalize derived fields after extraction."""
+    """Normalize derived fields after extraction.
+
+    Purpose:
+        Normalize derived fields after extraction.
+
+    Args:
+        profile: Plan profile collected from the PDF, Excel, and summary.
+
+    Returns:
+        PlanProfile.
+
+    Raises:
+        None.
+
+    Example:
+        finalize_profile(profile) returns PlanProfile.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     field_sources = profile.extra.setdefault("field_sources", {})
     if profile.plan_year_start is None and profile.plan_year_end:
         try:

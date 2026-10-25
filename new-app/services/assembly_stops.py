@@ -12,7 +12,7 @@ import re
 import fitz
 
 from models.plan_profile import PlanProfile
-from services import file_order, ssn_scan
+from services import file_order, package_polish, ssn_scan
 from services.plan_config import package_flags
 from services.source_rewrite import calendar_402g_year
 
@@ -82,6 +82,36 @@ def stop_reasons(
     cover_address: str | None = None,
     cover_pye: str | None = None,
 ) -> list[str]:
+    """Checking whether assembly must stop.
+
+    Purpose:
+        Checking whether assembly must stop.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+        profile: Plan profile collected from the PDF, Excel, and the compliance summary.
+        source_files: Uploaded file names. None means there are none.
+        excel_plan_name: Excel plan name. Type: str | None.
+        pdf_plan_name: Pdf plan name. Type: str | None.
+        excel_company: Excel company. Type: str | None.
+        excel_address: Excel address. Type: str | None.
+        excel_pye: Excel pye. Type: str | None.
+        cover_company: Cover company. Type: str | None.
+        cover_address: Cover address. Type: str | None.
+        cover_pye: Cover pye. Type: str | None.
+
+    Returns:
+        a list of str.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        stop_reasons(doc, profile, []) returns a list of str.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     reasons = _content_reasons(doc)
     if not _is_valuation_package(source_files):
         return reasons
@@ -104,6 +134,26 @@ def stop_reasons(
 
 
 def _content_reasons(doc: fitz.Document) -> list[str]:
+    """Content reasons.
+
+    Purpose:
+        Content reasons.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+
+    Returns:
+        list[str].
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _content_reasons(doc) returns list[str].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     reasons: list[str] = []
     pages = ssn_scan.scan_ssns(doc)
     if pages:
@@ -138,6 +188,36 @@ def _package_reasons(
     cover_address: str | None = None,
     cover_pye: str | None = None,
 ) -> list[str]:
+    """Package reasons.
+
+    Purpose:
+        Package reasons.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+        profile: Plan profile collected from the PDF, Excel, and the compliance summary.
+        source_files: Uploaded file names. None means there are none.
+        excel_plan_name: Excel plan name. Type: str | None.
+        pdf_plan_name: Pdf plan name. Type: str | None.
+        excel_company: Excel company. Type: str | None.
+        excel_address: Excel address. Type: str | None.
+        excel_pye: Excel pye. Type: str | None.
+        cover_company: Cover company. Type: str | None.
+        cover_address: Cover address. Type: str | None.
+        cover_pye: Cover pye. Type: str | None.
+
+    Returns:
+        a list of str.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _package_reasons(doc, profile, []) returns a list of str.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     reasons: list[str] = []
     if profile.moa_logo_found is not True:
         reasons.append(
@@ -148,6 +228,7 @@ def _package_reasons(
     if address:
         reasons.append(address)
     reasons.extend(_name_reasons(doc, profile, excel_plan_name, pdf_plan_name))
+    reasons.extend(_summary_result_reasons(doc))
     reasons.extend(
         _excel_cover_reasons(
             excel_company=excel_company,
@@ -160,13 +241,66 @@ def _package_reasons(
     )
     reasons.extend(_pye_reasons(doc, profile))
     reasons.extend(_missing_report_reasons(doc, profile, source_files))
+    order_check = package_polish._assembly_order_check(doc, profile)
+    if not order_check.passed:
+        reasons.append("Report pages do not follow TEST23 order: " + order_check.detail + ". Assembly stopped.")
     coverage = _coverage_reason(doc)
     if coverage:
         reasons.append(coverage)
     return reasons
 
 
+def _summary_result_reasons(doc: fitz.Document) -> list[str]:
+    """Stop if the tester's Result Summary conflicts with the test reports.
+
+    Purpose:
+        Stop if the tester's Result Summary conflicts with the test reports.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+
+    Returns:
+        list[str].
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _summary_result_reasons(doc) returns list[str].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
+    from services.package_polish import _result_summary_checks
+
+    failures = [item for item in _result_summary_checks(doc) if not item.passed]
+    return [
+        f"Result Summary validation failed ({item.label}): {item.detail}. Assembly stopped."
+        for item in failures
+    ]
+
+
 def _is_valuation_package(source_files: list[str]) -> bool:
+    """Is valuation package.
+
+    Purpose:
+        Is valuation package.
+
+    Args:
+        source_files: Uploaded file names. None means no file names.
+
+    Returns:
+        bool.
+
+    Raises:
+        None.
+
+    Example:
+        _is_valuation_package([]) returns bool.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     for name in source_files:
         spec = file_order.matched_spec(name)
         if spec and spec.get("name") == "Cover Letter" and spec.get("split_pages"):
@@ -175,6 +309,26 @@ def _is_valuation_package(source_files: list[str]) -> bool:
 
 
 def _address_reason(address: str | None) -> str | None:
+    """Address reason.
+
+    Purpose:
+        Address reason.
+
+    Args:
+        address: Address. Type: str | None.
+
+    Returns:
+        a str | None.
+
+    Raises:
+        None.
+
+    Example:
+        _address_reason("text") returns a str | None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     text = (address or "").strip()
     if not text:
         return (
@@ -195,6 +349,29 @@ def _name_reasons(
     excel_plan_name: str | None,
     pdf_plan_name: str | None,
 ) -> list[str]:
+    """Name reasons.
+
+    Purpose:
+        Name reasons.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+        profile: Plan profile collected from the PDF, Excel, and the compliance summary.
+        excel_plan_name: Excel plan name. Type: str | None.
+        pdf_plan_name: Pdf plan name. Type: str | None.
+
+    Returns:
+        a list of str.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _name_reasons(doc, profile, "text") returns a list of str.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     reasons: list[str] = []
     plan_names = _labeled_values(doc, _PLAN_NAME)
     if pdf_plan_name:
@@ -221,6 +398,27 @@ def _name_reasons(
 
 
 def _labeled_values(doc: fitz.Document, pattern: re.Pattern[str]) -> set[str]:
+    """Labeled values.
+
+    Purpose:
+        Labeled values.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+        pattern: Pattern. Type: re.Pattern[str].
+
+    Returns:
+        a set[str].
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _labeled_values(doc, "text") returns a set[str].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     found: set[str] = set()
     for page in doc:
         for match in pattern.finditer(page.get_text("text") or ""):
@@ -231,6 +429,26 @@ def _labeled_values(doc: fitz.Document, pattern: re.Pattern[str]) -> set[str]:
 
 
 def _norm_name(value: str) -> str:
+    """Norm name.
+
+    Purpose:
+        Norm name.
+
+    Args:
+        value: Value. Type: str.
+
+    Returns:
+        a str.
+
+    Raises:
+        None.
+
+    Example:
+        _norm_name("text") returns a str.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     return re.sub(r"[^a-z0-9]+", " ", (value or "").lower()).strip()
 
 
@@ -243,7 +461,31 @@ def _excel_cover_reasons(
     cover_address: str | None,
     cover_pye: str | None,
 ) -> list[str]:
-    """Cover letter block must match the valuation package Excel when those cells are filled."""
+    """Cover letter block must match the valuation package Excel when those cells are filled.
+
+    Purpose:
+        Cover letter block must match the valuation package Excel when those cells are filled.
+
+    Args:
+        excel_company: Excel company. Type: str | None.
+        excel_address: Excel address. Type: str | None.
+        excel_pye: Excel pye. Type: str | None.
+        cover_company: Cover company. Type: str | None.
+        cover_address: Cover address. Type: str | None.
+        cover_pye: Cover pye. Type: str | None.
+
+    Returns:
+        a list of str.
+
+    Raises:
+        None.
+
+    Example:
+        _excel_cover_reasons(excel_company="text", excel_address="text", excel_pye="text", cover_company="text") returns a list of str.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     reasons: list[str] = []
     if excel_company and _norm_name(excel_company) != _norm_name(cover_company or ""):
         reasons.append(
@@ -264,6 +506,27 @@ def _excel_cover_reasons(
 
 
 def _pye_reasons(doc: fitz.Document, profile: PlanProfile) -> list[str]:
+    """Pye reasons.
+
+    Purpose:
+        Pye reasons.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+        profile: Plan profile collected from the PDF, Excel, and summary.
+
+    Returns:
+        list[str].
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _pye_reasons(doc, profile) returns list[str].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     expected = _norm_date(profile.plan_year_end)
     if not expected:
         return []
@@ -293,6 +556,26 @@ def _pye_reasons(doc: fitz.Document, profile: PlanProfile) -> list[str]:
 
 
 def _page_year_ends(text: str) -> list[str]:
+    """Page year ends.
+
+    Purpose:
+        Page year ends.
+
+    Args:
+        text: Text taken from a page or a file.
+
+    Returns:
+        list[str].
+
+    Raises:
+        None.
+
+    Example:
+        _page_year_ends("text") returns list[str].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     ends: list[str] = []
     for match in _PYE_LABEL.finditer(text):
         ends.append(_norm_date(match.group(1)))
@@ -304,6 +587,26 @@ def _page_year_ends(text: str) -> list[str]:
 
 
 def _page_kind(text: str) -> str:
+    """Page kind.
+
+    Purpose:
+        Page kind.
+
+    Args:
+        text: Text taken from a page or a file.
+
+    Returns:
+        str.
+
+    Raises:
+        None.
+
+    Example:
+        _page_kind("text") returns str.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     head = "\n".join(text.splitlines()[:12])
     if re.search(r"future\s*hce|fyhce", head, re.I):
         return "future"
@@ -313,6 +616,28 @@ def _page_kind(text: str) -> str:
 
 
 def _allowed_year_ends(expected: str, profile: PlanProfile, kind: str) -> set[str]:
+    """Allowed year ends.
+
+    Purpose:
+        Allowed year ends.
+
+    Args:
+        expected: Expected. Type: str.
+        profile: Plan profile collected from the PDF, Excel, and the compliance summary.
+        kind: Kind. Type: str.
+
+    Returns:
+        a set[str].
+
+    Raises:
+        None.
+
+    Example:
+        _allowed_year_ends("text", profile, "text") returns a set[str].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     allowed = {expected}
     if kind == "402g":
         year = calendar_402g_year(profile.plan_year_end)
@@ -322,6 +647,26 @@ def _allowed_year_ends(expected: str, profile: PlanProfile, kind: str) -> set[st
 
 
 def _norm_date(value: str | None) -> str:
+    """Norm date.
+
+    Purpose:
+        Norm date.
+
+    Args:
+        value: Value. Type: str | None.
+
+    Returns:
+        a str.
+
+    Raises:
+        None.
+
+    Example:
+        _norm_date("text") returns a str.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     if not value:
         return ""
     match = re.search(r"(\d{1,2})/(\d{1,2})/(\d{4})", value)
@@ -331,6 +676,26 @@ def _norm_date(value: str | None) -> str:
 
 
 def _year(value: str) -> int:
+    """Year.
+
+    Purpose:
+        Year.
+
+    Args:
+        value: Value. Type: str.
+
+    Returns:
+        a int.
+
+    Raises:
+        None.
+
+    Example:
+        _year("text") returns a int.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     return int(value[-4:])
 
 
@@ -339,6 +704,28 @@ def _missing_report_reasons(
     profile: PlanProfile,
     source_files: list[str],
 ) -> list[str]:
+    """Missing report reasons.
+
+    Purpose:
+        Missing report reasons.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+        profile: Plan profile collected from the PDF, Excel, and summary.
+        source_files: Uploaded file names. None means no file names.
+
+    Returns:
+        list[str].
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _missing_report_reasons(doc, profile, []) returns list[str].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     present = _present_reports(doc, source_files)
     required = [label for label, _file_pattern, _head_pattern in _REPORTS]
     if profile.safe_harbor is True:
@@ -365,6 +752,27 @@ def _missing_report_reasons(
 
 
 def _present_reports(doc: fitz.Document, source_files: list[str]) -> set[str]:
+    """Present reports.
+
+    Purpose:
+        Present reports.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+        source_files: Uploaded file names. None means no file names.
+
+    Returns:
+        set[str].
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _present_reports(doc, []) returns set[str].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     present: set[str] = set()
     filenames = "\n".join(source_files)
     for label, file_pattern, _head_pattern in _REPORTS:
@@ -397,6 +805,26 @@ def _present_reports(doc: fitz.Document, source_files: list[str]) -> set[str]:
 
 
 def _summary_text(doc: fitz.Document) -> str:
+    """Summary text.
+
+    Purpose:
+        Summary text.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+
+    Returns:
+        str.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _summary_text(doc) returns str.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     parts: list[str] = []
     for page in doc:
         text = page.get_text("text") or ""
@@ -407,6 +835,26 @@ def _summary_text(doc: fitz.Document) -> str:
 
 
 def _coverage_reason(doc: fitz.Document) -> str | None:
+    """Coverage reason.
+
+    Purpose:
+        Coverage reason.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+
+    Returns:
+        str | None.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _coverage_reason(doc) returns str | None.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     from services.package_polish import is_compliance_overview
 
     full = "\n".join(
@@ -440,6 +888,27 @@ def _coverage_reason(doc: fitz.Document) -> str | None:
 
 
 def _resolved_result(text: str, label: str) -> bool:
+    """Resolved result.
+
+    Purpose:
+        Resolved result.
+
+    Args:
+        text: Text from a page or a file.
+        label: Label. Type: str.
+
+    Returns:
+        True or False.
+
+    Raises:
+        None.
+
+    Example:
+        _resolved_result("text", "text") returns True or False.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     match = re.search(label + r".{0,60}?\b(pass|fail)\b", text, re.I | re.S)
     if not match:
         return False

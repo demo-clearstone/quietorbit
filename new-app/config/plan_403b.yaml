@@ -1,0 +1,63 @@
+# 403(b) plan differences. Loaded only when the plan type is 403(b).
+# This is not one page. It changes the pages listed below for a 403(b) package.
+# Action Required paragraphs are in config/action_required.yaml.
+
+package:
+  keep_brf: true
+  require_410b_report: false
+  rewrite_adp_mentions: true
+  ignore_adp_results: true
+  acp_notice_amount: true
+
+
+bookmarks:
+  HCE/Key: HCE
+  ADP/ACP: ACP Test
+  BRF: Benefits, Rights and Features test
+
+# These replace the 401(k) rule with the same id.
+rules:
+  - id: I
+    section: Excess Return Notice, current year ACP, within 12 months
+    keep_when:
+      all:
+        - field: testing_method
+          equals: CURRENT
+        - field: returns_required
+          equals: true
+        - field: acp_failed
+          equals: true
+        - field: after_12_months
+          not_true: true
+    else: remove
+
+  - id: J_ADP
+    section: Sample letter, ADP test failure
+    keep_when:
+      all:
+        - field: plan_type
+          equals: 401k
+    else: remove
+
+  - id: Y10
+    section: Year End Recap, 15-year catch-up
+    keep_when:
+      all:
+        - field: special_catchup_disallowed
+          not_true: true
+    else: remove
+
+paragraphs:
+  notices:
+    - id: I
+      heading: Failed Compliance Testing
+      extra: Current method testing
+      must_include:
+        - Excess Return Notice
+        - Qualified Non-Elective Contribution
+        - ACP test is
+        - Form W-4P
+
+  recap_bullets:
+    - id: Y10
+      match: fifteen or more years of service

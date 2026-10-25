@@ -3,10 +3,30 @@ from __future__ import annotations
 from models.plan_profile import PlanProfile
 from models.review import ReviewResult, ValidationItem
 from services.action_required import inspect_compliance_failure_wording
-from services.file_order import load_section_specs
 
 
 def validate(profile: PlanProfile, doc=None) -> ReviewResult:
+    """Checking validation on the plan profile.
+
+    Purpose:
+        Checking validation on the plan profile.
+
+    Args:
+        profile: Plan profile collected from the PDF, Excel, and summary.
+        doc: Open PDF. Must not be closed.
+
+    Returns:
+        ReviewResult.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        validate(profile, doc) returns ReviewResult.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     items = [
         _present("cover_plan_number", "Plan Number", profile.plan_number),
         _present("cover_plan_name", "Plan Name", profile.plan_name),
@@ -25,7 +45,6 @@ def validate(profile: PlanProfile, doc=None) -> ReviewResult:
             ),
         ),
         _present("top_heavy", "Top Heavy %", profile.top_heavy_percent),
-        _order_item(profile),
     ]
     if doc is not None:
         wording = inspect_compliance_failure_wording(doc)
@@ -41,6 +60,28 @@ def validate(profile: PlanProfile, doc=None) -> ReviewResult:
 
 
 def _present(code: str, label: str, value: object) -> ValidationItem:
+    """Present.
+
+    Purpose:
+        Present.
+
+    Args:
+        code: Code. Type: str.
+        label: Label. Type: str.
+        value: Value. Type: object.
+
+    Returns:
+        a ValidationItem.
+
+    Raises:
+        None.
+
+    Example:
+        _present("text", "text", value) returns a ValidationItem.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     ok = value is not None and value != ""
     return ValidationItem(
         code=code,
@@ -50,17 +91,37 @@ def _present(code: str, label: str, value: object) -> ValidationItem:
     )
 
 
-def _order_item(profile: PlanProfile) -> ValidationItem:
-    expected = [str(spec["name"]) for spec in load_section_specs()]
-    found = [section.name for section in profile.detected_sections]
-    expected_found = [name for name in expected if name in found]
-    actual = [name for name in found if name in expected]
-    ok = actual == expected_found
+def _order_item(profile: PlanProfile, doc=None) -> ValidationItem:
+    """Order item.
+
+    Purpose:
+        Order item.
+
+    Args:
+        profile: Plan profile collected from the PDF, Excel, and summary.
+        doc: Open PDF. Must not be closed.
+
+    Returns:
+        ValidationItem.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _order_item(profile, doc) returns ValidationItem.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
+    if doc is not None:
+        from services.package_polish import _assembly_order_check
+
+        result = _assembly_order_check(doc, profile)
+        result.label = "Package order (TEST23)"
+        return result
     return ValidationItem(
         code="package_order",
-        label="Package order (SOP)",
-        passed=ok,
-        detail="Detected sections follow TEST23 combine order"
-        if ok
-        else f"Expected {expected_found}; detected {actual}",
+        label="Package order (TEST23)",
+        passed=False,
+        detail="Could not inspect the assembled PDF pages.",
     )
