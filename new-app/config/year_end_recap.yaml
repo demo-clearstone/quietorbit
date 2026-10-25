@@ -10,6 +10,7 @@ rules:
         - field: hce_future
           not_true: true
     else: remove
+    missing: remove
 
   - id: Y2
     section: Year End Recap, prior year testing
@@ -21,6 +22,7 @@ rules:
           not_true: true
         - any_true: [hce_current, hce_future]
     else: remove
+    missing: remove
 
   - id: Y3
     section: Year End Recap, current year testing
@@ -32,6 +34,7 @@ rules:
           not_true: true
         - any_true: [hce_current, hce_future]
     else: remove
+    missing: remove
 
   - id: Y4
     section: Year End Recap, safe harbor
@@ -50,6 +53,7 @@ rules:
         - field: hce_future
           equals: false
     else: remove
+    missing: remove
 
   - id: Y6
     section: Year End Recap, age 50 catch-up
@@ -66,6 +70,7 @@ rules:
         - field: top_heavy
           equals: true
     else: remove
+    missing: remove
 
   - id: Y8
     section: Year End Recap, per-payroll match
@@ -74,22 +79,31 @@ rules:
         - field: per_payroll_match
           equals: true
     else: remove
+    missing: remove
 
 recap_bullets:
   - id: Y1
     match: did not have any Highly Compensated Employees
   - id: Y2
     match: prior year data
+  - id: Y2
+    match: is % based on
   - id: Y3
     match: the actual amount the employee can defer
+  - id: Y3
+    match: Nonhighly Compensated Employees for
   - id: Y4
     match: Safe Harbor Plan
   - id: Y5
     match: the plan had Highly Compensated Employees for the plan year ending
+  - id: Y5
+    match: no employee will be considered highly compensated for the plan year beginning
   - id: Y6
     match: designed to allow participants who were age 50
   - id: Y7
     match: Based on the top heavy testing results
+  - id: Y7
+    match: considered top heavy
   - id: Y8
     match: employer match contribution is calculated on a participant's compensation
   - id: Y9

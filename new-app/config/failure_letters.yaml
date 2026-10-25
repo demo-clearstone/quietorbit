@@ -10,6 +10,7 @@ rules:
         - field: adp_failed
           equals: true
     else: remove
+    missing: remove
 
   - id: J_ACP
     section: Sample letter, ACP test failure
@@ -20,6 +21,7 @@ rules:
         - field: acp_failed
           equals: true
     else: remove
+    missing: remove
 
   - id: K
     section: Sample letter, 402(g) deferral limit
@@ -32,6 +34,7 @@ rules:
         - field: fail_402g_after_deadline
           not_true: true
     else: remove
+    missing: remove
 
   - id: L
     section: 415 failure information and sample letter
@@ -40,6 +43,7 @@ rules:
         - field: fail_415
           equals: true
     else: remove
+    missing: remove
 
 notices:
   - id: L
@@ -55,6 +59,12 @@ sample_letters:
   - id: J_ADP
     heading: SAMPLE/DRAFT Communication to Participant
     extra: Actual Deferral Percentage (ADP)
+  - id: J_ADP
+    heading: SAMPLE/DRAFT Communication to Participant
+    extra: ADP/ACP correction
+  - id: J_ACP
+    heading: SAMPLE/DRAFT Communication to Participant
+    extra: ADP/ACP correction
   - id: K
     heading: SAMPLE/DRAFT Communication to Participant
     extra: 402(g) Deferral Limit

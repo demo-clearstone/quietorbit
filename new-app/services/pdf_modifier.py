@@ -69,7 +69,7 @@ def apply_decisions(
                     continue
                 if _kept_by_other_spec(page, page_text, specs, heading, hit.y0, end_y, keep_ids):
                     continue
-                boxes.append(fitz.Rect(40, max(36, hit.y0 - 2), page.rect.x1 - 40, end_y))
+                boxes.append(fitz.Rect(18, max(28, hit.y0 - 2), page.rect.x1 - 28, end_y))
                 if rule_id not in removed:
                     removed.append(rule_id)
         if boxes:
@@ -78,6 +78,7 @@ def apply_decisions(
     if touched:
         _restack_pages(doc, touched)
         _pull_kept_action_forward(doc)
+        _strip_im_fragments(doc)
         _drop_empty_pages(doc)
         for page in doc:
             text = page.get_text("text") or ""
@@ -692,6 +693,37 @@ def _is_recap_text(text: str) -> bool:
     return bool(re.search(r"year[- ]end recap|important information", text or "", re.I))
 
 
+def _strip_im_fragments(doc: fitz.Document) -> None:
+    """Remove the clipped 'IM' left when IMMEDIATE is only partly covered.
+
+    Purpose:
+        Remove the clipped 'IM' left when IMMEDIATE is only partly covered.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+
+    Returns:
+        None.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _strip_im_fragments(doc) returns None.
+
+    Side effects:
+        Changes the PDF passed in. Does not save the file by itself.
+    """
+    for page in doc:
+        boxes = [
+            fitz.Rect(word[:4])
+            for word in (page.get_text("words") or [])
+            if str(word[4]).upper() in {"IM", "MEDIATE"}
+        ]
+        if boxes:
+            _apply_redact_boxes(page, boxes)
+
+
 def _is_noise_text(text: str) -> bool:
     """A page number or a stray letter such as 'i' is not a paragraph.
 
@@ -714,7 +746,11 @@ def _is_noise_text(text: str) -> bool:
         None. This function only reads data and returns a value.
     """
     words = re.findall(r"[A-Za-z0-9]+", text or "")
-    return not any(len(word) >= 2 and re.search(r"[A-Za-z]", word) for word in words)
+    # "IM" is the clipped start of IMMEDIATE after a redact. It is not a paragraph.
+    return not any(
+        len(word) >= 2 and re.search(r"[A-Za-z]", word) and word.upper() not in {"IM", "MEDIATE"}
+        for word in words
+    )
 
 
 def _pad_rect(rect: fitz.Rect, page: fitz.Page) -> fitz.Rect:
@@ -897,7 +933,18 @@ def _pull_kept_action_forward(doc: fitz.Document) -> None:
         return
     anchor_blocks = _text_blocks(anchor)
     cursor = anchor_blocks[-1]["bbox"].y1 + 18 if anchor_blocks else 90
-    if not re.search(r"action required", anchor.get_text("text") or "", re.I):
+    # The green "no immediate action" line is the whole section. Do not add
+    # a second "ACTION REQUIRED" heading above it.
+    moving_failure = False
+    for page in later:
+        moved = " ".join(
+            " ".join(span["text"] for span in block["spans"])
+            for block in _action_blocks_to_move(page)
+        )
+        if re.search(r"immediate action required\s*-|attention required", moved, re.I):
+            moving_failure = True
+            break
+    if moving_failure and not re.search(r"action required", anchor.get_text("text") or "", re.I):
         cursor = _write_action_heading(anchor, cursor)
     delete_numbers: list[int] = []
     for page in later:
@@ -1369,12 +1416,14 @@ def apply_recap_bullets(
     removed: list[str] = []
     for page in doc:
         original = page.get_text("text") or ""
-        if "important information" not in original.lower():
+        if not _is_recap_text(original):
             continue
         header, bullets = _split_recap(original)
         kept: list[str] = []
         for bullet in bullets:
             spec = _matching_recap(bullet, specs)
+            if spec is None and re.search(r"(?:^|\s)%(?:\s|$)", bullet):
+                continue
             if spec and str(spec["id"]) in remove_ids:
                 if spec["id"] not in removed:
                     removed.append(str(spec["id"]))
