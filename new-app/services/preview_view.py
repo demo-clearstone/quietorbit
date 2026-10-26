@@ -363,7 +363,7 @@ def shift_line_down(
                 raise ValueError("This line is too close to the bottom of the page to move the text down.")
             for group in (spans, *[item["spans"] for item in captured]):
                 for span in group:
-                    page.add_redact_annot(fitz.Rect(span["bbox"]), fill=(1, 1, 1))
+                page.add_redact_annot(fitz.Rect(span["bbox"]), fill=(1, 1, 1))
             page.apply_redactions(
                 images=fitz.PDF_REDACT_IMAGE_NONE,
                 graphics=fitz.PDF_REDACT_LINE_ART_NONE,
@@ -1001,10 +1001,10 @@ def _sync_saved_copy(pdf_path: Path, copy_path: Path | None) -> None:
     """
     if copy_path is None or not copy_path.parent.exists():
         return
-    try:
-        copy_path.write_bytes(pdf_path.read_bytes())
-    except OSError:
-        pass
+            try:
+                copy_path.write_bytes(pdf_path.read_bytes())
+            except OSError:
+                pass
 
 
 def _page(doc: fitz.Document, page_number: int) -> fitz.Page:
@@ -1117,7 +1117,7 @@ def _spans_in(page: fitz.Page, box: fitz.Rect) -> list[dict]:
                     center = fitz.Point((rect.x0 + rect.x1) / 2, (rect.y0 + rect.y1) / 2)
                     nearby.append((abs(center.y - (box.y0 + box.y1) / 2), span))
     if found:
-        return found
+    return found
     nearby.sort(key=lambda item: item[0])
     if not nearby:
         return []

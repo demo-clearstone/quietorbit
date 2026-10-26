@@ -6,6 +6,7 @@ import fitz
 
 from models.plan_profile import PlanProfile
 from services.file_order import load_section_specs
+from services.pdf_assembler import page_section
 from services.plan_config import bookmark_overrides, is_403b_plan, load_package_order, package_flags
 
 _ADP_FILE = re.compile(r"\badp\s*test\b")
@@ -39,22 +40,70 @@ _SOP_SECTION_ORDER = (
     "Top Heavy",
     "Census",
 )
+# A client report title often continues with Determination, Report, or "for the plan year".
+_HEADING_TAIL = r"(?:\s+report)?(?:\s+for\b.{0,80})?$"
 _SECTION_HEADINGS: dict[str, re.Pattern[str]] = {
     "Cover Letter": re.compile(r"^(?:cover letter|cover page)$", re.I),
     "Test Summary": re.compile(r"^(?:compliance testing summary of results|compliance summary|test summary)$", re.I),
-    "Contribution Analysis": re.compile(r"^contribution analysis(?:\s+loc(?:ation)?\s*\d+)?$", re.I),
-    "HCE/Key": re.compile(r"^(?:hce\s*/\s*key|hce\s*/\s*key employee determinations|hce\s+key)$", re.I),
-    "Future HCE": re.compile(r"^(?:future\s+hce|future\s+highly compensated employee(?:s)?(?:\s+projection)?)$", re.I),
-    "ADP/ACP": re.compile(r"^(?:adp\s*/\s*acp\s+(?:summary|test results|tests?)|adp\s+(?:summary|test results|tests?)|acp\s+(?:summary|test results|tests?))$", re.I),
-    "402(g)": re.compile(r"^(?:402\s*\(\s*g\s*\)|402\s*g)(?:\s+(?:deferral limits?|test))?$", re.I),
-    "410(b)": re.compile(r"^(?:410\s*\(\s*b\s*\)|410\s*b)(?:\s+(?:coverage\s+)?test)?$", re.I),
-    "401(a)(4)": re.compile(r"^401\s*\(\s*a\s*\)\s*\(\s*4\s*\)(?:\s+test)?$", re.I),
-    "Average Benefit Percentage Test": re.compile(r"^(?:average benefit percentage(?: test)?|abpt)$", re.I),
-    "BRF": re.compile(r"^(?:benefits,? rights(?: and features)?(?: test)?|brf test)$", re.I),
-    "414(s)": re.compile(r"^414\s*\(\s*s\s*\)(?:\s+test)?$", re.I),
-    "415": re.compile(r"^(?:415(?:\s*\(\s*c\s*\))?|415\s+limit)(?:\s+(?:annual additions\s+)?test)?$", re.I),
-    "Top Heavy": re.compile(r"^(?:top\s*[- ]?heavy)(?:\s+test)?$", re.I),
-    "Census": re.compile(r"^census(?:\s+report)?$", re.I),
+    "Contribution Analysis": re.compile(
+        rf"^contribution analysis(?:\s+report)?(?:\s+loc(?:ation)?\s*\d+)?{_HEADING_TAIL}",
+        re.I,
+    ),
+    "HCE/Key": re.compile(
+        rf"^(?:hce\s*/\s*key|hce\s+key|highly compensated(?:\s+employees?)?\s*/\s*key)"
+        rf"(?:\s+employees?)?(?:\s+determinations?)?{_HEADING_TAIL}",
+        re.I,
+    ),
+    "Future HCE": re.compile(
+        rf"^(?:future\s+hce|future\s+highly compensated employees?)"
+        rf"(?:\s+determinations?)?(?:\s+projection)?{_HEADING_TAIL}",
+        re.I,
+    ),
+    "ADP/ACP": re.compile(
+        r"^(?:adp\s*/\s*acp|adp|acp)\s+(?:nondiscrimination\s+)?"
+        r"(?:summary|test(?:\s+results)?|tests?)(?:\s+report)?$",
+        re.I,
+    ),
+    "402(g)": re.compile(
+        rf"^(?:(?:section\s+|irc\s+)?402\s*\(\s*g\s*\)|402\s*g)"
+        rf"(?:\s+excess)?(?:\s+deferral)?(?:\s+limits?)?(?:\s+test)?{_HEADING_TAIL}",
+        re.I,
+    ),
+    "410(b)": re.compile(
+        rf"^(?:410\s*\(\s*b\s*\)|410\s*b)"
+        rf"(?:\s+(?:coverage|ratio\s+percentage))?(?:\s+test)?{_HEADING_TAIL}",
+        re.I,
+    ),
+    "401(a)(4)": re.compile(
+        rf"^401\s*\(\s*a\s*\)\s*\(\s*4\s*\)(?:\s+(?:general\s+)?test)?{_HEADING_TAIL}",
+        re.I,
+    ),
+    "Average Benefit Percentage Test": re.compile(
+        rf"^(?:average benefits?(?:\s+percentage)?(?:\s+test)?|abpt){_HEADING_TAIL}",
+        re.I,
+    ),
+    "BRF": re.compile(
+        rf"^(?:benefits?,?\s+rights(?:\s+and\s+features)?(?:\s+test)?|brf(?:\s+test)?){_HEADING_TAIL}",
+        re.I,
+    ),
+    "414(s)": re.compile(
+        rf"^414\s*\(\s*s\s*\)(?:\s+compensation)?(?:\s+test)?{_HEADING_TAIL}",
+        re.I,
+    ),
+    "415": re.compile(
+        rf"^(?!.*\bfailure\b)(?:415(?:\s*\(\s*c\s*\))?|415\s+limit|"
+        rf"annual additions(?:\s*\(\s*irc\s*415\s*\))?)(?:\s+limit)?(?:\s+annual additions)?"
+        rf"(?:\s+test)?{_HEADING_TAIL}",
+        re.I,
+    ),
+    "Top Heavy": re.compile(
+        rf"^(?:top\s*[- ]?heavy)(?:\s+determinations?)?(?:\s+test)?{_HEADING_TAIL}",
+        re.I,
+    ),
+    "Census": re.compile(
+        rf"^(?:employee\s+)?census(?:\s+report)?{_HEADING_TAIL}",
+        re.I,
+    ),
 }
 _WRAPPER_PAGE = re.compile(
     r"cover letter|as you requested|we are pleased to provide|"
@@ -121,7 +170,7 @@ def add_bookmarks(
             title = adp_acp_bookmark_title(profile, doc, source_files)
         if name == "BRF" and not keep_brf:
             continue
-        page = _find_section_page(doc, name)
+        page = _find_section_page(doc, name) or _tagged_section_page(doc, name)
         if page is None:
             continue
         if not title:
@@ -279,7 +328,7 @@ def _heading_lines(page: fitz.Page) -> list[str]:
         page: One PDF page.
 
     Returns:
-        Up to the first 14 non-empty lines, with extra spaces removed.
+        The non-empty lines among the first 40 lines, with extra spaces removed.
 
     Raises:
         None.
@@ -292,7 +341,7 @@ def _heading_lines(page: fitz.Page) -> list[str]:
     """
     return [
         re.sub(r"\s+", " ", line).strip(" \t\r\n:·")
-        for line in (page.get_text("text") or "").splitlines()[:14]
+        for line in (page.get_text("text") or "").splitlines()[:40]
         if line.strip()
     ]
 
@@ -325,10 +374,23 @@ def _find_section_page(doc: fitz.Document, section_name: str) -> int | None:
     pattern = _SECTION_HEADINGS.get(section_name)
     if pattern is None:
         return None
+    found: list[int] = []
     for index, page in enumerate(doc):
         if section_name != "Test Summary" and _is_summary_or_overview(page):
             continue
         if any(pattern.fullmatch(line) for line in _heading_lines(page)):
+            found.append(index + 1)
+    if not found:
+        return None
+    # A contents line on the cover is not the report. Use the later page.
+    later = [page_number for page_number in found if page_number > 1]
+    return later[0] if later else found[0]
+
+
+def _tagged_section_page(doc: fitz.Document, section_name: str) -> int | None:
+    """First page that came from an uploaded file matched to ``section_name``, or ``None``."""
+    for index, page in enumerate(doc):
+        if page_section(page) == section_name:
             return index + 1
     return None
 

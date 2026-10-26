@@ -4,6 +4,21 @@ from fastapi import HTTPException
 import fitz
 
 from config.settings import MAX_FILE_BYTES, MAX_FILES
+from services import file_order
+
+SECTION_KEY = "MOASection"
+
+
+def tag_pages(doc: fitz.Document, start: int, end: int, section: str) -> None:
+    """Record the report section on pages ``start`` to ``end - 1`` so bookmarks survive heading changes."""
+    for index in range(start, end):
+        doc.xref_set_key(doc[index].xref, SECTION_KEY, f"({section})")
+
+
+def page_section(page: fitz.Page) -> str | None:
+    """Return the section tag written by ``tag_pages``, or ``None`` when the page has none."""
+    kind, value = page.parent.xref_get_key(page.xref, SECTION_KEY)
+    return value if kind == "string" and value else None
 
 
 def merge_pdfs(uploads: list[tuple[str, bytes]]) -> fitz.Document:
@@ -59,7 +74,11 @@ def merge_pdfs(uploads: list[tuple[str, bytes]]) -> fitz.Document:
                     )
                 if source.page_count < 1:
                     raise HTTPException(status_code=400, detail=f"{name} has no pages")
+                first = combined.page_count
                 combined.insert_pdf(source)
+                spec = file_order.matched_spec(name)
+                if spec and spec.get("name"):
+                    tag_pages(combined, first, combined.page_count, str(spec["name"]))
             finally:
                 source.close()
     except HTTPException:
