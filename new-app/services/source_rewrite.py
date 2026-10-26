@@ -24,6 +24,15 @@ _COVER_SLASH = re.compile(r"\b(\d{1,2})/0([1-9])/(20\d{2})\b")
 _LETTER_DATE = re.compile(rf"({_MONTH})\s+(\d{{1,2}}),\s+(20\d{{2}})", re.I)
 _PERCENT = re.compile(r"(\d{1,2}(?:\.\d+)?)\s*%")
 _NHCE = re.compile(r"NHCE[^%\n]{0,80}?(\d{1,2}(?:\.\d+)?)\s*%", re.I)
+_RANGE_DATE = (
+    r"(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|"
+    r"(?:January|February|March|April|May|June|July|August|September|October|November|December)"
+    r"\s+\d{1,2},\s+\d{4})"
+)
+_DATE_RANGE_CONNECTOR = re.compile(
+    rf"(?P<left>{_RANGE_DATE})\s*(?P<connector>to|and|from)\s*(?P<right>{_RANGE_DATE})",
+    re.I,
+)
 
 
 def calendar_402g_year(plan_year_end: str | None) -> int | None:
@@ -113,6 +122,119 @@ def apply_cover_date(doc: fitz.Document, marks: list[dict] | None = None) -> lis
     if changed:
         return [f"Cover letter date set to {today} ({changed} place(s)). Check the letterhead spacing."]
     return [f"Cover letter date left as printed (already {today}, or no letter date was found)."]
+
+
+def normalize_cover_address_spacing(doc: fitz.Document) -> list[str]:
+    """Compact oversized vertical gaps between the cover date and the RE line."""
+    if not doc.page_count:
+        return []
+    page = doc[0]
+    blocks = page.get_text("dict").get("blocks", [])
+    lines: list[dict] = []
+    for block in blocks:
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []):
+            spans = [span for span in line.get("spans", []) if span.get("text", "").strip()]
+            text = "".join(span.get("text", "") for span in spans).strip()
+            if text:
+                lines.append({"line": line, "spans": spans, "text": text})
+    lines.sort(key=lambda item: (item["line"]["bbox"][1], item["line"]["bbox"][0]))
+    date_index = next(
+        (index for index, item in enumerate(lines) if _LETTER_DATE.search(item["text"])),
+        None,
+    )
+    if date_index is None:
+        return []
+    re_index = next(
+        (index for index in range(date_index + 1, len(lines)) if re.match(r"^RE:\s*", lines[index]["text"], re.I)),
+        None,
+    )
+    if re_index is None:
+        return []
+
+    address_lines = lines[date_index + 1 : re_index]
+    if len(address_lines) < 2:
+        return []
+    first_baseline = min(float(span.get("origin", (0, span["bbox"][3]))[1]) for span in address_lines[0]["spans"])
+    destination_baselines: list[float] = [first_baseline]
+    for index, item in enumerate(address_lines[1:], start=1):
+        previous = address_lines[index - 1]
+        previous_size = max(float(span.get("size") or 10) for span in previous["spans"])
+        line_size = max(float(span.get("size") or 10) for span in item["spans"])
+        step = max(previous_size, line_size) * 1.35
+        original_baseline = min(float(span.get("origin", (0, span["bbox"][3]))[1]) for span in item["spans"])
+        destination_baselines.append(min(original_baseline, destination_baselines[-1] + step))
+
+    moved = [
+        (item, destination - min(float(span.get("origin", (0, span["bbox"][3]))[1]) for span in item["spans"]))
+        for item, destination in zip(address_lines, destination_baselines)
+    ]
+    moved = [(item, delta) for item, delta in moved if delta < -1.0]
+    if not moved:
+        return []
+
+    for item, _delta in moved:
+        page.add_redact_annot(fitz.Rect(item["line"]["bbox"]) + (-1, -1, 1, 1), fill=(1, 1, 1))
+    page.apply_redactions(images=0, graphics=0)
+    for item, delta in moved:
+        for span in item["spans"]:
+            origin = span.get("origin") or (span["bbox"][0], span["bbox"][3])
+            page.insert_text(
+                (origin[0], origin[1] + delta),
+                span["text"],
+                fontsize=float(span.get("size") or 10),
+                fontname=_base_font(str(span.get("font") or ""), int(span.get("flags") or 0)),
+                color=_rgb(span.get("color") or 0),
+                overlay=True,
+            )
+    return [f"Compacted spacing between {len(moved)} cover-address line(s)."]
+
+
+def normalize_date_range_spacing(doc: fitz.Document) -> list[str]:
+    """Ensure date range connectors have one space on both sides throughout report pages."""
+    changed = 0
+    for page in doc:
+        lines: list[tuple[dict, list[dict], str]] = []
+        for block in page.get_text("dict").get("blocks", []):
+            if block.get("type") != 0:
+                continue
+            for line in block.get("lines", []):
+                spans = [span for span in line.get("spans", []) if span.get("text", "").strip()]
+                text = "".join(span.get("text", "") for span in line.get("spans", []))
+                if spans and _DATE_RANGE_CONNECTOR.search(text):
+                    lines.append((line, spans, text))
+        for line, spans, original in lines:
+            updated = _DATE_RANGE_CONNECTOR.sub(
+                lambda match: f"{match.group('left')} {match.group('connector')} {match.group('right')}",
+                original,
+            )
+            if updated == original:
+                continue
+            page.add_redact_annot(fitz.Rect(line["bbox"]) + (-1, -1, 1, 1), fill=(1, 1, 1))
+            page.apply_redactions(images=0, graphics=0)
+            first = spans[0]
+            origin = first.get("origin") or (first["bbox"][0], first["bbox"][3])
+            fontname = _base_font(str(first.get("font") or ""), int(first.get("flags") or 0))
+            fontsize = float(first.get("size") or 10)
+            try:
+                page.insert_text(
+                    (origin[0], origin[1]),
+                    updated,
+                    fontsize=fontsize,
+                    fontname=fontname,
+                    color=_rgb(first.get("color") or 0),
+                )
+            except Exception:
+                page.insert_text(
+                    (origin[0], origin[1]),
+                    updated,
+                    fontsize=fontsize,
+                    fontname="helv",
+                    color=_rgb(first.get("color") or 0),
+                )
+            changed += 1
+    return [f"Normalized spacing in {changed} date range(s)."] if changed else []
 
 
 def apply_402g_dates(

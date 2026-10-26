@@ -731,6 +731,7 @@ def _detect_sections(doc: fitz.Document) -> list[DetectedSection]:
         None. This function only reads data and returns a value.
     """
     from services.package_polish import is_compliance_overview
+    from services.pdf_assembler import page_section
 
     found: list[DetectedSection] = []
     seen: set[str] = set()
@@ -739,6 +740,10 @@ def _detect_sections(doc: fitz.Document) -> list[DetectedSection]:
         text = page.get_text("text") or ""
         if is_compliance_overview(text):
             continue
+        tagged = page_section(page)
+        if tagged in {"HCE/Key", "Future HCE"} and tagged not in seen:
+            found.append(DetectedSection(name=tagged, page=page_index + 1, matched_alias=tagged))
+            seen.add(tagged)
         for spec in specs:
             name = str(spec["name"])
             if name in seen:

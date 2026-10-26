@@ -58,6 +58,7 @@ def process_uploads(
     source_folder: str | None = None,
     rewrite_sources: bool = False,
     check_assembly_stops: bool = False,
+    validation_checks: list[str] | None = None,
 ) -> JobResult:
     """Assemble one valuation package from the uploaded files.
 
@@ -72,6 +73,7 @@ def process_uploads(
         source_folder: Folder the PDFs were loaded from. None when the user uploaded files.
         rewrite_sources: True rewrites dates and other source text inside the PDF.
         check_assembly_stops: True stops assembly when a required check fails.
+        validation_checks: Selected stop checks; None means all configured checks.
 
     Returns:
         The saved package, warnings, and highlight rectangles.
@@ -189,13 +191,7 @@ def process_uploads(
         if profile.top_heavy_percent is not None:
             profile.top_heavy = profile.top_heavy_percent > 60
             profile.extra.setdefault("field_sources", {})["top_heavy"] = "Top-heavy percentage; threshold is greater than 60%"
-        section_names = set()
-        with file_order.use_filename_batch([name for name, _data in ordered]):
-            section_names = {
-                str(spec.get("name"))
-                for name, _data in ordered
-                if (spec := file_order.matched_spec(name))
-            }
+        section_names = set(file_order.matched_sections([name for name, _data in ordered]).values())
         if profile.hce_current is None and "HCE/Key" in section_names:
             profile.hce_current = True
             profile.extra["field_sources"]["hce_current"] = "Uploaded report filename"
@@ -256,6 +252,8 @@ def process_uploads(
         else:
             warnings.extend(source_rewrite.apply_cover_date(doc, highlights))
             warnings.extend(source_rewrite.apply_402g_dates(doc, profile, highlights))
+        warnings.extend(source_rewrite.normalize_cover_address_spacing(doc))
+        warnings.extend(source_rewrite.normalize_date_range_spacing(doc))
         if not profile.midyear and not is_457_plan(profile.plan_type):
             warnings.extend(
                 package_builder.ensure_compliance_overview(
@@ -266,6 +264,7 @@ def process_uploads(
                     plan_year_end=profile.plan_year_end,
                 )
             )
+        warnings.extend(package_polish.ensure_summary_heading_rule(doc))
         warnings.extend(package_polish.renumber_footers(doc))
         warnings.extend(package_polish.normalize_report_layout(doc))
         # 6. Bookmarks, SSN scan, and assembly stops.
@@ -324,9 +323,16 @@ def process_uploads(
                 cover_company=cover_company,
                 cover_address=cover_address,
                 cover_pye=cover_pye,
+                selected_checks=validation_checks,
             )
             if reasons:
-                raise HTTPException(status_code=400, detail="Assembly stopped.\n" + "\n".join(reasons))
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "message": "Assembly stopped. Uncheck failed validations you want to ignore, then process again.",
+                        "validations": assembly_stops.validation_failures(reasons),
+                    },
+                )
         # 7. Save the package, the email draft, and the log.
         dest = save_service.testing_folder_from_source(source_folder)
         path = save_service.save_package(doc, job_id, profile, dest_dir=dest)

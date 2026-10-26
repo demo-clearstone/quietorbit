@@ -656,6 +656,59 @@ def renumber_footers(doc: fitz.Document) -> list[str]:
     return [f"Renumbered {changed} page footer(s) to match the final page order."] if changed else []
 
 
+def ensure_summary_heading_rule(doc: fitz.Document) -> list[str]:
+    """Add the horizontal divider below a Result Summary title block if it is absent."""
+    changed = 0
+    title_pattern = re.compile(
+        r"^(?:compliance testing summary of results|compliance summary|result summary|test summary)$",
+        re.I,
+    )
+    section_pattern = re.compile(
+        r"^(?:416\s+top heavy|410\s*\(?b\)?\s+coverage|401\s*\(|402\s*\(?g\)?|"
+        r"415(?:\s*\(\s*c\s*\))?|414\s*\(?s\)?|average\s+(?:deferral|contribution|benefit)|"
+        r"benefits?,?\s+rights|plan\s+number\s*:)",
+        re.I,
+    )
+    for page in doc:
+        text_lines = [
+            (line, "".join(span.get("text", "") for span in line.get("spans", [])).strip())
+            for block in page.get_text("dict").get("blocks", [])
+            if block.get("type") == 0
+            for line in block.get("lines", [])
+        ]
+        text_lines.sort(key=lambda item: (item[0]["bbox"][1], item[0]["bbox"][0]))
+        title_index = next((i for i, (_line, value) in enumerate(text_lines) if title_pattern.fullmatch(value)), None)
+        if title_index is None:
+            continue
+        header_lines = []
+        for line, value in text_lines[title_index:]:
+            if header_lines and section_pattern.match(value):
+                break
+            if value:
+                header_lines.append(line)
+            if len(header_lines) >= 8:
+                break
+        if not header_lines:
+            continue
+        bottom = max(line["bbox"][3] for line in header_lines)
+        y = bottom + 7
+        has_rule = any(
+            abs(float(drawing["rect"].y0) - y) <= 3
+            and float(drawing["rect"].width) >= page.rect.width * 0.65
+            and float(drawing["rect"].height) <= 2
+            for drawing in page.get_drawings()
+        )
+        if not has_rule and y < page.rect.y1 - 40:
+            page.draw_line(
+                fitz.Point(48, y),
+                fitz.Point(page.rect.width - 48, y),
+                color=(0, 0, 0),
+                width=1,
+            )
+            changed += 1
+    return [f"Added a divider below {changed} Result Summary heading block(s)."] if changed else []
+
+
 def package_checks(doc: fitz.Document, profile: PlanProfile) -> list[ValidationItem]:
     """Checking the package pages against the profile.
 
@@ -713,6 +766,7 @@ def _assembly_order_check(doc: fitz.Document, profile: "PlanProfile") -> Validat
         None. This function only reads data and returns a value.
     """
     from services.file_order import load_section_specs
+    from services.pdf_assembler import page_section
     if package_flags(profile.plan_type).get("rewrite_adp_mentions"):
         names = [
             "Cover Letter", "Test Summary", "Compensation Limit Failure Summary",
@@ -761,6 +815,10 @@ def _assembly_order_check(doc: fitz.Document, profile: "PlanProfile") -> Validat
             continue
         if any(re.search(r"combined testing report", line, re.I) for line in head_lines):
             recognized.append((page_index + 1, "Combined Testing Report", order["Combined Testing Report"]))
+            continue
+        source_section = page_section(page)
+        if source_section in {"HCE/Key", "Future HCE"} and source_section in order:
+            recognized.append((page_index + 1, source_section, order[source_section]))
             continue
         for spec in specs:
             name = str(spec.get("name") or "")

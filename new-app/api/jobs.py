@@ -13,6 +13,7 @@ from config.settings import MAX_FILE_BYTES, MAX_FILES, OUTPUT_DIR
 from models.job import HighlightMark, JobResult
 from services.change_marks import apply_highlights, load_marks
 from services.file_order import list_file_meta
+from services.file_order import classify_file_rows
 from services.preview_view import add_annotation, add_highlight, add_secure_redaction, add_text, modify_pages
 from services.preview_view import outline as preview_outline
 from services.preview_view import page_lines, page_png, replace_line, replace_lines, search_pdf, shift_line_down, update_bookmark, validate_bookmarks
@@ -58,6 +59,8 @@ async def create_job(
     auto_order: bool = Form(default=True),
     rewrite_sources: bool = Form(default=False),
     check_assembly_stops: bool = Form(default=True),
+    validation_checks: list[str] | None = Form(default=None),
+    validation_checks_configured: bool = Form(default=False),
     file_order: list[str] | None = Form(default=None),
     item_name: list[str] | None = Form(default=None),
     item_page: list[int] | None = Form(default=None),
@@ -115,6 +118,7 @@ async def create_job(
             detail="Upload PDF files or enter a Valuation Package folder path",
         )
 
+    validation_selection = (validation_checks or []) if validation_checks_configured else None
     if log_steps and trace_id and not _UPLOAD_ID.fullmatch(trace_id):
         raise HTTPException(400, "Console trace ID is not valid")
     options = dict(
@@ -123,6 +127,7 @@ async def create_job(
         source_folder=folder or None,
         rewrite_sources=rewrite_sources,
         check_assembly_stops=check_assembly_stops,
+        validation_checks=validation_selection,
     )
     try:
         if log_steps:
@@ -234,6 +239,18 @@ async def upload_part(
         )
     _remember_blob(token, filename, data)
     return {"complete": True, "upload_id": token, "file": await _describe_file(filename, data)}
+
+
+@router.post("/classify-files")
+def classify_files(
+    item_name: list[str] = Form(default=[]),
+    item_page: list[int] = Form(default=[]),
+    item_page_count: list[int] = Form(default=[]),
+) -> dict:
+    """Resolve labels and order ranks using all currently listed filenames together."""
+    return {
+        "files": classify_file_rows(item_name, item_page, item_page_count),
+    }
 
 
 def _pdf_pages(data: bytes) -> tuple[int, list[str]]:

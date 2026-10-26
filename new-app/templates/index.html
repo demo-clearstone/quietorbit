@@ -251,6 +251,21 @@
     button:disabled { opacity: 0.55; cursor: not-allowed; }
     .check { font-size: 0.75rem; font-weight: 500; }
     .check input { width: auto; margin-right: 4px; }
+    .validation-dialog { width: min(760px, calc(100vw - 32px)); max-width: none; max-height: min(85vh, 900px); padding: 0; border: 1px solid var(--line); border-radius: 12px; color: var(--text); box-shadow: 0 24px 80px #0f172a55; }
+    .validation-dialog::backdrop { background: #0f172a88; }
+    .validation-dialog-body { display: flex; flex-direction: column; max-height: min(85vh, 900px); }
+    .validation-dialog-head { padding: 18px 22px 12px; border-bottom: 1px solid var(--line); }
+    .validation-dialog-head h2 { margin: 0 0 4px; font-size: 1.05rem; }
+    .validation-dialog-head p { margin: 0; color: var(--muted); font-size: 0.82rem; }
+    .validation-menu { min-height: 0; overflow-y: auto; padding: 10px 22px; background: #fff; }
+    .validation-actions { display: flex; gap: 6px; margin-bottom: 6px; }
+    .validation-actions button { padding: 3px 7px; font-size: 0.7rem; }
+    .validation-option { display: block; margin: 10px 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: #f8fafc; font-weight: 400; }
+    .validation-option input { width: auto; margin-right: 7px; }
+    .validation-detail { margin: 6px 0 0 25px; padding-left: 22px; color: var(--fail); font-size: 0.78rem; white-space: normal; }
+    .validation-detail li { padding-left: 3px; margin: 4px 0; }
+    .validation-dialog-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 22px 16px; border-top: 1px solid var(--line); }
+    .validation-dialog-foot button { min-width: 100px; }
     #status { color: var(--muted); font-size: 0.75rem; }
     @keyframes time-blink {
       0%, 45% { background: #7e22ce; color: #fff; }
@@ -268,7 +283,9 @@
     @media (prefers-reduced-motion: reduce) {
       .time-blink { animation: none; background: #7e22ce; color: #fff; }
     }
-    #error { color: var(--fail); font-size: 0.75rem; white-space: pre-line; }
+    #error { color: var(--fail); font-size: 0.75rem; white-space: normal; }
+    #error ol { margin: 3px 0 0; padding-left: 22px; }
+    #error li { margin: 1px 0; }
     .workspace {
       flex: 1 1 auto;
       min-height: 0;
@@ -633,7 +650,7 @@
       <h1>MOA Valuation Package</h1>
       <p class="lead">Upload PDFs, Excel, and the testing summary, or paste a short folder path.</p>
       <div class="status-line" id="status"></div>
-      <div class="status-line" id="error"></div>
+      <div class="status-line" id="error" role="alert"></div>
     </header>
 
     <section class="card upload-bar" id="upload-bar">
@@ -660,6 +677,7 @@
           <label class="check"><input id="auto-order" type="checkbox" checked /> Auto-order</label>
           <label class="check"><input id="rewrite-sources" type="checkbox" /> Retype 402(g) dates and HCE %. The cover letter date is set to today on every Process.</label>
           <label class="check"><input id="assembly-stops" type="checkbox" checked /> Assembly stops (recommended; stop on missing reports or validation issues)</label>
+          <button type="button" class="btn ghost hidden" id="validation-open">Review failed validations</button>
           <label class="check"><input id="log-steps" type="checkbox" /> Log assembly steps in the browser console</label>
           <button id="run" type="button">Process package</button>
         </div>
@@ -743,6 +761,24 @@
         </div>
       </div>
     </section>
+    <dialog class="validation-dialog" id="validation-dialog" aria-labelledby="validation-dialog-title">
+      <div class="validation-dialog-body">
+        <div class="validation-dialog-head">
+          <h2 id="validation-dialog-title">Review failed validations</h2>
+          <p>Each item repeats the assembly-stop message. Check a message to ignore only that validation on retry.</p>
+        </div>
+        <div class="validation-menu">
+          <div class="validation-actions">
+            <button type="button" class="btn ghost" id="validation-select-all">Ignore all</button>
+            <button type="button" class="btn ghost" id="validation-select-none">Enforce all</button>
+          </div>
+          <div id="validation-options"></div>
+        </div>
+        <div class="validation-dialog-foot">
+          <button type="button" class="btn ghost" id="validation-dialog-close">Close</button>
+        </div>
+      </div>
+    </dialog>
   </div>
   <script>
     const picker = document.getElementById("picker");
@@ -909,6 +945,30 @@
       inspectAndAdd(incoming);
     }
 
+    async function refreshBatchFileClassifications() {
+      if (!files.length) return;
+      const form = new FormData();
+      files.forEach((item) => {
+        form.append("item_name", item.name);
+        form.append("item_page", String(item.page || 0));
+        form.append("item_page_count", String(item.pageCount || 1));
+      });
+      try {
+        const payload = await postJson("/api/classify-files", form);
+        (payload.files || []).forEach((classified, index) => {
+          const item = files[index];
+          if (!item || item.name !== classified.name || (item.page || 0) !== classified.page) return;
+          item.label = classified.label || item.label;
+          item.rank = Number.isFinite(Number(classified.rank)) ? Number(classified.rank) : item.rank;
+        });
+        sortFilesIfAutoOrder();
+        retitleCoverRows();
+        renderFiles();
+      } catch (err) {
+        console.warn("Could not refresh report labels from the full filename set", err);
+      }
+    }
+
     async function inspectAndAdd(incoming) {
       errorEl.textContent = "";
       setStatus("Adding " + incoming.length + " file(s)…");
@@ -934,6 +994,7 @@
           retitleCoverRows();
           renderFiles();
         }
+        await refreshBatchFileClassifications();
         const extraPages = metas.filter((item) => item.split);
         setStatus(extraPages.length
           ? extraPages.map((item) => (item.label || item.name) + " listed as " + item.pages + " page(s).").join(" ")
@@ -1107,7 +1168,9 @@
             throw new Error(text || response.statusText);
           }
           if (!response.ok) {
-            throw new Error(formatDetail(payload.detail) || response.statusText);
+            const error = new Error(formatDetail(payload.detail) || response.statusText);
+            error.detail = payload.detail;
+            throw error;
           }
           return payload;
         } catch (err) {
@@ -1129,6 +1192,7 @@
       if (Array.isArray(detail)) {
         return detail.map((item) => item.msg || JSON.stringify(item)).join("; ");
       }
+      if (typeof detail === "object" && detail.message) return detail.message;
       return JSON.stringify(detail);
     }
 
@@ -1215,6 +1279,164 @@
       };
     }
 
+    const validationDialog = document.getElementById("validation-dialog");
+    const validationOpen = document.getElementById("validation-open");
+    const validationOptions = document.getElementById("validation-options");
+    const validationTitle = document.getElementById("validation-dialog-title");
+    let validationSelectionActive = false;
+    const knownValidations = new Map();
+    function showError(detail) {
+      errorEl.replaceChildren();
+      const message = detail && typeof detail === "object" ? detail.message : "";
+      const validations = detail && typeof detail === "object" && Array.isArray(detail.validations)
+        ? detail.validations
+        : [];
+      if (message && validations.length) {
+        errorEl.append(document.createTextNode(message));
+        const list = document.createElement("ol");
+        validations.forEach((validation) => {
+          (validation.details || [validation.label]).forEach((text) => {
+            const item = document.createElement("li");
+            item.textContent = text;
+            list.append(item);
+          });
+        });
+        errorEl.append(list);
+        return;
+      }
+      const text = typeof detail === "string" ? detail : formatDetail(detail);
+      const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+      const reasonLines = lines.filter((line) => !/^assembly stopped\.?$/i.test(line));
+      if (lines.length > 1 && reasonLines.length) {
+        const heading = lines.find((line) => /^assembly stopped\.?$/i.test(line)) || "Assembly stopped.";
+        errorEl.append(document.createTextNode(heading));
+        const list = document.createElement("ol");
+        reasonLines.forEach((line) => {
+          const item = document.createElement("li");
+          item.textContent = line;
+          list.append(item);
+        });
+        errorEl.append(list);
+        return;
+      }
+      errorEl.textContent = text;
+    }
+    function validationChecks() {
+      return [...validationOptions.querySelectorAll('input[name="validation-check"]')];
+    }
+    function updateValidationSummary() {
+      const checks = validationChecks();
+      const selected = checks.filter((input) => input.checked).length;
+      validationTitle.textContent = `Review failed validations (${selected}/${checks.length} ignored)`;
+    }
+    function failedValidationItems(detail) {
+      if (detail && Array.isArray(detail.validations)) return detail.validations;
+      const text = typeof detail === "string" ? detail : (detail && detail.message) || "";
+      const patterns = [
+        ["ssn", /social security number/i, "Full or masked Social Security numbers"],
+        ["summary_placeholders", /unresolved wording|still says pass\/fail|plan is\/is not/i, "Unresolved Result Summary wording"],
+        ["cover_stamp", /mutual of america stamp/i, "Mutual of America cover stamp"],
+        ["employer_address", /employer address/i, "Employer address completeness"],
+        ["employer_name", /employer name/i, "Employer name consistency"],
+        ["plan_name", /plan name/i, "Plan name consistency"],
+        ["plan_number", /plan number/i, "Plan number consistency"],
+        ["compliance_pages", /compliance reports? \(3 pages\)|compliance report page/i, "Three Compliance and Administrative pages"],
+        ["required_reports", /required reports are missing/i, "Required reports present"],
+        ["report_order", /do not follow test23 order/i, "Report order"],
+        ["coverage_results", /410\(b\).*coverage|coverage.*410\(b\)/i, "410(b) coverage results"],
+        ["brf_result", /brf.*result summary/i, "BRF Result Summary result"],
+        ["cover_excel", /cover letter.*valuation package excel|company address on the cover letter|plan year end on the cover letter/i, "Cover details vs. Val Assembly Excel"],
+        ["plan_year_end", /plan year end does not match|page \d+ shows/i, "Plan year end consistency"],
+        ["summary_results", /result summary validation failed/i, "Result Summary vs. test report results"],
+      ];
+      const lines = text.split(/\r?\n/).filter((line) => line.trim() && !/^assembly stopped\.?$/i.test(line.trim()));
+      const found = new Map();
+      lines.forEach((line) => {
+        const match = patterns.find(([, pattern]) => pattern.test(line));
+        if (!match) return;
+        const [id, , label] = match;
+        if (!found.has(id)) found.set(id, { id, label, details: [] });
+        found.get(id).details.push(line.trim());
+      });
+      return [...found.values()];
+    }
+    function showFailedValidations(validations) {
+      (validations || []).forEach((validation) => {
+        const previous = knownValidations.get(validation.id);
+        knownValidations.set(validation.id, {
+          id: validation.id,
+          label: validation.label || (previous && previous.label) || validation.id,
+          details: validation.details && validation.details.length
+            ? validation.details
+            : (previous && previous.details) || [],
+          ignored: previous ? previous.ignored : false,
+        });
+      });
+      validationOptions.replaceChildren();
+      knownValidations.forEach((validation) => {
+        const label = document.createElement("label");
+        label.className = "validation-option";
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.name = "validation-check";
+        input.value = validation.id;
+        input.checked = validation.ignored;
+        input.addEventListener("change", () => {
+          validation.ignored = input.checked;
+          updateValidationSummary();
+        });
+        input.setAttribute("aria-label", `Ignore ${validation.label}`);
+        label.append(input, document.createTextNode(` Ignore ${validation.label}`));
+        const detail = document.createElement("ol");
+        detail.className = "validation-detail";
+        (validation.details || []).forEach((message) => {
+          const item = document.createElement("li");
+          item.textContent = message;
+          detail.append(item);
+        });
+        label.append(detail);
+        validationOptions.append(label);
+      });
+      validationSelectionActive = validationOptions.childElementCount > 0;
+      validationOpen.classList.toggle("hidden", !validationSelectionActive);
+      if (validationSelectionActive) {
+        updateValidationSummary();
+        if (!validationDialog.open) {
+          validationOpen.disabled = true;
+          validationDialog.showModal();
+        }
+      }
+    }
+    validationOpen.addEventListener("click", () => {
+      if (validationSelectionActive && !validationDialog.open) {
+        validationOpen.disabled = true;
+        validationDialog.showModal();
+      }
+    });
+    document.getElementById("validation-dialog-close").addEventListener("click", () => validationDialog.close());
+    validationDialog.addEventListener("close", () => {
+      validationOpen.disabled = false;
+    });
+    validationDialog.addEventListener("cancel", () => {
+      validationOpen.disabled = false;
+    });
+    document.getElementById("validation-select-all").addEventListener("click", () => {
+      validationChecks().forEach((input) => {
+        input.checked = true;
+        const validation = knownValidations.get(input.value);
+        if (validation) validation.ignored = true;
+      });
+      updateValidationSummary();
+    });
+    document.getElementById("validation-select-none").addEventListener("click", () => {
+      validationChecks().forEach((input) => {
+        input.checked = false;
+        const validation = knownValidations.get(input.value);
+        if (validation) validation.ignored = false;
+      });
+      updateValidationSummary();
+    });
+
     runBtn.addEventListener("click", async () => {
       errorEl.textContent = "";
       const sourcePath = (document.getElementById("source-path").value || "").trim();
@@ -1239,6 +1461,10 @@
       form.append("auto_order", document.getElementById("auto-order").checked ? "true" : "false");
       form.append("rewrite_sources", document.getElementById("rewrite-sources").checked ? "true" : "false");
       form.append("check_assembly_stops", document.getElementById("assembly-stops").checked ? "true" : "false");
+      if (validationSelectionActive && document.getElementById("assembly-stops").checked) {
+        form.append("validation_checks_configured", "true");
+        validationChecks().filter((input) => input.checked).forEach((input) => form.append("validation_checks", input.value));
+      }
       const logSteps = document.getElementById("log-steps").checked;
       form.append("log_steps", logSteps ? "true" : "false");
       files.forEach((item) => {
@@ -1268,13 +1494,21 @@
       }
       try {
         const payload = await postJson("/api/jobs", form);
+          knownValidations.clear();
+        showFailedValidations([]);
         showResults(payload);
         showElapsed("Done. Time to process: ", payload.elapsed_seconds == null ? (Date.now() - processStarted) / 1000 : payload.elapsed_seconds);
       } catch (err) {
         const raw = err.message || String(err);
-        errorEl.textContent = raw === "Failed to fetch"
-          ? "Cannot reach the API. Keep python main.py running and open http://127.0.0.1:8002."
-          : raw;
+        const failedValidations = failedValidationItems(err.detail);
+        if (failedValidations.length) showFailedValidations(failedValidations);
+        if (raw === "Failed to fetch") {
+          showError("Cannot reach the API. Keep python main.py running and open http://127.0.0.1:8002.");
+        } else if (err.detail && typeof err.detail === "object") {
+          showError(err.detail);
+        } else {
+          showError(raw);
+        }
         showElapsed("Stopped after ", (Date.now() - processStarted) / 1000, ".");
       } finally {
         clearInterval(processTimer);

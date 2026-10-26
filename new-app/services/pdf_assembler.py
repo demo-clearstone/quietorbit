@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from fastapi import HTTPException
 import fitz
 
@@ -19,6 +21,23 @@ def page_section(page: fitz.Page) -> str | None:
     """Return the section tag written by ``tag_pages``, or ``None`` when the page has none."""
     kind, value = page.parent.xref_get_key(page.xref, SECTION_KEY)
     return value if kind == "string" and value else None
+
+
+def _test_results_first(source: fitz.Document, filename: str) -> bool:
+    """Move an ADP/ACP report's TEST RESULTS page to its own first page."""
+    spec = file_order.matched_spec(filename)
+    if not spec or spec.get("name") != "ADP/ACP" or source.page_count < 2:
+        return False
+    result_page = None
+    for index, page in enumerate(source):
+        lines = [line.strip() for line in (page.get_text("text") or "").splitlines() if line.strip()]
+        if any(re.fullmatch(r"TEST\s+RESULTS", line, re.I) for line in lines[:8]):
+            result_page = index
+            break
+    if result_page is None or result_page == 0:
+        return False
+    source.select([result_page, *[index for index in range(source.page_count) if index != result_page]])
+    return True
 
 
 def merge_pdfs(uploads: list[tuple[str, bytes]]) -> fitz.Document:
@@ -75,6 +94,7 @@ def merge_pdfs(uploads: list[tuple[str, bytes]]) -> fitz.Document:
                         )
                     if source.page_count < 1:
                         raise HTTPException(status_code=400, detail=f"{name} has no pages")
+                    _test_results_first(source, name)
                     first = combined.page_count
                     combined.insert_pdf(source)
                     spec = file_order.matched_spec(name)

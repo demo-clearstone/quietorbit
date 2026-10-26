@@ -49,7 +49,7 @@ def apply_decisions(
     keep_ids = {item.rule_id for item in decisions if item.action == "keep"}
     headings = [str(spec["heading"]) for spec in specs if spec.get("heading")]
     removed: list[str] = []
-    touched: set[int] = set()
+    touched: dict[int, list[fitz.Rect]] = {}
     for page in doc:
         boxes: list[fitz.Rect] = []
         for spec in specs:
@@ -69,12 +69,13 @@ def apply_decisions(
                     continue
                 if _kept_by_other_spec(page, page_text, specs, heading, hit.y0, end_y, keep_ids):
                     continue
-                boxes.append(fitz.Rect(18, max(28, hit.y0 - 2), page.rect.x1 - 28, end_y))
+                removal = fitz.Rect(18, max(28, hit.y0 - 2), page.rect.x1 - 28, end_y)
+                boxes.append(removal)
+                touched.setdefault(page.number, []).append(removal)
                 if rule_id not in removed:
                     removed.append(rule_id)
         if boxes:
             _apply_redact_boxes(page, boxes)
-            touched.add(page.number)
     if touched:
         _restack_pages(doc, touched)
         _pull_kept_action_forward(doc)
@@ -393,15 +394,15 @@ def _block_matches(page: fitz.Page, spec: dict, y0: float, y1: float) -> bool:
     return True
 
 
-def _restack_pages(doc: fitz.Document, touched: set[int]) -> None:
-    """Shift leftover text up, keeping font/size/color. Images stay put.
+def _restack_pages(doc: fitz.Document, touched: dict[int, list[fitz.Rect]]) -> None:
+    """Collapse removed regions by their exact height while keeping each surviving span at its source x-position and style.
 
     Purpose:
         Shift leftover text up, keeping font/size/color. Images stay put.
 
     Args:
         doc: Open PDF. Must not be closed.
-        touched: Touched. Type: set[int].
+        touched: Page-index to removed vertical regions.
 
     Returns:
         None.
@@ -410,37 +411,42 @@ def _restack_pages(doc: fitz.Document, touched: set[int]) -> None:
         A closed PDF raises from PyMuPDF.
 
     Example:
-        _restack_pages(doc, touched) returns None.
+        Text below one removed region moves up by exactly that region's height; text above it stays put.
 
     Side effects:
         None. This function only reads data and returns a value.
     """
     for page in doc:
-        if page.number not in touched:
+        removed = touched.get(page.number)
+        if not removed:
             continue
         blocks = _text_blocks(page)
         if not blocks:
             continue
         body = [block for block in blocks if not _is_page_number_block(page, block)]
         footer = [block for block in blocks if _is_page_number_block(page, block)]
-        header_bottom, footer_top = _image_bands(page)
-        _apply_redact_boxes(
-            page,
-            [block["bbox"] for block in blocks]
-            + [fitz.Rect(drawing["rect"]) for drawing in page.get_drawings()],
-        )
-        cursor = header_bottom
+        removed_bands = _merged_vertical_bands(removed)
+        _apply_redact_boxes(page, [block["bbox"] for block in blocks])
         for block in body:
-            height = block["bbox"].height
-            if cursor + height > footer_top:
-                break
-            delta = cursor - block["bbox"].y0
+            delta = -sum(bottom - top for top, bottom in removed_bands if bottom <= block["bbox"].y0)
             for span in block["spans"]:
                 _write_span(page, span, delta)
-            cursor += height + 8
         for block in footer:
             for span in block["spans"]:
                 _write_span(page, span, 0)
+
+
+def _merged_vertical_bands(boxes: list[fitz.Rect]) -> list[tuple[float, float]]:
+    """Merge overlapping redaction bands so their heights are not subtracted twice."""
+    intervals = sorted((float(box.y0), float(box.y1)) for box in boxes if box.y1 > box.y0)
+    merged: list[tuple[float, float]] = []
+    for top, bottom in intervals:
+        if merged and top <= merged[-1][1]:
+            previous_top, previous_bottom = merged[-1]
+            merged[-1] = (previous_top, max(previous_bottom, bottom))
+        else:
+            merged.append((top, bottom))
+    return merged
 
 
 def _is_page_number_block(page: fitz.Page, block: dict) -> bool:
