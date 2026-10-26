@@ -469,6 +469,103 @@ def rewrite_403b_adp_mentions(doc: fitz.Document) -> list[str]:
     return ["403(b) package uses ACP only. ADP testing wording was removed."]
 
 
+def normalize_report_layout(doc: fitz.Document) -> list[str]:
+    """Normalize known text offsets and split merged Amount / % column headings."""
+    from services.pdf_modifier import _base_font, _rgb
+
+    changed = False
+    for page in doc:
+        lines = [
+            (line, "".join(span.get("text", "") for span in line.get("spans", [])).strip())
+            for block in page.get_text("dict").get("blocks", [])
+            if block.get("type") == 0
+            for line in block.get("lines", [])
+        ]
+        page_text = "\n".join(text for _line, text in lines)
+        shifts: list[tuple[dict, float]] = []
+        if re.search(r"annual valuation report", page_text, re.I):
+            for line, text in lines:
+                if text.upper() == "ACTION REQUIRED" and abs(line["bbox"][0] - 36) < 0.5:
+                    shifts.append((line, 2.0))
+                elif (
+                    text.upper() == "NO IMMEDIATE ACTION IS REQUIRED AT THIS TIME"
+                    and abs(line["bbox"][0] - 30) < 0.5
+                ):
+                    shifts.append((line, 9.0))
+        if re.search(r"year end recap", page_text, re.I):
+            start = next(
+                (line["bbox"][1] for line, text in lines if "UNIVERSAL AVAILABILITY RULE" in text.upper()),
+                None,
+            )
+            end = next(
+                (
+                    line["bbox"][3]
+                    for line, text in lines
+                    if start is not None
+                    and line["bbox"][1] >= start
+                    and "representative to discuss" in text.lower()
+                ),
+                None,
+            )
+            if start is not None and end is not None:
+                shifts.extend(
+                    (line, 5.0)
+                    for line, _text in lines
+                    if start - 1 <= line["bbox"][1] and line["bbox"][3] <= end + 1
+                    and 60 <= line["bbox"][0] < 98
+                )
+        if re.search(r"\bcensus\b", " ".join(text for _line, text in lines[:8]), re.I):
+            shifts.extend(
+                (line, 6.0)
+                for line, text in lines
+                if text.casefold() == "name"
+                and line["bbox"][1] > 100
+                and abs(line["bbox"][0] - 36) < 0.5
+            )
+        if shifts:
+            unique = {id(line): (line, delta) for line, delta in shifts}
+            for line, _delta in unique.values():
+                page.add_redact_annot(fitz.Rect(line["bbox"]) + (-1, -1, 1, 1), fill=(1, 1, 1))
+            page.apply_redactions(images=0, graphics=0)
+            for line, delta in unique.values():
+                for span in line.get("spans", []):
+                    text = span.get("text", "")
+                    if not text:
+                        continue
+                    origin = span.get("origin") or (span["bbox"][0], span["bbox"][3])
+                    font = _base_font(str(span.get("font") or ""), int(span.get("flags") or 0))
+                    page.insert_text(
+                        (origin[0] + delta, origin[1]),
+                        text,
+                        fontsize=float(span.get("size") or 10),
+                        fontname=font,
+                        color=_rgb(span.get("color") or 0),
+                        overlay=True,
+                    )
+            changed = True
+
+        for block in page.get_text("dict").get("blocks", []):
+            if block.get("type") != 0:
+                continue
+            for line in block.get("lines", []):
+                spans = line.get("spans", [])
+                original = "".join(span.get("text", "") for span in spans).strip()
+                if not re.fullmatch(r"Amount\s{2,}%", original) or not spans:
+                    continue
+                span = spans[0]
+                box = fitz.Rect(line["bbox"]) + (-1, -1, 1, 1)
+                origin = span.get("origin") or (span["bbox"][0], span["bbox"][3])
+                size = float(span.get("size") or 8)
+                font = _base_font(str(span.get("font") or ""), int(span.get("flags") or 0))
+                color = _rgb(span.get("color") or 0)
+                page.add_redact_annot(box, fill=(1, 1, 1))
+                page.apply_redactions(images=0, graphics=0)
+                page.insert_text((288, origin[1]), "Amount", fontsize=size, fontname=font, color=color)
+                page.insert_text((360, origin[1]), "%", fontsize=size, fontname=font, color=color)
+                changed = True
+    return ["Aligned report text and separated merged column headings."] if changed else []
+
+
 def drop_brf_pages(doc: fitz.Document) -> list[str]:
     """Removing BRF pages from the 401(k) package.
 

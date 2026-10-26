@@ -8,6 +8,7 @@ upload includes a valuation package, cover letter, or cover page file.
 from __future__ import annotations
 
 import re
+from datetime import datetime
 
 import fitz
 
@@ -17,10 +18,11 @@ from services.plan_config import package_flags
 from services.source_rewrite import calendar_402g_year
 
 _SLASH_WORDING = re.compile(
-    r"is\s*[\\/]\s*is\s+not|\bpass\s*[\\/]\s*fail\b",
+    r"is\s*[\\/]\s*is\s+not|\bpass\s*[\\/]\s*fail\b|\bfail\s*[\\/]\s*pass\b",
     re.I,
 )
 _PLAN_NAME = re.compile(r"plan\s*name\s*[:\-]\s*(.+)", re.I)
+_PLAN_NUMBER = re.compile(r"plan\s*(?:number|no\.?|#)\s*[:\-]?\s*(\d{3,10})\b", re.I)
 _EMPLOYER_NAME = re.compile(r"(?:employer|company)\s*name\s*[:\-]\s*(.+)", re.I)
 _PYE_LABEL = re.compile(
     r"plan\s+year\s+end(?:ing)?\s*[:\-]?\s*(\d{1,2}/\d{1,2}/\d{4})",
@@ -32,6 +34,19 @@ _PLAN_YEAR_RANGE = re.compile(
 )
 _PERIOD_ENDING = re.compile(
     r"period\s+ending\s*[:\-]?\s*(\d{1,2}/\d{1,2}/\d{4})",
+    re.I,
+)
+_MONTH_YEAR_END = re.compile(
+    r"(?:plan\s+year\s+end(?:ing)?|period\s+ending)\s*[:\-]?\s*"
+    r"((?:January|February|March|April|May|June|July|August|September|October|November|December)"
+    r"\s+\d{1,2},\s+\d{4})",
+    re.I,
+)
+_MONTH_YEAR_RANGE = re.compile(
+    r"(?:January|February|March|April|May|June|July|August|September|October|November|December)"
+    r"\s+\d{1,2},\s+\d{4}\s*[-–]\s*"
+    r"((?:January|February|March|April|May|June|July|August|September|October|November|December)"
+    r"\s+\d{1,2},\s+\d{4})",
     re.I,
 )
 _STREET = re.compile(r"(P\.?\s*O\.?\s*Box\b|\d{1,6}\s+\S)", re.I)
@@ -46,21 +61,39 @@ _SUMMARY_HEAD = re.compile(
     r"test summary|result summary|compliance summary|testing summary of results",
     re.I,
 )
-_SKIP_HEAD = re.compile(r"test summary|result summary|compliance summary|action required|cover letter", re.I)
+_SKIP_HEAD = re.compile(
+    r"test summary|result summary|compliance summary|action required|cover letter|"
+    r"sample/draft|failure letter|failed compliance|excess return notice|415 failure information",
+    re.I,
+)
 
 # Heading on the report itself, not a mention inside the Result Summary.
 _REPORTS: list[tuple[str, str, str]] = [
     ("Result Summary", r"resultsumm|result\s*summary|test\s*summary", r"result summary|test summary|compliance summary"),
-    ("402(g) Test Report", r"402\s*\(?g\)?", r"402\s*\(?\s*g\s*\)?"),
+    ("402(g) Test Report", r"402\s*(?:\(?g\)?)?", r"402\s*\(?\s*g\s*\)?"),
     ("415 Test Report", r"415", r"415"),
     ("ADP/ACP Test Report", r"adp|acp", r"adp\s*/\s*acp|adp test|acp test"),
-    ("410(b) Test Report", r"410\s*\(?b\)?", r"410\s*\(?b\)?"),
+    ("410(b) Test Report", r"410\s*(?:\(?b\)?)?", r"410\s*\(?b\)?"),
     ("HCE Key Report", r"hce\s*/?\s*key|hcekey", r"hce\s*/\s*key|hce\s+key|hcekey"),
     ("Future HCE Report", r"future\s*hce|fyhce", r"future\s*hce|fyhce"),
     ("Top Heavy Report", r"top\s*-?\s*heavy|(^|[^a-z])th([^a-z]|$)", r"top\s*-?\s*heavy"),
     ("Census Report", r"census", r"\bcensus\b"),
     ("Contribution Analysis Report", r"contri", r"contribution analysis"),
 ]
+_REAL_REPORT_HEADS = tuple(
+    re.compile(pattern, re.I)
+    for pattern in (
+        r"^402\s*\(?g\)?\s+(?:deferral|test|limit)",
+        r"^415(?:\s*\(\s*c\s*\))?\s+(?:limit|test|annual additions)",
+        r"^(?:adp|acp|adp\s*/\s*acp)\s+(?:nondiscrimination|test|summary)",
+        r"^410\s*\(?b\)?\s+(?:coverage|test)",
+        r"^(?:hce\s*/?\s*key|highly compensated employees?)\b",
+        r"^(?:future\s+hce|future highly compensated employees?)\b",
+        r"^top\s*[- ]?heavy(?:\s+test|\s+determination)?\b",
+        r"^(?:employee\s+)?census(?:\s+report)?\b",
+        r"^contribution analysis(?:\s+report)?\b",
+    )
+)
 _EXTRA_REPORTS: list[tuple[str, str, str, str]] = [
     ("Variance Client Copy", r"variance", r"variance", r"\bvariance\b"),
     ("414(s) Test Report", r"414\s*\(?s\)?", r"414\s*\(?s\)?", r"414\s*\(?s\)?"),
@@ -113,7 +146,7 @@ def stop_reasons(
         None. This function only reads data and returns a value.
     """
     reasons = _content_reasons(doc)
-    if not _is_valuation_package(source_files):
+    if not _is_valuation_package(source_files, doc):
         return reasons
     reasons.extend(
         _package_reasons(
@@ -166,13 +199,19 @@ def _content_reasons(doc: fitz.Document) -> list[str]:
         text = page.get_text("text") or ""
         if not _SUMMARY_HEAD.search("\n".join(text.splitlines()[:8])):
             continue
-        if _SLASH_WORDING.search(text):
+        if _unresolved_summary_wording(text):
             reasons.append(
                 "The Result Summary still has unresolved wording such as "
                 "\"Plan is/is not\" or \"Pass/Fail\". Assembly stopped."
             )
             break
     return reasons
+
+
+def _unresolved_summary_wording(text: str) -> bool:
+    """Catch result placeholders even when their slash wording is split across PDF lines."""
+    compact = re.sub(r"\s+", " ", text or "")
+    return bool(_SLASH_WORDING.search(compact))
 
 
 def _package_reasons(
@@ -227,7 +266,22 @@ def _package_reasons(
     address = _address_reason(cover_address or profile.company_address)
     if address:
         reasons.append(address)
+    if not profile.plan_name:
+        reasons.append("The plan name could not be verified from the cover, Excel, or reports. Assembly stopped.")
+    if not profile.plan_number:
+        reasons.append("The plan number could not be verified from the cover, Excel, or reports. Assembly stopped.")
+    if not profile.company_name:
+        reasons.append("The employer name could not be verified from the cover or Excel. Assembly stopped.")
+    if not profile.plan_year_end:
+        reasons.append("The plan year end could not be verified from the cover, Excel, or reports. Assembly stopped.")
     reasons.extend(_name_reasons(doc, profile, excel_plan_name, pdf_plan_name))
+    reasons.extend(_plan_number_reasons(doc, profile.plan_number))
+    reasons.extend(_company_report_reasons(doc, excel_company or cover_company or profile.company_name))
+    from services.package_polish import _compliance_check, _identity_checks
+
+    for item in (_identity_checks(doc, profile) + [_compliance_check(doc, profile)]):
+        if not item.passed:
+            reasons.append(f"{item.label} validation failed: {item.detail}. Assembly stopped.")
     reasons.extend(_summary_result_reasons(doc))
     reasons.extend(
         _excel_cover_reasons(
@@ -280,7 +334,7 @@ def _summary_result_reasons(doc: fitz.Document) -> list[str]:
     ]
 
 
-def _is_valuation_package(source_files: list[str]) -> bool:
+def _is_valuation_package(source_files: list[str], doc: fitz.Document | None = None) -> bool:
     """Is valuation package.
 
     Purpose:
@@ -305,7 +359,24 @@ def _is_valuation_package(source_files: list[str]) -> bool:
         spec = file_order.matched_spec(name)
         if spec and spec.get("name") == "Cover Letter" and spec.get("split_pages"):
             return True
+    if doc and doc.page_count:
+        cover = "\n".join((page.get_text("text") or "") for page in doc[:2])
+        if re.search(r"mutual of america|financial group", cover, re.I) and re.search(
+            r"we are pleased to provide|period ending|valuation package", cover, re.I
+        ):
+            return True
     return False
+
+
+def _company_report_reasons(doc: fitz.Document, expected: str | None) -> list[str]:
+    """Stop when explicitly labeled employer names disagree across report pages."""
+    names = _labeled_values(doc, _EMPLOYER_NAME)
+    normalized = {name for name in names if name}
+    if expected:
+        normalized.add(_norm_name(expected))
+    if len(normalized) > 1:
+        return ["The employer name does not match across the cover, Excel, and reports. Assembly stopped."]
+    return []
 
 
 def _address_reason(address: str | None) -> str | None:
@@ -395,6 +466,19 @@ def _name_reasons(
             "The employer name is not the same on every report. Assembly stopped."
         )
     return reasons
+
+
+def _plan_number_reasons(doc: fitz.Document, expected: str | None) -> list[str]:
+    """Require a consistent plan number wherever reports label one."""
+    numbers = _labeled_values(doc, _PLAN_NUMBER)
+    if expected:
+        numbers.add(re.sub(r"\D", "", expected))
+    numbers.discard("")
+    if expected and numbers and any(number != re.sub(r"\D", "", expected) for number in numbers):
+        return ["The plan number does not match across the cover, Excel, and reports. Assembly stopped."]
+    if len(numbers) > 1:
+        return ["The plan number is not the same on every report. Assembly stopped."]
+    return []
 
 
 def _labeled_values(doc: fitz.Document, pattern: re.Pattern[str]) -> set[str]:
@@ -583,6 +667,16 @@ def _page_year_ends(text: str) -> list[str]:
         ends.append(_norm_date(match.group(2)))
     for match in _PERIOD_ENDING.finditer(text):
         ends.append(_norm_date(match.group(1)))
+    for match in _MONTH_YEAR_END.finditer(text):
+        try:
+            ends.append(datetime.strptime(match.group(1), "%B %d, %Y").strftime("%m/%d/%Y"))
+        except ValueError:
+            continue
+    for match in _MONTH_YEAR_RANGE.finditer(text):
+        try:
+            ends.append(datetime.strptime(match.group(1), "%B %d, %Y").strftime("%m/%d/%Y"))
+        except ValueError:
+            continue
     return [item for item in ends if item]
 
 
@@ -774,12 +868,11 @@ def _present_reports(doc: fitz.Document, source_files: list[str]) -> set[str]:
         None. This function only reads data and returns a value.
     """
     present: set[str] = set()
-    filenames = "\n".join(source_files)
     for label, file_pattern, _head_pattern in _REPORTS:
-        if re.search(file_pattern, filenames, re.I):
+        if _report_filename_present(label, source_files, file_pattern):
             present.add(label)
     for label, _summary_pattern, file_pattern, _head_pattern in _EXTRA_REPORTS:
-        if re.search(file_pattern, filenames, re.I):
+        if _report_filename_present(label, source_files, file_pattern):
             present.add(label)
     from services.package_polish import is_compliance_overview
 
@@ -796,12 +889,27 @@ def _present_reports(doc: fitz.Document, source_files: list[str]) -> set[str]:
                 present.add("Result Summary")
             continue
         for label, _file_pattern, head_pattern in _REPORTS:
+            if not any(pattern.search(head) for pattern in _REAL_REPORT_HEADS):
+                continue
             if re.search(head_pattern, head, re.I):
                 present.add(label)
         for label, _summary_pattern, _file_pattern, head_pattern in _EXTRA_REPORTS:
             if re.search(head_pattern, head, re.I):
                 present.add(label)
     return present
+
+
+def _report_filename_present(label: str, source_files: list[str], pattern: str) -> bool:
+    """Exclude notices and sample letters from satisfying required report checks."""
+    for filename in source_files:
+        if not re.search(pattern, filename, re.I):
+            continue
+        if label in {"402(g) Test Report", "415 Test Report", "ADP/ACP Test Report"} and re.search(
+            r"failure|failed|letter|notice|sample|excess|correction", filename, re.I
+        ):
+            continue
+        return True
+    return False
 
 
 def _summary_text(doc: fitz.Document) -> str:

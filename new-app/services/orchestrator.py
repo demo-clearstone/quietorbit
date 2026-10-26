@@ -267,6 +267,7 @@ def process_uploads(
                 )
             )
         warnings.extend(package_polish.renumber_footers(doc))
+        warnings.extend(package_polish.normalize_report_layout(doc))
         # 6. Bookmarks, SSN scan, and assembly stops.
         profile.detected_sections = pdf_extractor.detect_sections(doc)
         profile_debug_path = str(
