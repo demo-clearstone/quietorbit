@@ -1,8 +1,19 @@
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import re
 
 from services.plan_config import load_package_order
+
+# Names passed together so 2026HCE and 2027HCE can be told apart.
+_MATCH_NAMES: contextvars.ContextVar[tuple[str, ...]] = contextvars.ContextVar(
+    "match_names",
+    default=(),
+)
+_PLAIN_HCE_YEAR = re.compile(r"(20\d{2})\s*hce(?!\s*key)\b", re.I)
+_HCE_KEY_FILE = re.compile(r"hce\s*/?\s*key", re.I)
+_FUTURE_HCE_FILE = re.compile(r"fy\s*hce|future(?:\s*year)?\s*hce", re.I)
 
 
 def load_section_specs() -> list[dict]:
@@ -107,6 +118,66 @@ def _rank(spec: dict, fallback: int) -> int:
         return len(order) + fallback
 
 
+def _plain_hce_year(filename: str) -> int | None:
+    """Year on a plain HCE report name such as 2026HCE, or None for HCEKey and FYHCE."""
+    stem = re.sub(r"\.[^.]+$", "", filename or "")
+    if _FUTURE_HCE_FILE.search(stem) or _HCE_KEY_FILE.search(stem):
+        return None
+    match = _PLAIN_HCE_YEAR.search(stem)
+    return int(match.group(1)) if match else None
+
+
+def _valuation_year(names: tuple[str, ...]) -> int | None:
+    """Plan year printed in the valuation package file name, such as 2026 in a 403(b) package."""
+    for name in names:
+        if not re.search(r"valuation", name, re.I):
+            continue
+        if not re.search(r"401|403|457", name, re.I):
+            continue
+        years = re.findall(r"20\d{2}", name)
+        if years:
+            return int(years[0])
+    return None
+
+
+def hce_section_name(filename: str) -> str | None:
+    """Choose HCE/Key or Future HCE for a plain YYYYHCE file.
+
+    A 403(b) package names the current report 2026HCE and the next year 2027HCE.
+    The later year is Future HCE. The package year, or the earlier file, is HCE/Key.
+    HCEKey and FYHCE keep their own names and return None here.
+    """
+    year = _plain_hce_year(filename)
+    if year is None:
+        return None
+    names = _MATCH_NAMES.get() or (filename,)
+    plain_years = [found for name in names if (found := _plain_hce_year(name)) is not None]
+    package_year = _valuation_year(names)
+    has_key_file = any(_HCE_KEY_FILE.search(name) for name in names)
+    later_than_another = any(other < year for other in plain_years)
+    later_than_package = package_year is not None and year > package_year
+    if later_than_another or has_key_file or later_than_package:
+        return "Future HCE"
+    return "HCE/Key"
+
+
+def _spec_named(name: str) -> dict | None:
+    for spec in load_section_specs():
+        if str(spec.get("name") or "") == name:
+            return spec
+    return None
+
+
+@contextlib.contextmanager
+def use_filename_batch(names: list[str]):
+    """Let file matching see every uploaded name, so 2026HCE is not treated as 2027HCE."""
+    token = _MATCH_NAMES.set(tuple(names))
+    try:
+        yield
+    finally:
+        _MATCH_NAMES.reset(token)
+
+
 def _best_section(filename: str) -> tuple[int, dict] | None:
     """Longest keyword match wins so SHMaVar is not treated as MaVar, 401a4 is not 401k, etc.
 
@@ -128,6 +199,16 @@ def _best_section(filename: str) -> tuple[int, dict] | None:
     Side effects:
         None. This function only reads data and returns a value.
     """
+    forced = hce_section_name(filename)
+    if forced:
+        spec = _spec_named(forced)
+        if spec:
+            specs = load_section_specs()
+            index = next(
+                (item_index for item_index, item in enumerate(specs) if str(item.get("name") or "") == forced),
+                0,
+            )
+            return _rank(spec, index), spec
     name = _norm(filename)
     specs = load_section_specs()
     paged = re.search(r"_p0*(\d+)(?:\.[^.]+)?$", filename, re.I)
@@ -537,4 +618,5 @@ def order_uploads(uploads: list[tuple[str, bytes]]) -> list[tuple[str, bytes]]:
     Side effects:
         None. This function only reads data and returns a value.
     """
-    return sorted(uploads, key=lambda item: (sop_rank(item[0]), location_index(item[0]), item[0].lower()))
+    with use_filename_batch([name for name, _data in uploads]):
+        return sorted(uploads, key=lambda item: (sop_rank(item[0]), location_index(item[0]), item[0].lower()))

@@ -189,11 +189,13 @@ def process_uploads(
         if profile.top_heavy_percent is not None:
             profile.top_heavy = profile.top_heavy_percent > 60
             profile.extra.setdefault("field_sources", {})["top_heavy"] = "Top-heavy percentage; threshold is greater than 60%"
-        section_names = {
-            str(spec.get("name"))
-            for name, _data in ordered
-            if (spec := file_order.matched_spec(name))
-        }
+        section_names = set()
+        with file_order.use_filename_batch([name for name, _data in ordered]):
+            section_names = {
+                str(spec.get("name"))
+                for name, _data in ordered
+                if (spec := file_order.matched_spec(name))
+            }
         if profile.hce_current is None and "HCE/Key" in section_names:
             profile.hce_current = True
             profile.extra["field_sources"]["hce_current"] = "Uploaded report filename"

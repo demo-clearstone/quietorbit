@@ -49,38 +49,39 @@ def merge_pdfs(uploads: list[tuple[str, bytes]]) -> fitz.Document:
 
     combined = fitz.open()
     try:
-        for name, data in uploads:
-            if len(data) > MAX_FILE_BYTES:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"{name} exceeds {MAX_FILE_BYTES // (1024 * 1024)} MB limit",
-                )
-            if not data:
-                raise HTTPException(status_code=400, detail=f"{name} is empty")
-            try:
-                source = fitz.open(stream=data, filetype="pdf")
-            except Exception as exc:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"{name} is not a readable PDF ({exc})",
-                ) from exc
-            try:
-                if source.is_encrypted:
-                    source.authenticate("")
-                if source.is_encrypted:
+        with file_order.use_filename_batch([name for name, _data in uploads]):
+            for name, data in uploads:
+                if len(data) > MAX_FILE_BYTES:
                     raise HTTPException(
                         status_code=400,
-                        detail=f"{name} is encrypted and cannot be assembled",
+                        detail=f"{name} exceeds {MAX_FILE_BYTES // (1024 * 1024)} MB limit",
                     )
-                if source.page_count < 1:
-                    raise HTTPException(status_code=400, detail=f"{name} has no pages")
-                first = combined.page_count
-                combined.insert_pdf(source)
-                spec = file_order.matched_spec(name)
-                if spec and spec.get("name"):
-                    tag_pages(combined, first, combined.page_count, str(spec["name"]))
-            finally:
-                source.close()
+                if not data:
+                    raise HTTPException(status_code=400, detail=f"{name} is empty")
+                try:
+                    source = fitz.open(stream=data, filetype="pdf")
+                except Exception as exc:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"{name} is not a readable PDF ({exc})",
+                    ) from exc
+                try:
+                    if source.is_encrypted:
+                        source.authenticate("")
+                    if source.is_encrypted:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"{name} is encrypted and cannot be assembled",
+                        )
+                    if source.page_count < 1:
+                        raise HTTPException(status_code=400, detail=f"{name} has no pages")
+                    first = combined.page_count
+                    combined.insert_pdf(source)
+                    spec = file_order.matched_spec(name)
+                    if spec and spec.get("name"):
+                        tag_pages(combined, first, combined.page_count, str(spec["name"]))
+                finally:
+                    source.close()
     except HTTPException:
         combined.close()
         raise
