@@ -51,7 +51,7 @@ _KEEP_PAGE = re.compile(
 )
 _SOC_PAGE = re.compile(r"statement of contribution", re.I)
 _DISALLOWED_LINE = re.compile(
-    r"escalat|form\s+5500|5500\s+wording|audited\s+wording|statement of contribution|\bSOC\b",
+    r"escalat|form\s+5500|5500\s+wording|audited\s+wording|statement of contribution|(?-i:\bSOC\b)(?!\.?\s*sec)",
     re.I,
 )
 _DISALLOWED_EXCEPT_SOC = re.compile(
@@ -283,7 +283,16 @@ def reorder_inner_pages(doc: fitz.Document) -> list[str]:
     Side effects:
         Changes the PDF passed in. Does not save the file by itself.
     """
-    kinds = [_page_kind(page.get_text("text") or "") for page in doc]
+    texts = [page.get_text("text") or "" for page in doc]
+    kinds = [_page_kind(text) for text in texts]
+    for number in range(1, len(kinds)):
+        # A second employee-listing page has no heading. It stays behind its first page.
+        if (
+            kinds[number] is None
+            and kinds[number - 1] == ("ADP/ACP", 1)
+            and _LISTING_CONTINUATION.search(_head(texts[number]) + " " + texts[number][:600])
+        ):
+            kinds[number] = ("ADP/ACP", 1)
     order = list(range(doc.page_count))
     changed: list[str] = []
     index = 0
@@ -350,6 +359,11 @@ def remove_disallowed_wording(doc: fitz.Document, keep_soc: bool = False) -> lis
 
 
 _ADP_PHRASES = ("ADP/ACP", "ADP / ACP", "ADP and/or ACP", "ADP and ACP")
+# Pages of the ADP/ACP test report keep their printed wording.
+_ADP_ACP_REPORT_PAGE = re.compile(
+    r"nondiscrimination test for plan year end|this plan (?:passes|fails) the", re.I
+)
+_LISTING_CONTINUATION = re.compile(r"\b(?:ADP|ACP)\b[\s\S]*compensation[\s\S]*amount", re.I)
 
 
 def _is_recap_page(text: str) -> bool:
@@ -399,7 +413,10 @@ def rewrite_403b_adp_mentions(doc: fitz.Document) -> list[str]:
     """
     changed = False
     for page in doc:
-        recap = _is_recap_page(page.get_text("text") or "")
+        page_text = page.get_text("text") or ""
+        if _ADP_ACP_REPORT_PAGE.search(page_text):
+            continue
+        recap = _is_recap_page(page_text)
         hits: list[fitz.Rect] = []
         for phrase in _ADP_PHRASES:
             hits.extend(page.search_for(phrase))
@@ -721,6 +738,9 @@ def _page_kind(text: str) -> tuple[str, int] | None:
             head,
             ((r"correction", 3), (r"excluded", 2), (r"\bdetail\b", 1), (r"\bsummary\b", 0)),
         )
+        if rank is None:
+            wider = " ".join([line.strip() for line in text.splitlines() if line.strip()][:8])
+            rank = _ranked(wider, ((r"test results", 0), (r"employee listing", 1)))
         if rank is not None:
             return ("ADP/ACP", rank)
     return None
