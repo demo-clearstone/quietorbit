@@ -51,12 +51,14 @@ _SECTION_HEADINGS: dict[str, re.Pattern[str]] = {
     ),
     "HCE/Key": re.compile(
         rf"^(?:hce\s*/\s*key|hce\s+key|highly compensated(?:\s+employees?)?\s*/\s*key)"
-        rf"(?:\s+employees?)?(?:\s+determinations?)?{_HEADING_TAIL}",
+        rf"(?:\s+employees?)?(?:\s+determinations?)?{_HEADING_TAIL}"
+        rf"|^(?:determination of\s+)?highly compensated employees and key employees{_HEADING_TAIL}",
         re.I,
     ),
     "Future HCE": re.compile(
         rf"^(?:future\s+hce|future\s+highly compensated employees?)"
-        rf"(?:\s+determinations?)?(?:\s+projection)?{_HEADING_TAIL}",
+        rf"(?:\s+determinations?)?(?:\s+projection)?{_HEADING_TAIL}"
+        rf"|^determination of highly compensated employees(?!\s+and\s+key\b){_HEADING_TAIL}",
         re.I,
     ),
     "ADP/ACP": re.compile(
@@ -170,7 +172,9 @@ def add_bookmarks(
             title = adp_acp_bookmark_title(profile, doc, source_files)
         if name == "BRF" and not keep_brf:
             continue
-        page = _find_section_page(doc, name) or _tagged_section_page(doc, name)
+        # The uploaded report is the real section. A heading on the overview
+        # page must not take the bookmark away from that file.
+        page = _tagged_section_page(doc, name) or _find_section_page(doc, name)
         if page is None:
             continue
         if not title:
@@ -346,6 +350,18 @@ def _heading_lines(page: fitz.Page) -> list[str]:
     ]
 
 
+def _heading_matches(page: fitz.Page, pattern: re.Pattern[str], section_name: str) -> bool:
+    """True when a heading line, or two wrapped heading lines, match ``pattern``."""
+    lines = _heading_lines(page)
+    candidates = list(lines)
+    candidates.extend(f"{left} {right}" for left, right in zip(lines, lines[1:]))
+    if section_name == "Future HCE":
+        current = _SECTION_HEADINGS["HCE/Key"]
+        if any(current.fullmatch(line) for line in candidates):
+            return False
+    return any(pattern.fullmatch(line) for line in candidates)
+
+
 def _find_section_page(doc: fitz.Document, section_name: str) -> int | None:
     """Find the page where a report section starts.
 
@@ -378,7 +394,7 @@ def _find_section_page(doc: fitz.Document, section_name: str) -> int | None:
     for index, page in enumerate(doc):
         if section_name != "Test Summary" and _is_summary_or_overview(page):
             continue
-        if any(pattern.fullmatch(line) for line in _heading_lines(page)):
+        if _heading_matches(page, pattern, section_name):
             found.append(index + 1)
     if not found:
         return None
