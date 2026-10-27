@@ -426,9 +426,24 @@ def _restack_pages(doc: fitz.Document, touched: dict[int, list[fitz.Rect]]) -> N
         body = [block for block in blocks if not _is_page_number_block(page, block)]
         footer = [block for block in blocks if _is_page_number_block(page, block)]
         removed_bands = _merged_vertical_bands(removed)
+        header_rule_y = _top_header_rule_y(page)
+        first_after_header = next(
+            (block for block in body if header_rule_y is not None and block["bbox"].y0 > header_rule_y),
+            None,
+        )
+        max_upshift = (
+            max(0.0, first_after_header["bbox"].y0 - header_rule_y - 30.0)
+            if first_after_header is not None and header_rule_y is not None
+            else None
+        )
         _apply_redact_boxes(page, [block["bbox"] for block in blocks])
         for block in body:
             delta = -sum(bottom - top for top, bottom in removed_bands if bottom <= block["bbox"].y0)
+            if header_rule_y is not None and block["bbox"].y0 > header_rule_y:
+                minimum_y = header_rule_y + 30.0
+                delta = max(delta, minimum_y - block["bbox"].y0)
+                if max_upshift is not None:
+                    delta = max(delta, -max_upshift)
             for span in block["spans"]:
                 _write_span(page, span, delta)
         for block in footer:
@@ -447,6 +462,25 @@ def _merged_vertical_bands(boxes: list[fitz.Rect]) -> list[tuple[float, float]]:
         else:
             merged.append((top, bottom))
     return merged
+
+
+def _top_header_rule_y(page: fitz.Page) -> float | None:
+    """Find the full-width header divider near the top of an Annual Valuation Report page."""
+    text = page.get_text("text") or ""
+    if not re.search(r"annual valuation report", text, re.I):
+        return None
+    found: list[float] = []
+    for drawing in page.get_drawings():
+        for item in drawing.get("items", []):
+            if not item or item[0] != "l" or len(item) < 3:
+                continue
+            start, end = fitz.Point(item[1]), fitz.Point(item[2])
+            if abs(start.y - end.y) > 1.5:
+                continue
+            left, right = sorted((start.x, end.x))
+            if left <= 52 and right >= page.rect.width - 52 and start.y < page.rect.height * 0.4:
+                found.append(start.y)
+    return max(found) if found else None
 
 
 def _is_page_number_block(page: fitz.Page, block: dict) -> bool:
@@ -938,7 +972,7 @@ def _pull_kept_action_forward(doc: fitz.Document) -> None:
     if anchor is None or not later or _KEPT_ACTION.search(anchor.get_text("text") or ""):
         return
     anchor_blocks = _text_blocks(anchor)
-    cursor = anchor_blocks[-1]["bbox"].y1 + 18 if anchor_blocks else 90
+    cursor = anchor_blocks[-1]["bbox"].y1 + 36 if anchor_blocks else 90
     # The green "no immediate action" line is the whole section. Do not add
     # a second "ACTION REQUIRED" heading above it.
     moving_failure = False
@@ -1014,12 +1048,29 @@ def _redraw_action_rules(page: fitz.Page) -> None:
         color = (0, 0.45, 0.15) if text.startswith("NO IMMEDIATE") else (0, 0, 0)
         if text.startswith("IMMEDIATE ACTION"):
             color = (0.8, 0, 0)
+        if _has_horizontal_rule(page, y, group[0][0], group[-1][2]):
+            continue
         page.draw_line(
             fitz.Point(group[0][0], y),
             fitz.Point(group[-1][2], y),
             color=color,
             width=0.8,
         )
+
+
+def _has_horizontal_rule(page: fitz.Page, y: float, x0: float, x1: float) -> bool:
+    """Check whether a horizontal vector rule already underlines this heading."""
+    for drawing in page.get_drawings():
+        for item in drawing.get("items", []):
+            if not item or item[0] != "l" or len(item) < 3:
+                continue
+            start, end = fitz.Point(item[1]), fitz.Point(item[2])
+            if abs(start.y - end.y) > 1.5 or abs(start.y - y) > 4:
+                continue
+            left, right = sorted((start.x, end.x))
+            if right >= x0 - 2 and left <= x1 + 2:
+                return True
+    return False
 
 
 def _drop_empty_pages(doc: fitz.Document) -> None:
