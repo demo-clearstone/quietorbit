@@ -1033,12 +1033,6 @@ def _redraw_action_rules(page: fitz.Page) -> None:
         text = " ".join(item[4] for item in group)
         y = max(item[3] for item in group) + 1.5
         if re.fullmatch(r"\d{5,7}", text):
-            page.draw_line(
-                fitz.Point(48, y + 4),
-                fitz.Point(page.rect.width - 48, y + 4),
-                color=(0, 0, 0),
-                width=1,
-            )
             continue
         if not re.match(
             r"^(ACTION REQUIRED|IMMEDIATE ACTION REQUIRED|ATTENTION REQUIRED|NO IMMEDIATE ACTION IS REQUIRED)",
@@ -1492,8 +1486,9 @@ def apply_recap_bullets(
                 bullet = _fill_prior_rates(bullet, nhce)
             kept.append(bullet)
         if not dropped:
-            continue
-        if _redact_recap_paragraphs(page, dropped):
+            if _recap_bullets_have_marks(page):
+                continue
+        elif _recap_bullets_have_marks(page) and _redact_recap_paragraphs(page, dropped):
             continue
         header_lines = [line.strip() for line in header.splitlines() if line.strip()]
         if not header_lines:
@@ -1504,6 +1499,20 @@ def apply_recap_bullets(
         number = _recap_page_number(original)
         write_recap_page(page, header_lines, kept, number=number)
     return removed
+
+
+def _recap_bullets_have_marks(page: fitz.Page) -> bool:
+    """Return true when every recognized recap paragraph has an explicit leading bullet marker."""
+    lines = _page_lines(page)
+    paragraph_starts = []
+    for text, _bbox in lines:
+        stripped = text.strip()
+        if not _recap_paragraph_start(_strip_recap_mark(stripped)):
+            continue
+        paragraph_starts.append(stripped)
+    if not paragraph_starts:
+        return True
+    return all(bool(re.match(r"^[^A-Za-z0-9\s]{1,3}\s+", text)) for text in paragraph_starts)
 
 
 def _recap_specs(plan_type: str | None = None) -> list[dict]:
