@@ -707,6 +707,7 @@
             <a class="btn ghost hidden" id="email-link" href="#">Email tester</a>
             <a class="btn ghost hidden" id="eml-link" href="#">Outlook draft</a>
             <a class="btn ghost hidden" id="log-link" href="#">Assembly log</a>
+            <a class="btn ghost hidden" id="audit-log-link" href="#">Audit log</a>
           </div>
           <div class="facts" id="facts"></div>
           <div class="source-block">
@@ -1291,17 +1292,29 @@
       const validations = detail && typeof detail === "object" && Array.isArray(detail.validations)
         ? detail.validations
         : [];
-      if (message && validations.length) {
+      if (message && (validations.length || detail.audit_log_url)) {
         errorEl.append(document.createTextNode(message));
-        const list = document.createElement("ol");
-        validations.forEach((validation) => {
-          (validation.details || [validation.label]).forEach((text) => {
-            const item = document.createElement("li");
-            item.textContent = text;
-            list.append(item);
+        if (validations.length) {
+          const list = document.createElement("ol");
+          validations.forEach((validation) => {
+            (validation.details || [validation.label]).forEach((text) => {
+              const item = document.createElement("li");
+              item.textContent = text;
+              list.append(item);
+            });
           });
-        });
-        errorEl.append(list);
+          errorEl.append(list);
+        }
+        if (detail.audit_log_url) {
+          const link = document.createElement("a");
+          link.href = /^https?:\/\//i.test(detail.audit_log_url)
+            ? detail.audit_log_url
+            : apiBase() + detail.audit_log_url;
+          link.textContent = "Download audit log";
+          link.className = "audit-download-link";
+          link.setAttribute("download", "assembly-audit.json");
+          errorEl.append(document.createElement("br"), link);
+        }
         return;
       }
       const text = typeof detail === "string" ? detail : formatDetail(detail);
@@ -2029,6 +2042,7 @@
       const email = document.getElementById("email-link");
       const eml = document.getElementById("eml-link");
       const log = document.getElementById("log-link");
+      const audit = document.getElementById("audit-log-link");
       if (job.email_subject) {
         email.href = "mailto:?subject=" + encodeURIComponent(job.email_subject);
         email.classList.remove("hidden");
@@ -2046,6 +2060,12 @@
         log.classList.remove("hidden");
       } else {
         log.classList.add("hidden");
+      }
+      if (job.job_id && job.audit_log_path) {
+        audit.href = apiBase() + "/api/jobs/" + job.job_id + "/audit-log";
+        audit.classList.remove("hidden");
+      } else {
+        audit.classList.add("hidden");
       }
       link.onclick = async (event) => {
         event.preventDefault();

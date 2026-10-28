@@ -28,6 +28,7 @@ from models.job import HighlightMark
 from services import (
     assembly_log,
     assembly_stops,
+    audit_log,
     bookmark_service,
     change_marks,
     file_order,
@@ -93,6 +94,8 @@ def process_uploads(
     started = time.perf_counter()
     warnings = list(extra_warnings or [])
     highlights: list[dict] = []
+    audit_log_path = ""
+    audit_log_path = ""
 
     # 1. Sort the uploads.
     pdfs, excels = _split_uploads(uploads)
@@ -326,11 +329,32 @@ def process_uploads(
                 selected_checks=validation_checks,
             )
             if reasons:
+                audit_path = audit_log.audit_log_path(profile, job_id)
+                audit_log.write_audit_log(
+                    audit_path,
+                    job_id=job_id,
+                    filename=save_service.valuation_filename(profile),
+                    source_files=ordered + excels + summary_texts,
+                    options={
+                        "auto_order": auto_order,
+                        "rewrite_sources": rewrite_sources,
+                        "check_assembly_stops": check_assembly_stops,
+                        "validation_checks": validation_checks,
+                    },
+                    profile=profile,
+                    decisions=decisions,
+                    validations=review.items,
+                    warnings=warnings,
+                    elapsed_seconds=time.perf_counter() - started,
+                    stop_reasons=reasons,
+                )
                 raise HTTPException(
                     status_code=400,
                     detail={
                         "message": "Assembly stopped. Uncheck failed validations you want to ignore, then process again.",
                         "validations": assembly_stops.validation_failures(reasons),
+                        "job_id": job_id,
+                        "audit_log_url": f"/api/jobs/{job_id}/audit-log",
                     },
                 )
         # 7. Save the package, the email draft, and the log.
@@ -377,6 +401,25 @@ def process_uploads(
     if any(d.skipped for d in decisions):
         warnings.append("Some rules were skipped because extraction did not fill required fields.")
 
+    audit_path = audit_log.write_audit_log(
+        audit_log.audit_log_path(profile, job_id),
+        job_id=job_id,
+        filename=path.name,
+        source_files=ordered + excels + summary_texts,
+        options={
+            "auto_order": auto_order,
+            "rewrite_sources": rewrite_sources,
+            "check_assembly_stops": check_assembly_stops,
+            "validation_checks": validation_checks,
+        },
+        profile=profile,
+        decisions=decisions,
+        validations=review.items,
+        warnings=warnings,
+        elapsed_seconds=elapsed_seconds,
+    )
+    audit_log_path = str(audit_path)
+
     return JobResult(
         job_id=job_id,
         filename=path.name,
@@ -392,6 +435,7 @@ def process_uploads(
         email_subject=subject,
         email_path=email_path,
         log_path=log_file,
+        audit_log_path=audit_log_path,
         profile_debug_path=profile_debug_path,
         saved_copy_path=saved_copy,
         elapsed_seconds=round(elapsed_seconds, 1),

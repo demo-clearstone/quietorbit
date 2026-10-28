@@ -31,7 +31,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
 from api.jobs import router as jobs_router
-from config.settings import HOST, PORT, TEMPLATES_DIR
+from config.settings import HOST, LOG_DIR, PORT, TEMPLATES_DIR
+
+LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(
     title="MOA Valuation Package Automation",

@@ -33,6 +33,8 @@ class JobResult(BaseModel):
     email_subject: str = ""
     email_path: str = ""
     log_path: str = ""
+    audit_log_path: str = ""
+    audit_log_url: str = ""
     profile_debug_path: str = ""
     saved_copy_path: str = ""
     elapsed_seconds: float | None = None
