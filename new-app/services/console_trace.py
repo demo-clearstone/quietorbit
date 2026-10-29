@@ -7,8 +7,9 @@ The Python terminal is not written.
 
 from __future__ import annotations
 
+import importlib
+import inspect
 import re
-import sys
 import time
 from pathlib import Path
 from threading import Lock
@@ -224,6 +225,8 @@ def run_traced(token: str, function, *args, **kwargs):
 
     Purpose:
         Record one step per function the assembly procedure calls directly.
+        Named assembly steps are wrapped for this run instead of using
+        ``sys.setprofile``, which otherwise slows every Python call.
 
     Args:
         token: Id for this assembly trace.
@@ -241,33 +244,13 @@ def run_traced(token: str, function, *args, **kwargs):
         run_traced("text", function) returns None.
 
     Side effects:
-        None. This function only reads data and returns a value.
+        Temporarily wraps assembly step functions on their modules.
     """
-    open_calls: dict[int, tuple[dict, float]] = {}
     started = time.perf_counter()
     root_name = function.__name__
+    depth = {"value": 0}
 
     def append(event: dict) -> None:
-        """Append.
-
-        Purpose:
-            Append.
-
-        Args:
-            event: Event. Type: dict.
-
-        Returns:
-            None.
-
-        Raises:
-            None.
-
-        Example:
-            append({}) returns None.
-
-        Side effects:
-            None. This function only reads data and returns a value.
-        """
         with _LOCK:
             trace = _TRACES[token]
             if len(trace["events"]) >= _MAX_EVENTS:
@@ -277,80 +260,44 @@ def run_traced(token: str, function, *args, **kwargs):
             event["elapsed_ms"] = round((time.perf_counter() - started) * 1000, 2)
             trace["events"].append(event)
 
-    def profile(frame, event, result):
-        """Profile.
-
-        Purpose:
-            Profile.
-
-        Args:
-            frame: Frame. Type: unspecified.
-            event: Event. Type: unspecified.
-            result: Result. Type: unspecified.
-
-        Returns:
-            None.
-
-        Raises:
-            None.
-
-        Example:
-            profile(frame, event, result) returns None.
-
-        Side effects:
-            None. This function only reads data and returns a value.
-        """
-        if event not in {"call", "return"}:
-            return
-        code = frame.f_code
-        filename = code.co_filename.replace("\\", "/")
-        if code.co_name.startswith("<") or not filename.startswith(_SERVICE_PREFIX):
-            return
-        if filename == __file__.replace("\\", "/"):
-            return
-        if event == "call":
-            caller = _outer_caller(frame)
-            caller_name = caller.f_code.co_name if caller is not None else ""
-            file_name = "services/" + Path(filename).name
-            # Helpers such as _pdf_text run once per file. Only the named assembly steps are logged.
-            if f"{file_name}:{code.co_name}" not in _PURPOSE:
-                return
-            if code.co_name != root_name and caller_name != root_name:
-                return
-            count = code.co_argcount + code.co_kwonlyargcount
-            inputs = {
-                name: summarize(frame.f_locals[name])
-                for name in code.co_varnames[:count]
-                if name in frame.f_locals and name not in _SKIP_LOCALS
+    def wrap(file_name: str, original):
+        def traced(*call_args, **call_kwargs):
+            # Log only steps called directly from process_uploads (or the root itself).
+            if depth["value"] > 1 and original.__name__ != root_name:
+                return original(*call_args, **call_kwargs)
+            inputs = _call_inputs(original, call_args, call_kwargs)
+            line = getattr(getattr(original, "__code__", None), "co_firstlineno", 0) or 0
+            details = {
+                "function": original.__name__,
+                "file": file_name,
+                "purpose": _purpose(file_name, original.__name__, inputs),
+                "input": inputs,
+                "code_link": f"{file_name}:{line}",
             }
-            open_calls[id(frame)] = (
+            began = time.perf_counter()
+            depth["value"] += 1
+            try:
+                result = original(*call_args, **call_kwargs)
+            finally:
+                depth["value"] -= 1
+            append(
                 {
-                    "function": code.co_name,
-                    "file": file_name,
-                    "purpose": _purpose(file_name, code.co_name, inputs),
-                    "input": inputs,
-                    "code_link": f"{file_name}:{code.co_firstlineno}",
-                },
-                time.perf_counter(),
+                    "event": "step",
+                    **details,
+                    "output": summarize(result),
+                    "duration_ms": round((time.perf_counter() - began) * 1000, 2),
+                }
             )
-            return
-        started_call = open_calls.pop(id(frame), None)
-        if started_call is None:
-            return
-        details, began = started_call
-        append(
-            {
-                "event": "step",
-                **details,
-                "output": summarize(result),
-                "duration_ms": round((time.perf_counter() - began) * 1000, 2),
-            }
-        )
+            return result
 
-    previous = sys.getprofile()
+        traced.__name__ = getattr(original, "__name__", "traced")
+        traced.__wrapped__ = original
+        return traced
+
+    patches = _install_step_wrappers(wrap)
     try:
-        sys.setprofile(profile)
-        result = function(*args, **kwargs)
+        depth["value"] = 0
+        result = wrap("services/orchestrator.py", function)(*args, **kwargs)
     except BaseException as exc:
         append(
             {
@@ -372,7 +319,61 @@ def run_traced(token: str, function, *args, **kwargs):
             _TRACES[token]["status"] = "completed"
         return result
     finally:
-        sys.setprofile(previous)
+        _restore_step_wrappers(patches)
+
+
+def _call_inputs(original, call_args, call_kwargs) -> dict:
+    """Build the summarized argument map for one wrapped assembly step."""
+    try:
+        bound = inspect.signature(original).bind_partial(*call_args, **call_kwargs)
+        bound.apply_defaults()
+        items = bound.arguments.items()
+    except Exception:
+        items = list(enumerate(call_args)) + list(call_kwargs.items())
+        items = [(str(name), value) for name, value in items]
+    return {
+        str(name): summarize(value)
+        for name, value in items
+        if str(name) not in _SKIP_LOCALS
+    }
+
+
+def _install_step_wrappers(wrap) -> list[tuple[object, str, object]]:
+    """Patch each named assembly step on its module (and orchestrator aliases)."""
+    import services.orchestrator as orchestrator
+
+    patches: list[tuple[object, str, object]] = []
+    seen: set[tuple[int, str]] = set()
+    for key in _PURPOSE:
+        if ":" not in key:
+            continue
+        file_name, func_name = key.split(":", 1)
+        module_name = "services." + Path(file_name).stem
+        try:
+            module = importlib.import_module(module_name)
+        except Exception:
+            continue
+        original = getattr(module, func_name, None)
+        if not callable(original):
+            continue
+        marker = (id(module), func_name)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        wrapped = wrap(file_name, original)
+        setattr(module, func_name, wrapped)
+        patches.append((module, func_name, original))
+        # orchestrator imports a few plan_config helpers by name.
+        if getattr(orchestrator, func_name, None) is original:
+            setattr(orchestrator, func_name, wrapped)
+            patches.append((orchestrator, func_name, original))
+    return patches
+
+
+def _restore_step_wrappers(patches: list[tuple[object, str, object]]) -> None:
+    """Put the original assembly step functions back after tracing."""
+    for module, func_name, original in reversed(patches):
+        setattr(module, func_name, original)
 
 
 def _is_named_blob(item: object) -> bool:

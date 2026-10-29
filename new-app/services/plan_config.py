@@ -16,6 +16,7 @@ Files and what they return:
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 
 import yaml
 
@@ -597,11 +598,14 @@ def _load_457() -> dict:
     return _load_yaml("plan_457.yaml")
 
 
+@lru_cache(maxsize=None)
 def _load_yaml(name: str) -> dict:
     """Read one YAML file from the config folder.
 
     Purpose:
         Turn a configuration file into a dictionary the other functions can use.
+        Parsed files stay in memory for the process so assembly does not re-read
+        the same YAML on every file match.
 
     Args:
         name: File name inside config/, such as ``"action_required.yaml"``.
@@ -622,3 +626,8 @@ def _load_yaml(name: str) -> dict:
     """
     data = yaml.safe_load((CONFIG_DIR / name).read_text(encoding="utf-8")) or {}
     return data if isinstance(data, dict) else {}
+
+
+def clear_yaml_cache() -> None:
+    """Drop cached config YAML. Used by tests that rewrite config files."""
+    _load_yaml.cache_clear()

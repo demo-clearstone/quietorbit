@@ -1016,7 +1016,7 @@
       const uploadId = (window.crypto && crypto.randomUUID)
         ? crypto.randomUUID()
         : ("up" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10));
-      const chunkSize = 24 * 1024;
+      const chunkSize = 2 * 1024 * 1024;
       const total = Math.max(1, Math.ceil((file.size || 0) / chunkSize));
       let meta = null;
       for (let index = 0; index < total; index += 1) {

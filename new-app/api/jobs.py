@@ -32,7 +32,9 @@ JOBS: dict[str, JobResult] = {}
 _PARTS: dict[str, dict] = {}
 _BLOBS: dict[str, tuple[str, bytes]] = {}
 _UPLOAD_ID = re.compile(r"[A-Za-z0-9_-]{8,80}")
-_CHUNK_LIMIT = 48 * 1024
+# Large client packages (census / valuation scans) are tens of MB. Tiny chunks
+# turn one Process into thousands of HTTP round-trips and dominate wall time.
+_CHUNK_LIMIT = 2 * 1024 * 1024
 
 
 def _saved_pdf(job_id: str) -> tuple[Path, str] | None:
@@ -270,7 +272,7 @@ async def upload_part(
         raise HTTPException(status_code=400, detail="Choose a PDF or Excel file")
     if not filename.lower().endswith((".pdf", ".xlsx", ".xls")):
         raise HTTPException(status_code=400, detail=f"{filename} must be a PDF or Excel file")
-    if total < 1 or total > 4000 or index < 0 or index >= total:
+    if total < 1 or total > 500 or index < 0 or index >= total:
         raise HTTPException(status_code=400, detail="Upload piece is out of range")
     piece = await chunk.read() if chunk is not None else b""
     if len(piece) > _CHUNK_LIMIT:

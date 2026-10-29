@@ -475,13 +475,20 @@ def normalize_report_layout(doc: fitz.Document) -> list[str]:
 
     changed = False
     for page in doc:
+        page_text = page.get_text("text") or ""
+        # Most pages need no layout fix; skip the expensive dict extract.
+        if not re.search(
+            r"annual valuation report|year end recap|Amount\s{2,}%|\bcensus\b",
+            page_text,
+            re.I,
+        ):
+            continue
         lines = [
             (line, "".join(span.get("text", "") for span in line.get("spans", [])).strip())
             for block in page.get_text("dict").get("blocks", [])
             if block.get("type") == 0
             for line in block.get("lines", [])
         ]
-        page_text = "\n".join(text for _line, text in lines)
         shifts: list[tuple[dict, float]] = []
         if re.search(r"annual valuation report", page_text, re.I):
             for line, text in lines:
