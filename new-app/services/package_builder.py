@@ -463,6 +463,17 @@ def _wrapped_text(
     return y
 
 
+def _draw_recap_header_rule(page: fitz.Page) -> None:
+    """Full-width divider under the Year End Recap plan headings."""
+    page.draw_line(
+        fitz.Point(54, 109.0),
+        fitz.Point(page.rect.width - 54, 109.0),
+        color=_BLACK,
+        width=0.8,
+        overlay=True,
+    )
+
+
 def _center(page: fitz.Page, text: str, y: float, size: float, font: str) -> None:
     """Center.
 
@@ -1127,6 +1138,7 @@ def write_recap_page(
     bullets: list[str],
     *,
     number: int | None = None,
+    plan_type: str | None = None,
 ) -> None:
     """Draw the Year End Recap. Header lines stay centered; bullets pack underneath.
 
@@ -1138,6 +1150,7 @@ def write_recap_page(
         header_lines: Header lines. Type: list[str].
         bullets: Bullets. Type: list[str].
         number: Number. Type: int | None.
+        plan_type: Plan type for the 403(b) recap title layout.
 
     Returns:
         None.
@@ -1152,46 +1165,75 @@ def write_recap_page(
         Changes the PDF passed in. Does not save the file by itself.
     """
     y = 48.0
+    header_rule_drawn = False
     for raw in header_lines:
         line = raw.strip()
         if not line:
             y += 6
             continue
         if line.upper() == "YEAR END RECAP":
-            _center(page, "YEAR END RECAP", y, 13, "hebo")
-            y += 18
+            _center(page, "YEAR END RECAP", y, 13.0, "hebo")
+            y = 66.0
             continue
         if line.lower() == "important information":
-            y += 6
-            page.insert_text((54, y), "Important Information", fontsize=11, fontname="hebo", color=_BLACK)
-            width = fitz.get_text_length("Important Information", fontname="hebo", fontsize=11)
-            page.draw_line(fitz.Point(54, y + 2), fitz.Point(54 + width, y + 2), color=_BLACK, width=0.7)
-            y += 18
+            if not header_rule_drawn:
+                _draw_recap_header_rule(page)
+                header_rule_drawn = True
+            # Sit just under the header rule (MOA / Kaagaz expected).
+            y = 123.0
+            page.insert_text((54, y), "Important Information", fontsize=11.0, fontname="hebo", color=_BLACK)
+            width = fitz.get_text_length("Important Information", fontname="hebo", fontsize=11.0)
+            page.draw_line(
+                fitz.Point(54, y + 2),
+                fitz.Point(54 + width, y + 2),
+                color=_BLACK,
+                width=0.7,
+                overlay=True,
+            )
+            y = 141.0
+            continue
+        if re.fullmatch(r"\d{5,7}", line):
+            _center(page, line, 93.0, 10.0, "helv")
+            continue
+        is_plan_name = bool(re.search(r"\b(?:401\s*\(?k\)?|403\s*\(?b\)?|457)\b.*\bplan\b", line, re.I))
+        if is_plan_name:
+            _center(page, line, 79.0, 11.0, "hebo")
+            y = 93.0
             continue
         font = "hebo" if line.replace(",", "").replace(".", "").isupper() else "helv"
-        size = 11 if font == "hebo" else 10
+        size = 10.0
         _center(page, line, y, size, font)
-        y += size + 3
-        if re.fullmatch(r"\d{5,7}", line):
-            y += 3
-            page.draw_line(fitz.Point(54, y), fitz.Point(page.rect.width - 54, y), color=_BLACK, width=0.8)
-            y += 8
+        y += 12.0
+    if not header_rule_drawn:
+        _draw_recap_header_rule(page)
     size = 8.0
     leading = 10.0
-    text_x = 68.0
-    width = page.rect.width - text_x - 36
+    # Bullets share the divider / Important Information left edge (Kaagaz page 4).
+    # Draw a filled+stroked disc — Helvetica "·" renders tiny/gray in viewers.
+    bullet_x = 54.0
+    bullet_diameter = 3.6
+    hang_x = bullet_x + bullet_diameter + 4.5
+    width = page.rect.width - hang_x - 36
     for bullet in bullets:
-        body = re.sub(r"^[\u2022•\-\*]\s*", "", bullet).strip()
+        body = re.sub(r"^(?:[\u2022•\u00b7\u25cf\u25e6\u2219\uf0b7╖■□▪▫*?\-]\s*)+", "", bullet).strip()
         if not body:
             continue
         lines = _wrap(body, "helv", size, width)
         for index, wrapped in enumerate(lines):
             if index == 0:
-                page.insert_text((50, y), "•  " + wrapped, fontsize=size, fontname="helv", color=_BLACK)
+                cy = y - size * 0.35
+                oval = fitz.Rect(
+                    bullet_x,
+                    cy - bullet_diameter / 2,
+                    bullet_x + bullet_diameter,
+                    cy + bullet_diameter / 2,
+                )
+                page.draw_oval(oval, color=_BLACK, fill=_BLACK, width=0.7, overlay=True)
+                page.insert_text((hang_x, y), wrapped, fontsize=size, fontname="helv", color=_BLACK)
             else:
-                page.insert_text((text_x, y), wrapped, fontsize=size, fontname="helv", color=_BLACK)
+                page.insert_text((hang_x, y), wrapped, fontsize=size, fontname="helv", color=_BLACK)
             y += leading
-        y += 6
+        y += 8
     if number is not None:
         _page_number(page, number)
 

@@ -3,7 +3,13 @@ from __future__ import annotations
 import fitz
 
 from services.package_polish import ensure_summary_heading_rule, normalize_report_layout
-from services.source_rewrite import normalize_cover_address_spacing, normalize_date_range_spacing
+from services.source_rewrite import (
+    _date_span_boundary_has_visual_gap,
+    normalize_cover_address_spacing,
+    normalize_cover_census_wrap,
+    normalize_date_range_spacing,
+    normalize_from_to_columns,
+)
 
 
 def _line_x(page: fitz.Page, text: str) -> float:
@@ -27,7 +33,20 @@ def test_aligns_action_required_headings() -> None:
     normalize_report_layout(doc)
     normalize_report_layout(doc)
 
-    assert round(_line_x(page, "ACTION REQUIRED")) == 38
+    assert round(_line_x(page, "ACTION REQUIRED")) == 40
+    assert round(_line_x(page, "NO IMMEDIATE ACTION IS REQUIRED AT THIS TIME")) == 39
+
+
+def test_aligns_client_action_headings_from_x24_to_expected_columns() -> None:
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((36, 60), "Annual Valuation Report", fontsize=12)
+    page.insert_text((24, 130), "ACTION REQUIRED", fontsize=11)
+    page.insert_text((24, 155), "NO IMMEDIATE ACTION IS REQUIRED AT THIS TIME", fontsize=11)
+
+    normalize_report_layout(doc)
+
+    assert round(_line_x(page, "ACTION REQUIRED")) == 40
     assert round(_line_x(page, "NO IMMEDIATE ACTION IS REQUIRED AT THIS TIME")) == 39
 
 
@@ -147,3 +166,68 @@ def test_normalizes_month_name_date_range_and_leaves_unrelated_dates_alone() -> 
     lines = [line.strip() for line in page.get_text().splitlines()]
     assert "January 1, 2025 To December 31, 2025" in lines
     assert "Date prepared: October 26, 2026" in lines
+
+
+def test_date_range_spacing_keeps_separate_source_spans_aligned() -> None:
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((326, 100), "From 01/01/2025", fontsize=9, fontname="hebo")
+    page.insert_text((406, 100), "To 12/31/2025", fontsize=9, fontname="hebo")
+
+    spans = [
+        {"text": "From 01/01/2025", "bbox": (326, 90, 396, 103), "size": 9},
+        {"text": "To 12/31/2025", "bbox": (406, 90, 465, 103), "size": 9},
+    ]
+    assert _date_span_boundary_has_visual_gap(spans, len(spans[0]["text"]))
+
+    assert normalize_date_range_spacing(doc) == []
+    assert normalize_from_to_columns(doc) == []
+    from_lines = [
+        line
+        for block in page.get_text("dict")["blocks"] if block.get("type") == 0
+        for line in block.get("lines", [])
+        if "".join(span["text"] for span in line["spans"]).strip().startswith("From")
+    ]
+    to_lines = [
+        line
+        for block in page.get_text("dict")["blocks"] if block.get("type") == 0
+        for line in block.get("lines", [])
+        if "".join(span["text"] for span in line["spans"]).strip().startswith("To")
+    ]
+    assert len(from_lines) == len(to_lines) == 1
+    assert round(from_lines[0]["spans"][0]["bbox"][0]) == 326
+    assert round(to_lines[0]["spans"][0]["bbox"][0]) == 406
+
+
+def test_splits_merged_from_to_date_header_into_columns() -> None:
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((326, 100), "From 01/01/2025 To 12/31/2025", fontsize=9, fontname="hebo")
+
+    assert normalize_from_to_columns(doc)
+
+    cols = [
+        (round(span["bbox"][0]), span["text"].strip())
+        for block in page.get_text("dict")["blocks"] if block.get("type") == 0
+        for line in block.get("lines", [])
+        for span in line.get("spans", [])
+        if span.get("text", "").strip()
+    ]
+    assert (326, "From 01/01/2025") in cols
+    assert (406, "To 12/31/2025") in cols
+
+
+def test_cover_census_wrap_breaks_after_results_of() -> None:
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text(
+        (48, 200),
+        "period ending 12/31/2025. This Valuation Report contains a recap of the finalized census data and results of the",
+        fontsize=10,
+    )
+    page.insert_text((48, 214), "IRS required testing for the plan year.", fontsize=10)
+
+    assert normalize_cover_census_wrap(doc)
+    lines = [line.strip() for line in page.get_text().splitlines() if line.strip()]
+    assert any(line.endswith("results of") for line in lines)
+    assert any(line.startswith("the IRS required testing") for line in lines)

@@ -256,7 +256,9 @@ def process_uploads(
             warnings.extend(source_rewrite.apply_cover_date(doc, highlights))
             warnings.extend(source_rewrite.apply_402g_dates(doc, profile, highlights))
         warnings.extend(source_rewrite.normalize_cover_address_spacing(doc))
+        warnings.extend(source_rewrite.normalize_cover_census_wrap(doc))
         warnings.extend(source_rewrite.normalize_date_range_spacing(doc))
+        warnings.extend(source_rewrite.normalize_from_to_columns(doc))
         if not profile.midyear and not is_457_plan(profile.plan_type):
             warnings.extend(
                 package_builder.ensure_compliance_overview(

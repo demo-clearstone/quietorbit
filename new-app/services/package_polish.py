@@ -492,13 +492,20 @@ def normalize_report_layout(doc: fitz.Document) -> list[str]:
         shifts: list[tuple[dict, float]] = []
         if re.search(r"annual valuation report", page_text, re.I):
             for line, text in lines:
-                if text.upper() == "ACTION REQUIRED" and abs(line["bbox"][0] - 36) < 0.5:
-                    shifts.append((line, 2.0))
+                if text.upper() == "ACTION REQUIRED":
+                    x = float(line["bbox"][0])
+                    if abs(x - 24) < 0.5:
+                        shifts.append((line, 16.0))
+                    elif abs(x - 36) < 0.5:
+                        shifts.append((line, 4.0))
                 elif (
                     text.upper() == "NO IMMEDIATE ACTION IS REQUIRED AT THIS TIME"
-                    and abs(line["bbox"][0] - 30) < 0.5
                 ):
-                    shifts.append((line, 9.0))
+                    x = float(line["bbox"][0])
+                    if abs(x - 24) < 0.5:
+                        shifts.append((line, 15.0))
+                    elif abs(x - 30) < 0.5:
+                        shifts.append((line, 9.0))
         if re.search(r"year end recap", page_text, re.I):
             start = next(
                 (line["bbox"][1] for line, text in lines if "UNIVERSAL AVAILABILITY RULE" in text.upper()),
