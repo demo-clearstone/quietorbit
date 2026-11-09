@@ -259,3 +259,39 @@ def test_cover_census_wrap_breaks_after_results_of() -> None:
     lines = [line.strip() for line in page.get_text().splitlines() if line.strip()]
     assert any(line.endswith("results of") for line in lines)
     assert any(line.startswith("the IRS required testing") for line in lines)
+
+
+def test_cover_census_wrap_does_not_wipe_we_are_pleased_body_line() -> None:
+    """Client covers keep tight leading; wrap redaction must not erase the body start."""
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((45, 72), "September 9, 2026", fontsize=11)
+    page.insert_text((45, 100), "GRACE MEDICAL HOME, INC.", fontsize=11)
+    page.insert_text((45, 136), "88 Chapel Street", fontsize=11)
+    page.insert_text((45, 172), "Orlando, FL 32801", fontsize=11)
+    page.insert_text((45, 222), "RE: GRACE MEDICAL HOME, INC. 403(B) PLAN", fontsize=11)
+    page.insert_text((45, 242), "Dear Plan Sponsor:", fontsize=11)
+    page.insert_text(
+        (45, 262),
+        "We are pleased to provide you with our completed administrative review of your",
+        fontsize=11,
+    )
+    page.insert_text(
+        (45, 276),
+        "qualified retirement plan for the period ending 12/31/2025. This Valuation Report",
+        fontsize=11,
+    )
+    page.insert_text(
+        (45, 290),
+        "contains a recap of the finalized census data and results of the",
+        fontsize=11,
+    )
+    page.insert_text((45, 304), "IRS required testing for the plan year.", fontsize=11)
+
+    assert normalize_cover_address_spacing(doc)
+    assert normalize_cover_census_wrap(doc)
+    text = page.get_text()
+    assert "We are pleased to provide you with our completed administrative review of your" in text
+    assert "qualified retirement plan for the period ending 12/31/2025. This Valuation Report" in text
+    assert "results of" in text
+    assert "the IRS required testing for the plan year." in text

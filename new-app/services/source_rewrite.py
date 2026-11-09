@@ -163,8 +163,10 @@ def normalize_cover_census_wrap(doc: fitz.Document) -> list[str]:
         color = _rgb(first_span.get("color") or 0)
         first_origin = first_span.get("origin") or (first_span["bbox"][0], first_span["bbox"][3])
         next_origin = next_span.get("origin") or (next_span["bbox"][0], next_span["bbox"][3])
-        page.add_redact_annot(fitz.Rect(item["line"]["bbox"]) + (-1, -1, 1, 1), fill=(1, 1, 1))
-        page.add_redact_annot(fitz.Rect(nxt["line"]["bbox"]) + (-1, -1, 1, 1), fill=(1, 1, 1))
+        # Tight span boxes only. Line-bbox padding was wiping the body line above
+        # ("We are pleased..." / "qualified retirement...") on real cover letters.
+        page.add_redact_annot(_tight_span_rect(item["spans"]), fill=(1, 1, 1))
+        page.add_redact_annot(_tight_span_rect(nxt["spans"]), fill=(1, 1, 1))
         page.apply_redactions(images=0, graphics=0)
         page.insert_text(
             (first_origin[0], first_origin[1]),
@@ -305,19 +307,29 @@ def normalize_cover_address_spacing(doc: fitz.Document) -> list[str]:
         return []
 
     for item, _delta in moved:
-        page.add_redact_annot(fitz.Rect(item["line"]["bbox"]) + (-1, -1, 1, 1), fill=(1, 1, 1))
+        page.add_redact_annot(_tight_span_rect(item["spans"]), fill=(1, 1, 1))
     page.apply_redactions(images=0, graphics=0)
     for item, delta in moved:
         for span in item["spans"]:
             origin = span.get("origin") or (span["bbox"][0], span["bbox"][3])
-            page.insert_text(
-                (origin[0], origin[1] + delta),
-                span["text"],
-                fontsize=float(span.get("size") or 10),
-                fontname=_base_font(str(span.get("font") or ""), int(span.get("flags") or 0)),
-                color=_rgb(span.get("color") or 0),
-                overlay=True,
-            )
+            try:
+                page.insert_text(
+                    (origin[0], origin[1] + delta),
+                    span["text"],
+                    fontsize=float(span.get("size") or 10),
+                    fontname=_base_font(str(span.get("font") or ""), int(span.get("flags") or 0)),
+                    color=_rgb(span.get("color") or 0),
+                    overlay=True,
+                )
+            except Exception:
+                page.insert_text(
+                    (origin[0], origin[1] + delta),
+                    span["text"],
+                    fontsize=float(span.get("size") or 10),
+                    fontname="helv",
+                    color=_rgb(span.get("color") or 0),
+                    overlay=True,
+                )
     parts = [f"Compacted spacing for {len(address_lines)} cover-address line(s)"]
     if body_moved:
         parts.append(f"shifted RE/body up by {abs(body_delta):.1f}pt")
