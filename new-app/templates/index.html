@@ -897,7 +897,7 @@
       <div class="validation-dialog-body">
         <div class="validation-dialog-head">
           <h2 id="validation-dialog-title">Review failed validations</h2>
-          <p>Each item repeats the assembly-stop message. Check a message to ignore only that validation on retry.</p>
+          <p>Check messages to ignore. Close removes those from the list above. Process package continues with the remaining ignores applied.</p>
         </div>
         <div class="validation-menu">
           <div class="validation-actions">
@@ -907,7 +907,7 @@
           <div id="validation-options"></div>
         </div>
         <div class="validation-dialog-foot">
-          <button type="button" class="btn ghost" id="validation-dialog-close">Close</button>
+          <button type="button" class="btn ghost" id="validation-dialog-close" title="Apply ignored validations to the list above">Close</button>
         </div>
       </div>
     </dialog>
@@ -1437,6 +1437,74 @@
     const validationTitle = document.getElementById("validation-dialog-title");
     let validationSelectionActive = false;
     const knownValidations = new Map();
+    let lastAssemblyError = null;
+    function activeValidationEntries() {
+      return [...knownValidations.values()].filter((validation) => !validation.ignored);
+    }
+    function ignoredValidationEntries() {
+      return [...knownValidations.values()].filter((validation) => validation.ignored);
+    }
+    function appendAuditLogLink(host, url) {
+      if (!url) return;
+      const link = document.createElement("a");
+      link.href = /^https?:\/\//i.test(url) ? url : apiBase() + url;
+      link.textContent = "Download audit log";
+      link.className = "audit-download-link";
+      link.setAttribute("download", "assembly-audit.json");
+      host.append(document.createElement("br"), link);
+    }
+    function renderUpperValidationList(message, validations, auditLogUrl) {
+      errorEl.replaceChildren();
+      const heading = message || "Assembly stopped.";
+      const active = (validations || []).filter((validation) => !validation.ignored);
+      const ignoredCount = (validations || []).filter((validation) => validation.ignored).length;
+      if (!active.length && ignoredCount) {
+        errorEl.append(
+          document.createTextNode(
+            "Ignored validations were removed from this list. Click Process package to continue with those ignores."
+          )
+        );
+        appendAuditLogLink(errorEl, auditLogUrl);
+        return;
+      }
+      errorEl.append(document.createTextNode(heading));
+      if (active.length) {
+        const list = document.createElement("ol");
+        active.forEach((validation) => {
+          (validation.details || [validation.label]).forEach((text) => {
+            const item = document.createElement("li");
+            item.textContent = text;
+            list.append(item);
+          });
+        });
+        errorEl.append(list);
+      }
+      if (ignoredCount) {
+        const note = document.createElement("p");
+        note.style.margin = "8px 0 0";
+        note.style.color = "var(--muted)";
+        note.style.fontSize = "0.78rem";
+        note.textContent = ignoredCount === 1
+          ? "1 validation ignored and hidden. Process package to continue with that ignore."
+          : ignoredCount + " validations ignored and hidden. Process package to continue with those ignores.";
+        errorEl.append(note);
+      }
+      appendAuditLogLink(errorEl, auditLogUrl);
+    }
+    function refreshUpperValidationList() {
+      if (!knownValidations.size) return;
+      const message = (lastAssemblyError && lastAssemblyError.message)
+        || "Assembly stopped.";
+      const auditLogUrl = lastAssemblyError && lastAssemblyError.audit_log_url;
+      renderUpperValidationList(
+        message,
+        [...knownValidations.values()],
+        auditLogUrl
+      );
+      validationSelectionActive = knownValidations.size > 0;
+      validationOpen.classList.toggle("hidden", !validationSelectionActive);
+      updateValidationSummary();
+    }
     function showError(detail) {
       errorEl.replaceChildren();
       const message = detail && typeof detail === "object" ? detail.message : "";
@@ -1444,30 +1512,21 @@
         ? detail.validations
         : [];
       if (message && (validations.length || detail.audit_log_url)) {
-        errorEl.append(document.createTextNode(message));
-        if (validations.length) {
-          const list = document.createElement("ol");
-          validations.forEach((validation) => {
-            (validation.details || [validation.label]).forEach((text) => {
-              const item = document.createElement("li");
-              item.textContent = text;
-              list.append(item);
-            });
-          });
-          errorEl.append(list);
-        }
-        if (detail.audit_log_url) {
-          const link = document.createElement("a");
-          link.href = /^https?:\/\//i.test(detail.audit_log_url)
-            ? detail.audit_log_url
-            : apiBase() + detail.audit_log_url;
-          link.textContent = "Download audit log";
-          link.className = "audit-download-link";
-          link.setAttribute("download", "assembly-audit.json");
-          errorEl.append(document.createElement("br"), link);
-        }
+        lastAssemblyError = {
+          message,
+          audit_log_url: detail.audit_log_url || "",
+        };
+        renderUpperValidationList(
+          message,
+          validations.map((validation) => ({
+            ...validation,
+            ignored: !!(knownValidations.get(validation.id) || {}).ignored,
+          })),
+          detail.audit_log_url
+        );
         return;
       }
+      lastAssemblyError = null;
       const text = typeof detail === "string" ? detail : formatDetail(detail);
       const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
       const reasonLines = lines.filter((line) => !/^assembly stopped\.?$/i.test(line));
@@ -1580,9 +1639,23 @@
     document.getElementById("validation-dialog-close").addEventListener("click", () => validationDialog.close());
     validationDialog.addEventListener("close", () => {
       validationOpen.disabled = false;
+      // Closing applies ignore selections to the upper list immediately.
+      // Process package is the separate action that continues with those ignores.
+      refreshUpperValidationList();
+      const ignored = ignoredValidationEntries().length;
+      const remaining = activeValidationEntries().length;
+      if (ignored && remaining) {
+        setStatus(
+          ignored + " validation(s) ignored and hidden. "
+          + remaining + " still active. Click Process package only when you want to continue."
+        );
+      } else if (ignored && !remaining) {
+        setStatus("All listed validations ignored and hidden. Click Process package to continue.");
+      }
     });
     validationDialog.addEventListener("cancel", () => {
       validationOpen.disabled = false;
+      refreshUpperValidationList();
     });
     document.getElementById("validation-select-all").addEventListener("click", () => {
       validationChecks().forEach((input) => {
@@ -1625,9 +1698,11 @@
       form.append("auto_order", document.getElementById("auto-order").checked ? "true" : "false");
       form.append("rewrite_sources", document.getElementById("rewrite-sources").checked ? "true" : "false");
       form.append("check_assembly_stops", document.getElementById("assembly-stops").checked ? "true" : "false");
-      if (validationSelectionActive && document.getElementById("assembly-stops").checked) {
+      // Process package is the proceed action: send currently ignored validations.
+      if (knownValidations.size && document.getElementById("assembly-stops").checked) {
+        const ignoredIds = ignoredValidationEntries().map((validation) => validation.id);
         form.append("validation_checks_configured", "true");
-        validationChecks().filter((input) => input.checked).forEach((input) => form.append("validation_checks", input.value));
+        ignoredIds.forEach((id) => form.append("validation_checks", id));
       }
       const logSteps = document.getElementById("log-steps").checked;
       form.append("log_steps", logSteps ? "true" : "false");
@@ -1658,7 +1733,8 @@
       }
       try {
         const payload = await postJson("/api/jobs", form);
-          knownValidations.clear();
+        knownValidations.clear();
+        lastAssemblyError = null;
         showFailedValidations([]);
         showResults(payload);
         showElapsed("Done. Time to process: ", payload.elapsed_seconds == null ? (Date.now() - processStarted) / 1000 : payload.elapsed_seconds);
