@@ -239,17 +239,19 @@ def process_uploads(
         # 5. Edit the PDF.
         removed = pdf_modifier.apply_decisions(doc, decisions, profile.plan_type)
         recap_removed = pdf_modifier.apply_recap_bullets(doc, decisions, profile.plan_type)
-        filled = pdf_modifier.fill_qnec_placeholders(doc, profile, highlights)
         flags = package_flags(profile.plan_type)
         if is_457_plan(profile.plan_type):
             warnings.extend(plan_457.remove_contribution_overview(doc))
         if profile.midyear:
             warnings.extend(midyear.apply_letter(doc, profile))
         warnings.extend(package_polish.remove_disallowed_wording(doc, keep_soc=bool(flags.get("keep_soc"))))
+        # 403(b): rewrite ADP/ACP → ACP on the Excess Return notice before QNEC fill
+        # so amounts match “ACP test is $…”.
         if flags.get("rewrite_adp_mentions"):
             warnings.extend(package_polish.rewrite_403b_adp_mentions(doc))
         else:
             warnings.extend(package_polish.drop_brf_pages(doc))
+        filled = pdf_modifier.fill_qnec_placeholders(doc, profile, highlights)
         if rewrite_sources:
             warnings.extend(source_rewrite.apply_source_rewrites(doc, profile, highlights))
         else:

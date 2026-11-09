@@ -75,7 +75,8 @@ def apply_decisions(
                 if rule_id not in removed:
                     removed.append(rule_id)
         if boxes:
-            _apply_redact_boxes(page, boxes)
+            # No lasting white cover: restack rewrites surviving text into these bands.
+            _apply_redact_boxes(page, boxes, cover=False)
     if touched:
         _restack_pages(doc, touched)
         _pull_kept_action_forward(doc)
@@ -415,7 +416,7 @@ def _restack_pages(doc: fitz.Document, touched: dict[int, list[fitz.Rect]]) -> N
         Text below one removed region moves up by exactly that region's height; text above it stays put.
 
     Side effects:
-        None. This function only reads data and returns a value.
+        Changes the PDF passed in. Does not save the file by itself.
     """
     for page in doc:
         removed = touched.get(page.number)
@@ -428,23 +429,16 @@ def _restack_pages(doc: fitz.Document, touched: dict[int, list[fitz.Rect]]) -> N
         footer = [block for block in blocks if _is_page_number_block(page, block)]
         removed_bands = _merged_vertical_bands(removed)
         header_rule_y = _top_header_rule_y(page)
-        first_after_header = next(
-            (block for block in body if header_rule_y is not None and block["bbox"].y0 > header_rule_y),
-            None,
-        )
-        max_upshift = (
-            max(0.0, first_after_header["bbox"].y0 - header_rule_y - 30.0)
-            if first_after_header is not None and header_rule_y is not None
-            else None
-        )
-        _apply_redact_boxes(page, [block["bbox"] for block in blocks])
+        # Wipe text without lasting white overlays — overlays at old y-positions would
+        # hide content that shifts up into those bands.
+        _apply_redact_boxes(page, [block["bbox"] for block in blocks], cover=False)
         for block in body:
-            delta = -sum(bottom - top for top, bottom in removed_bands if bottom <= block["bbox"].y0)
+            delta = _upshift_delta(block["bbox"].y0, removed_bands)
             if header_rule_y is not None and block["bbox"].y0 > header_rule_y:
+                # Keep a small gap under the header divider; do not cap later blocks by
+                # the first post-header gap (that left large white holes after mid-page removals).
                 minimum_y = header_rule_y + 30.0
                 delta = max(delta, minimum_y - block["bbox"].y0)
-                if max_upshift is not None:
-                    delta = max(delta, -max_upshift)
             for span in block["spans"]:
                 _write_span(page, span, delta)
         for block in footer:
@@ -453,6 +447,16 @@ def _restack_pages(doc: fitz.Document, touched: dict[int, list[fitz.Rect]]) -> N
         # Restack rewrites text but leaves vector underlines from removed headings.
         if header_rule_y is not None:
             _clear_short_rules_below(page, header_rule_y)
+
+
+def _upshift_delta(y0: float, bands: list[tuple[float, float]]) -> float:
+    """Vertical shift for a block whose top is at ``y0`` after removing ``bands``."""
+    total = 0.0
+    for top, bottom in bands:
+        if top >= y0:
+            continue
+        total += min(bottom, y0) - top
+    return -total
 
 
 def _merged_vertical_bands(boxes: list[fitz.Rect]) -> list[tuple[float, float]]:
@@ -823,7 +827,7 @@ def _pad_rect(rect: fitz.Rect, page: fitz.Page) -> fitz.Rect:
     return (fitz.Rect(rect) + (-1, -3, 1, 1)) & page.rect
 
 
-def _apply_redact_boxes(page: fitz.Page, boxes: list[fitz.Rect]) -> None:
+def _apply_redact_boxes(page: fitz.Page, boxes: list[fitz.Rect], *, cover: bool = True) -> None:
     """Apply redact boxes.
 
     Purpose:
@@ -832,6 +836,9 @@ def _apply_redact_boxes(page: fitz.Page, boxes: list[fitz.Rect]) -> None:
     Args:
         page: One PDF page.
         boxes: Boxes. Type: list[fitz.Rect].
+        cover: When True, paint lasting white rectangles over the redacted bands.
+            Use False when leftover text will be rewritten into those bands (restack),
+            because the overlays would hide the shifted content.
 
     Returns:
         None.
@@ -861,8 +868,9 @@ def _apply_redact_boxes(page: fitz.Page, boxes: list[fitz.Rect]) -> None:
         for rect in leftover:
             page.add_redact_annot(rect, fill=(1, 1, 1))
         page.apply_redactions(images=0)
-    for rect in rects:
-        page.draw_rect(rect, color=(1, 1, 1), fill=(1, 1, 1), width=0, overlay=True)
+    if cover:
+        for rect in rects:
+            page.draw_rect(rect, color=(1, 1, 1), fill=(1, 1, 1), width=0, overlay=True)
 
 
 def _action_blocks_to_move(page: fitz.Page) -> list[dict]:
@@ -982,13 +990,21 @@ def _finalize_no_immediate_pages(doc: fitz.Document) -> None:
             continue
         if not re.search(r"annual valuation report", text, re.I):
             continue
+        # Leave pages that still have other action blocks; only pack the all-clear page.
+        if re.search(r"IMMEDIATE ACTION REQUIRED|ATTENTION REQUIRED", text, re.I):
+            continue
         has_heading = bool(re.search(r"(?m)^\s*ACTION REQUIRED\s*$", text))
         green = None
+        trailing: list[dict] = []
+        started = False
         for block in _text_blocks(page):
             joined = " ".join(span["text"] for span in block["spans"]).strip()
             if re.match(r"NO IMMEDIATE ACTION IS REQUIRED AT THIS TIME", joined, re.I):
                 green = block
-                break
+                started = True
+                continue
+            if started and not _is_page_number_block(page, block) and not _is_noise_text(joined):
+                trailing.append(block)
         header_rule_y = _top_header_rule_y(page)
         if green is None:
             if header_rule_y is not None:
@@ -999,33 +1015,32 @@ def _finalize_no_immediate_pages(doc: fitz.Document) -> None:
                 _clear_short_rules_below(page, header_rule_y)
             continue
         green_spans = [dict(span) for span in green["spans"]]
-        baseline = float(green_spans[0]["origin"].y) if green_spans else float(green["bbox"].y1)
         green_text = "".join(span["text"] for span in green_spans)
         size = float(green_spans[0]["size"]) if green_spans else 11.0
         color = _rgb(green_spans[0]["color"]) if green_spans else (0, 0.45, 0.15)
-        fontname = _base_font(str(green_spans[0]["font"]), int(green_spans[0]["flags"])) if green_spans else "hebo"
-        for span in green_spans:
-            origin = span["origin"]
-            try:
-                width = float(fitz.get_text_length(span["text"], fontname=fontname, fontsize=span["size"]))
-            except Exception:
-                width = float(span["size"]) * max(len(span["text"]), 1) * 0.5
-            page.add_redact_annot(
-                fitz.Rect(origin.x - 0.5, origin.y - span["size"], origin.x + width + 0.5, origin.y + 2.5),
-                fill=(1, 1, 1),
-            )
-        page.apply_redactions(images=0, graphics=0)
+        # Pack under the header divider (not at the green line's current y, which left
+        # a hole and overlapped any trailing paragraph that restack had already pulled up).
+        heading_baseline = (header_rule_y + 40.0) if header_rule_y is not None else 90.0
+        wipe = [green["bbox"], *[block["bbox"] for block in trailing]]
+        _apply_redact_boxes(page, wipe, cover=False)
         if header_rule_y is not None:
             _clear_short_rules_below(page, header_rule_y, redact=True)
-        _write_action_heading(page, baseline)
+        cursor = _write_action_heading(page, heading_baseline)
         page.insert_text(
-            fitz.Point(54, baseline + 22),
+            fitz.Point(54, cursor),
             green_text,
             fontsize=size,
             fontname="hebo",
             color=color,
             overlay=True,
         )
+        cursor += size + 14.0
+        for block in trailing:
+            # Place each trailing block so its top sits just under the running cursor.
+            delta = (cursor - 11.0) - block["bbox"].y0
+            for span in block["spans"]:
+                _write_span(page, span, delta)
+            cursor += block["bbox"].height + 12.0
 
 
 def _pull_kept_action_forward(doc: fitz.Document) -> None:
@@ -1362,15 +1377,18 @@ def fill_qnec_placeholders(
         Changes the PDF passed in. Does not save the file by itself.
     """
     filled: list[str] = []
+    flags = package_flags(profile.plan_type)
+    acp_only_notice = bool(flags.get("acp_notice_amount"))
     both = [value for value in (profile.adp_qnec, profile.acp_qnec) if value is not None]
     total = round(sum(both), 2) if both else profile.total_qnec
+    # 403(b) Excess Return notice uses ACP QNEC only (“ACP test is $…”).
     amounts = {
-        "total": total,
-        "adp": profile.adp_qnec,
+        "total": None if acp_only_notice else total,
+        "adp": None if acp_only_notice else profile.adp_qnec,
         "acp": profile.acp_qnec,
         "deferral": profile.deferral_refund,
         "match": profile.match_refund,
-        "acp-notice": profile.acp_qnec if package_flags(profile.plan_type).get("acp_notice_amount") else None,
+        "acp-notice": profile.acp_qnec if acp_only_notice else None,
     }
     for page in doc:
         if "$X,XXX,XXX.XX" not in (page.get_text("text") or ""):
@@ -1399,6 +1417,8 @@ def _fill_notice_amounts(page: fitz.Page, amounts: dict[str, float | None]) -> l
 
     Purpose:
         Replace each $X,XXX,XXX.XX in place. A missing amount takes its label with it.
+        All placeholders on the page are collected first, then redacted together, so filling
+        one amount cannot wipe another placeholder on the same line.
 
     Args:
         page: One PDF page.
@@ -1411,38 +1431,70 @@ def _fill_notice_amounts(page: fitz.Page, amounts: dict[str, float | None]) -> l
         A closed PDF raises from PyMuPDF.
 
     Example:
-        _fill_notice_amounts(page, 1.0) returns a list of tuple[str, float | None].
+        _fill_notice_amounts(page, {"total": 1.0}) returns a list of tuple[str, float | None].
 
     Side effects:
         Changes the PDF passed in. Does not save the file by itself.
     """
-    done: list[tuple[str, float | None]] = []
-    while True:
-        hits = page.search_for("$X,XXX,XXX.XX")
-        if not hits:
-            return done
-        hit = sorted(hits, key=lambda item: (item.y0, item.x0))[0]
-        words = page.get_text("words") or []
+    hits = sorted(page.search_for("$X,XXX,XXX.XX"), key=lambda item: (item.y0, item.x0))
+    if not hits:
+        return []
+    words = page.get_text("words") or []
+    jobs: list[dict] = []
+    for hit in hits:
         kind, label_words, token = _notice_placeholder(words, hit)
         value = amounts.get(kind) if kind else None
-        rects = [fitz.Rect(token[:4])] if token else [hit]
+        token_rect = fitz.Rect(token[:4]) if token else fitz.Rect(hit)
         if value is None:
-            rects = [fitz.Rect(word[:4]) for word in label_words] or rects
-        for rect in rects:
+            rects = [_tighten_qnec_rect(fitz.Rect(word[:4])) for word in label_words] or [
+                _tighten_qnec_rect(token_rect)
+            ]
+            jobs.append({"kind": kind or "amount", "value": None, "rects": rects, "insert": None})
+            continue
+        money = _money(value)
+        if token and str(token[4]).endswith("."):
+            money += "."
+        fontsize = _qnec_fontsize(token_rect)
+        baseline = float(token[3]) - max(0.8, (token_rect.y1 - token_rect.y0) * 0.12) if token else hit.y1 - 1
+        jobs.append(
+            {
+                "kind": kind or "amount",
+                "value": value,
+                "rects": [_tighten_qnec_rect(token_rect)],
+                "insert": (float(token_rect.x0), baseline, money, fontsize),
+            }
+        )
+
+    for job in jobs:
+        for rect in job["rects"]:
             page.add_redact_annot(rect, fill=(1, 1, 1))
-        page.apply_redactions()
-        if value is not None and token:
-            money = _money(value)
-            if str(token[4]).endswith("."):
-                money += "."
+    page.apply_redactions(images=0, graphics=0)
+    done: list[tuple[str, float | None]] = []
+    for job in jobs:
+        insert = job["insert"]
+        if insert is not None:
+            x, y, money, fontsize = insert
             page.insert_text(
-                (float(token[0]), float(token[3]) - 1),
+                (x, y),
                 money,
-                fontsize=10,
+                fontsize=fontsize,
                 fontname="helv",
                 color=(0, 0, 0),
+                overlay=True,
             )
-        done.append((kind or "amount", value))
+        done.append((job["kind"], job["value"]))
+    return done
+
+
+def _tighten_qnec_rect(rect: fitz.Rect) -> fitz.Rect:
+    """Keep QNEC redaction on the placeholder ink so neighbor text/lines survive."""
+    return fitz.Rect(rect.x0 - 0.4, rect.y0 + 0.2, rect.x1 + 0.4, rect.y1 - 0.2)
+
+
+def _qnec_fontsize(rect: fitz.Rect) -> float:
+    """Estimate notice body font size from the placeholder box height."""
+    height = max(1.0, float(rect.y1 - rect.y0))
+    return max(8.0, min(11.0, height * 0.72))
 
 
 def _notice_placeholder(words: list[tuple], hit: fitz.Rect) -> tuple[str, list[tuple], tuple | None]:
@@ -1468,14 +1520,26 @@ def _notice_placeholder(words: list[tuple], hit: fitz.Rect) -> tuple[str, list[t
         None. This function only reads data and returns a value.
     """
     ordered = sorted(words, key=lambda word: (word[1], word[0]))
-    index = next(
-        (
-            pos
-            for pos, word in enumerate(ordered)
-            if abs(word[0] - hit.x0) < 3 and abs(word[1] - hit.y0) < 3
-        ),
-        None,
-    )
+    index = None
+    best_overlap = 0.0
+    for pos, word in enumerate(ordered):
+        word_rect = fitz.Rect(word[:4])
+        overlap = word_rect & hit
+        if overlap.is_empty:
+            continue
+        area = float(overlap.width * overlap.height)
+        if area > best_overlap:
+            best_overlap = area
+            index = pos
+    if index is None:
+        index = next(
+            (
+                pos
+                for pos, word in enumerate(ordered)
+                if abs(word[0] - hit.x0) < 4 and abs(word[1] - hit.y0) < 4
+            ),
+            None,
+        )
     if index is None:
         return "", [], None
     token = ordered[index]
@@ -1615,9 +1679,10 @@ def apply_recap_bullets(
                 bullet = _fill_prior_rates(bullet, nhce)
             kept.append(bullet)
         # In-place redaction of dropped bullets leaves large white gaps (Kaagaz page 3
-        # vs packed page 4). Always rebuild whenever anything was removed, or when the
-        # header/bullet columns do not already match the MOA layout.
-        if not dropped and _recap_layout_matches(page):
+        # vs packed page 4). Always rebuild whenever anything was removed, when the
+        # header/bullet columns do not already match the MOA layout, or when kept
+        # bullets are still spaced with large holes.
+        if not dropped and _recap_layout_matches(page) and not _recap_has_sparse_bullets(page):
             continue
         header_lines = [line.strip() for line in header.splitlines() if line.strip()]
         if not header_lines:
@@ -1631,6 +1696,26 @@ def apply_recap_bullets(
         number = _recap_page_number(original)
         write_recap_page(page, header_lines, kept, number=number, plan_type=plan_type)
     return removed
+
+
+def _recap_has_sparse_bullets(page: fitz.Page) -> bool:
+    """True when Important Information bullets still have large vertical holes."""
+    starts: list[float] = []
+    for block in page.get_text("dict").get("blocks", []):
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []):
+            spans = [span for span in line.get("spans", []) if span.get("text", "").strip()]
+            if not spans:
+                continue
+            text = _strip_recap_mark("".join(span.get("text", "") for span in spans).strip())
+            if not _recap_paragraph_start(text):
+                continue
+            starts.append(float(line["bbox"][1]))
+    starts = sorted(set(round(y, 1) for y in starts))
+    if len(starts) < 2:
+        return False
+    return max(starts[i + 1] - starts[i] for i in range(len(starts) - 1)) >= 90.0
 
 
 def _recap_has_header_rule(page: fitz.Page) -> bool:
@@ -1957,13 +2042,19 @@ def _split_recap(text: str) -> tuple[str, list[str]]:
 
 
 _RECAP_START = re.compile(
-    r"^(?:your plan is not subject to adp|"
+    r"^(?:your plan is not subject to (?:adp|acp)|"
     r"based on the definition of highly compensated|"
     r"your plan is designed to allow participants|"
+    r"your plan may also permit participants with over 15|"
+    r"participants with fifteen or more years of service|"
+    r"universal availability rule|"
+    r"the ['\u2018\u2019`\"\u201c\u201d]?universal availability|"
     r"based on the top heavy|"
     r"your plan will be considered top heavy|"
     r"if you sponsor a qualified retirement plan|"
-    r"the plan['\u2019`╖]s employer match contribution)",
+    r"the plan['\u2019`╖]s employer match contribution|"
+    r"reallocation of forfeitures|"
+    r"no forfeitures available to reallocate)",
     re.I,
 )
 

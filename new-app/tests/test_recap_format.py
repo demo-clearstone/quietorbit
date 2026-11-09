@@ -218,6 +218,39 @@ def test_recap_packs_bullets_after_removals_without_large_gaps() -> None:
     assert _recap_has_header_rule(page)
 
 
+def test_recap_rebuilds_when_bullets_are_already_sparse_without_removals() -> None:
+    """Even with no drop decisions, large holes between bullets must be packed."""
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((239, 48), "YEAR END RECAP", fontsize=13, fontname="hebo")
+    page.insert_text((214, 66), "January 1, 2025 - December 31, 2025", fontsize=10)
+    page.insert_text((184, 79), "SAMPLE 401(K) PLAN", fontsize=11, fontname="hebo")
+    page.insert_text((280, 93), "555001", fontsize=10)
+    page.draw_line(fitz.Point(54, 109), fitz.Point(page.rect.width - 54, 109), color=(0, 0, 0), width=0.8)
+    page.insert_text((54, 123), "Important Information", fontsize=11, fontname="hebo")
+    for y, text in (
+        (150, "Based on the definition of Highly Compensated Employee (HCE), the employee(s) listed."),
+        (320, "Your plan is designed to allow participants who were age 50 or older to make catch-up contributions."),
+        (500, "If you sponsor a qualified retirement plan not administered by Mutual of America, please provide."),
+    ):
+        page.draw_oval(fitz.Rect(54, y - 5, 57.6, y - 1.4), color=(0, 0, 0), fill=(0, 0, 0))
+        page.insert_text((62, y), text, fontsize=8)
+
+    apply_recap_bullets(doc, [], "401k")
+
+    starts = []
+    for block in doc[0].get_text("dict")["blocks"]:
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []):
+            text = "".join(span.get("text", "") for span in line.get("spans", [])).strip()
+            if text.startswith("Based on the definition") or text.startswith("Your plan is designed") or text.startswith("If you sponsor"):
+                starts.append(line["bbox"][1])
+    starts = sorted(set(round(y) for y in starts))
+    assert len(starts) == 3
+    assert max(starts[i + 1] - starts[i] for i in range(len(starts) - 1)) < 40
+
+
 def test_recap_rebuild_preserves_only_bullets_selected_by_keep_remove_rules() -> None:
     doc = _recap(bullets=False)
     decisions = [

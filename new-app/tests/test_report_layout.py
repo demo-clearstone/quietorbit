@@ -81,7 +81,7 @@ def test_splits_merged_amount_percent_heading_and_aligns_census_name() -> None:
     assert round(_line_x(page, "%")) == 360
 
 
-def test_compacts_cover_address_lines_without_moving_date_or_re_line() -> None:
+def test_compacts_cover_address_lines_and_shifts_re_body_up() -> None:
     doc = fitz.open()
     page = doc.new_page()
     page.insert_text((45, 70), "September 9, 2026", fontsize=20)
@@ -89,6 +89,7 @@ def test_compacts_cover_address_lines_without_moving_date_or_re_line() -> None:
     page.insert_text((45, 240), "88 Chapel Street", fontsize=20)
     page.insert_text((45, 310), "Orlando, FL 32801", fontsize=20)
     page.insert_text((45, 400), "RE: GRACE MEDICAL HOME, INC. 403(B) PLAN", fontsize=20)
+    page.insert_text((45, 450), "Dear Plan Sponsor:", fontsize=20)
 
     def baseline(text: str) -> float:
         for block in page.get_text("dict")["blocks"]:
@@ -99,6 +100,7 @@ def test_compacts_cover_address_lines_without_moving_date_or_re_line() -> None:
 
     date_y = baseline("September 9, 2026")
     re_y = baseline("RE: GRACE MEDICAL HOME, INC. 403(B) PLAN")
+    dear_y = baseline("Dear Plan Sponsor:")
     assert normalize_cover_address_spacing(doc)
     address_lines = [
         "GRACE MEDICAL HOME, INC.",
@@ -106,11 +108,16 @@ def test_compacts_cover_address_lines_without_moving_date_or_re_line() -> None:
         "Orlando, FL 32801",
     ]
     address_baselines = [baseline(line) for line in address_lines]
+    new_re_y = baseline("RE: GRACE MEDICAL HOME, INC. 403(B) PLAN")
+    new_dear_y = baseline("Dear Plan Sponsor:")
 
     assert all(right > left for left, right in zip(address_baselines, address_baselines[1:]))
     assert all(right - left <= 30 for left, right in zip(address_baselines, address_baselines[1:]))
     assert baseline("September 9, 2026") == date_y
-    assert baseline("RE: GRACE MEDICAL HOME, INC. 403(B) PLAN") == re_y
+    assert new_re_y < re_y
+    assert new_dear_y < dear_y
+    assert abs((dear_y - re_y) - (new_dear_y - new_re_y)) <= 1.0
+    assert new_re_y - address_baselines[-1] <= 60
 
 
 def test_adds_summary_divider_below_header_and_does_not_duplicate_it() -> None:
@@ -153,6 +160,27 @@ def test_normalizes_joined_date_range_connectors_on_report_pages() -> None:
     assert "Plan year 01/01/2025 and 12/31/2025" in lines
     assert "Period 01/01/2025 from 12/31/2025" in lines
     assert normalize_date_range_spacing(doc) == []
+
+
+def test_date_range_to_spacing_does_not_wipe_nearby_lines() -> None:
+    """Dense report lines overlap slightly in bbox; To-spacing must not redact neighbors."""
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((50, 120), "Employee Name", fontsize=9)
+    page.insert_text((50, 132), "Plan Year Ending Between 07/01/2025To 06/30/2026", fontsize=9)
+    page.insert_text((50, 144), "Contribution Amount", fontsize=9)
+    page.insert_text((50, 200), "Left label near dates", fontsize=9)
+    page.insert_text((326, 200), "From 01/01/2025 To 12/31/2025", fontsize=9)
+
+    assert normalize_date_range_spacing(doc)
+    normalize_from_to_columns(doc)
+    text = page.get_text()
+    assert "Employee Name" in text
+    assert "Contribution Amount" in text
+    assert "Left label near dates" in text
+    assert "07/01/2025 To 06/30/2026" in text
+    assert "From 01/01/2025" in text
+    assert "To 12/31/2025" in text
 
 
 def test_normalizes_month_name_date_range_and_leaves_unrelated_dates_alone() -> None:

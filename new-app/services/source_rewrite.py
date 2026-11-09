@@ -190,7 +190,7 @@ def normalize_from_to_columns(doc: fitz.Document) -> list[str]:
     """Split merged 'From DATE To DATE' headers into the MOA two-column layout."""
     changed = 0
     for page in doc:
-        targets: list[tuple[dict, list[dict], str, str]] = []
+        targets: list[tuple[list[dict], str, str, float]] = []
         for block in page.get_text("dict").get("blocks", []):
             if block.get("type") != 0:
                 continue
@@ -215,19 +215,18 @@ def normalize_from_to_columns(doc: fitz.Document) -> list[str]:
                     continue
                 if abs(from_x - 326) > 12:
                     continue
-                targets.append((line, spans, match.group("from"), match.group("to")))
+                origin = spans[0].get("origin") or (spans[0]["bbox"][0], spans[0]["bbox"][3])
+                targets.append((spans, match.group("from"), match.group("to"), float(origin[1])))
         if not targets:
             continue
-        for line, _spans, _from_text, _to_text in targets:
-            page.add_redact_annot(fitz.Rect(line["bbox"]) + (-1, -1, 1, 1), fill=(1, 1, 1))
+        for spans, _from_text, _to_text, _baseline in targets:
+            page.add_redact_annot(_tight_span_rect(spans), fill=(1, 1, 1))
         page.apply_redactions(images=0, graphics=0)
-        for line, spans, from_text, to_text in targets:
+        for spans, from_text, to_text, baseline in targets:
             span = spans[0]
-            origin = span.get("origin") or (span["bbox"][0], span["bbox"][3])
             size = float(span.get("size") or 9)
             font = "hebo"
             color = _rgb(span.get("color") or 0)
-            baseline = float(origin[1])
             page.insert_text((326, baseline), from_text, fontsize=size, fontname=font, color=color, overlay=True)
             page.insert_text((406, baseline), to_text, fontsize=size, fontname=font, color=color, overlay=True)
             changed += 1
@@ -235,7 +234,7 @@ def normalize_from_to_columns(doc: fitz.Document) -> list[str]:
 
 
 def normalize_cover_address_spacing(doc: fitz.Document) -> list[str]:
-    """Compact oversized vertical gaps between the cover date and the RE line."""
+    """Compact oversized gaps in the cover address block and pull RE:/body up with it."""
     if not doc.page_count:
         return []
     page = doc[0]
@@ -264,23 +263,44 @@ def normalize_cover_address_spacing(doc: fitz.Document) -> list[str]:
         return []
 
     address_lines = lines[date_index + 1 : re_index]
-    if len(address_lines) < 2:
+    if not address_lines:
         return []
-    first_baseline = min(float(span.get("origin", (0, span["bbox"][3]))[1]) for span in address_lines[0]["spans"])
+
+    def _baseline(item: dict) -> float:
+        return min(float(span.get("origin", (0, span["bbox"][3]))[1]) for span in item["spans"])
+
+    def _size(item: dict) -> float:
+        return max(float(span.get("size") or 10) for span in item["spans"])
+
+    first_baseline = _baseline(address_lines[0])
     destination_baselines: list[float] = [first_baseline]
     for index, item in enumerate(address_lines[1:], start=1):
         previous = address_lines[index - 1]
-        previous_size = max(float(span.get("size") or 10) for span in previous["spans"])
-        line_size = max(float(span.get("size") or 10) for span in item["spans"])
-        step = max(previous_size, line_size) * 1.35
-        original_baseline = min(float(span.get("origin", (0, span["bbox"][3]))[1]) for span in item["spans"])
+        step = max(_size(previous), _size(item)) * 1.35
+        original_baseline = _baseline(item)
         destination_baselines.append(min(original_baseline, destination_baselines[-1] + step))
 
-    moved = [
-        (item, destination - min(float(span.get("origin", (0, span["bbox"][3]))[1]) for span in item["spans"]))
+    moved: list[tuple[dict, float]] = [
+        (item, destination - _baseline(item))
         for item, destination in zip(address_lines, destination_baselines)
     ]
-    moved = [(item, delta) for item, delta in moved if delta < -1.0]
+    moved = [(item, delta) for item, delta in moved if abs(delta) > 1.0]
+
+    # After packing the address, close leftover space above RE: by shifting RE and
+    # everything below it by the same amount (keeps body spacing intact).
+    last_address_baseline = destination_baselines[-1]
+    re_item = lines[re_index]
+    re_baseline = _baseline(re_item)
+    step = max(_size(address_lines[-1]), _size(re_item)) * 1.35
+    # One blank line between the last address line and RE:.
+    target_re_baseline = last_address_baseline + step * 2
+    body_delta = target_re_baseline - re_baseline
+    body_moved = 0
+    if body_delta < -1.0:
+        for item in lines[re_index:]:
+            moved.append((item, body_delta))
+            body_moved += 1
+
     if not moved:
         return []
 
@@ -298,25 +318,27 @@ def normalize_cover_address_spacing(doc: fitz.Document) -> list[str]:
                 color=_rgb(span.get("color") or 0),
                 overlay=True,
             )
-    return [f"Compacted spacing between {len(moved)} cover-address line(s)."]
+    parts = [f"Compacted spacing for {len(address_lines)} cover-address line(s)"]
+    if body_moved:
+        parts.append(f"shifted RE/body up by {abs(body_delta):.1f}pt")
+    return ["; ".join(parts) + "."]
 
 
 def normalize_date_range_spacing(doc: fitz.Document) -> list[str]:
     """Ensure date range connectors have spaces while retaining source text spans and alignment."""
     changed = 0
     for page in doc:
-        lines: list[tuple[dict, list[dict], str, list[int]]] = []
+        lines: list[tuple[list[dict], str]] = []
         for block in page.get_text("dict").get("blocks", []):
             if block.get("type") != 0:
                 continue
             for line in block.get("lines", []):
-                spans = [span for span in line.get("spans", []) if span.get("text", "").strip()]
                 full_spans = [span for span in line.get("spans", []) if span.get("text", "")]
                 text = "".join(span.get("text", "") for span in full_spans)
-                if spans and _DATE_RANGE_CONNECTOR.search(text):
-                    lines.append((line, full_spans, text, spans))
-        changed_lines: list[tuple[dict, list[dict], list[str]]] = []
-        for line, spans, original, _nonempty_spans in lines:
+                if full_spans and _DATE_RANGE_CONNECTOR.search(text):
+                    lines.append((full_spans, text))
+        changed_lines: list[tuple[list[dict], list[str]]] = []
+        for spans, original in lines:
             insertions: list[int] = []
             for match in _DATE_RANGE_CONNECTOR.finditer(original):
                 connector_start = match.start("connector")
@@ -345,14 +367,21 @@ def normalize_date_range_spacing(doc: fitz.Document) -> list[str]:
                 for position in sorted(positions, reverse=True):
                     span_text = span_text[:position] + " " + span_text[position:]
                 updated_spans[span_index] = span_text
-            changed_lines.append((line, spans, updated_spans))
+            changed_lines.append((spans, updated_spans))
         if not changed_lines:
             continue
-        for line, _spans, _texts in changed_lines:
-            page.add_redact_annot(fitz.Rect(line["bbox"]) + (-1, -1, 1, 1), fill=(1, 1, 1))
+        for spans, updated_spans in changed_lines:
+            dirty = [
+                span
+                for span, new in zip(spans, updated_spans)
+                if str(span.get("text", "")) != new
+            ]
+            page.add_redact_annot(_tight_span_rect(dirty or spans), fill=(1, 1, 1))
         page.apply_redactions(images=0, graphics=0)
-        for _line, spans, updated_spans in changed_lines:
+        for spans, updated_spans in changed_lines:
             for span, updated in zip(spans, updated_spans):
+                if str(span.get("text", "")) == updated:
+                    continue
                 origin = span.get("origin") or (span["bbox"][0], span["bbox"][3])
                 fontsize = float(span.get("size") or 10)
                 fontname = _base_font(str(span.get("font") or ""), int(span.get("flags") or 0))
@@ -361,15 +390,26 @@ def normalize_date_range_spacing(doc: fitz.Document) -> list[str]:
                         (origin[0], origin[1]), updated,
                         fontsize=fontsize, fontname=fontname,
                         color=_rgb(span.get("color") or 0),
+                        overlay=True,
                     )
                 except Exception:
                     page.insert_text(
                         (origin[0], origin[1]), updated,
                         fontsize=fontsize, fontname="helv",
                         color=_rgb(span.get("color") or 0),
+                        overlay=True,
                     )
             changed += 1
     return [f"Normalized spacing in {changed} date range(s)."] if changed else []
+
+
+def _tight_span_rect(spans: list[dict]) -> fitz.Rect:
+    """Redact only the ink of these spans — no vertical padding that can wipe nearby lines."""
+    rect = fitz.Rect(spans[0]["bbox"])
+    for span in spans[1:]:
+        rect |= fitz.Rect(span["bbox"])
+    # Horizontal pad only; inset slightly on Y so overlapping neighbor line boxes survive.
+    return fitz.Rect(rect.x0 - 0.5, rect.y0 + 0.35, rect.x1 + 0.5, rect.y1 - 0.35)
 
 
 def _date_span_boundary_has_visual_gap(spans: list[dict], position: int) -> bool:

@@ -1,4 +1,6 @@
-# Year End Recap page. The page heading in the package is Important Information.
+# Year End Recap / Important Information — 401(k) plan rules.
+# 403(b) uses config/plan_403b.yaml `recap_rules` instead (see tests/test copy.docx).
+# 457 starts from these rules, then adds/overrides via config/plan_457.yaml `recap_rules`.
 
 rules:
   - id: Y1
@@ -12,38 +14,46 @@ rules:
     else: remove
     missing: remove
 
+  # Para 2: Keep if PRIOR testing used for ADP/ACP and Future HCE exist. Otherwise remove.
+  # Safe Harbor plans use Y4 instead (rules_engine drops Y2/Y3 when Y4 is kept).
+  # Do not keep with Y5 (HCE current year only — no Future HCE wording).
   - id: Y2
     section: Year End Recap, prior year testing
     keep_when:
       all:
         - field: testing_method
           equals: PRIOR
-        - field: safe_harbor
-          not_true: true
-        - any_true: [hce_current, hce_future]
+        - field: hce_future
+          equals: true
     else: remove
     missing: remove
 
+  # Para 3: Keep if CURRENT testing used for ADP/ACP and Future HCE exist. Otherwise remove.
   - id: Y3
     section: Year End Recap, current year testing
     keep_when:
       all:
         - field: testing_method
           equals: CURRENT
-        - field: safe_harbor
-          not_true: true
-        - any_true: [hce_current, hce_future]
+        - field: hce_future
+          equals: true
     else: remove
     missing: remove
 
+  # Para 4: Keep if plan is SH or switching to SH next year, and Future HCE exist.
   - id: Y4
     section: Year End Recap, safe harbor
     keep_when:
       all:
         - field: safe_harbor
           equals: true
+        - field: hce_future
+          equals: true
     else: remove
+    missing: remove
 
+  # Para 5: Keep if HCE current year but no HCE next year. Otherwise remove.
+  # Exclusive of Y2/Y3/Y4 Future-HCE deferral wording.
   - id: Y5
     section: Year End Recap, HCE this year but not next year
     keep_when:
@@ -91,15 +101,17 @@ recap_bullets:
   - id: Y2
     match: is % based on
   - id: Y3
-    match: the actual amount the employee can defer
+    match: In addition, the actual amount the employee can defer
   - id: Y3
-    match: Nonhighly Compensated Employees for
+    match: cannot exceed
   - id: Y4
     match: Safe Harbor Plan
+  - id: Y4
+    match: not limited as long as
   - id: Y5
     match: the plan had Highly Compensated Employees for the plan year ending
   - id: Y5
-    match: no employee will be considered highly compensated for the plan year beginning
+    match: however, no employee will be considered highly compensated
   - id: Y6
     match: designed to allow participants who were age 50
   - id: Y7

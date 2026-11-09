@@ -32,7 +32,45 @@ def evaluate(profile: PlanProfile) -> list[RuleDecision]:
     decisions: list[RuleDecision] = []
     for rule in spec.get("rules") or []:
         decisions.append(_apply_rule(rule, profile))
-    return decisions
+    return _apply_recap_method_exclusivity(decisions)
+
+
+def _apply_recap_method_exclusivity(decisions: list[RuleDecision]) -> list[RuleDecision]:
+    """Year End Recap HCE / method paragraphs are mutually exclusive.
+
+    - Y4 (Safe Harbor) wins over Y2/Y3
+    - Y5 (HCE current year, no future HCE) wins over Y2/Y3/Y4 Future-HCE wording
+    """
+    by_id = {item.rule_id: item for item in decisions}
+    updated = list(decisions)
+    y5 = by_id.get("Y5")
+    if y5 is not None and y5.action == "keep":
+        updated = [
+            RuleDecision(
+                rule_id=item.rule_id,
+                section=item.section,
+                action="remove",
+                reason=f"Rule {item.rule_id} removed: current-year HCE paragraph (Y5) is kept",
+            )
+            if item.rule_id in {"Y2", "Y3", "Y4"} and item.action != "remove"
+            else item
+            for item in updated
+        ]
+        return updated
+    y4 = by_id.get("Y4")
+    if y4 is None or y4.action != "keep":
+        return updated
+    return [
+        RuleDecision(
+            rule_id=item.rule_id,
+            section=item.section,
+            action="remove",
+            reason=f"Rule {item.rule_id} removed: Safe Harbor paragraph (Y4) is kept",
+        )
+        if item.rule_id in {"Y2", "Y3"} and item.action != "remove"
+        else item
+        for item in updated
+    ]
 
 
 def _apply_rule(rule: dict, profile: PlanProfile) -> RuleDecision:

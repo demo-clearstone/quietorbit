@@ -389,7 +389,7 @@ def _package_reasons(
         item = _compliance_check(doc, profile)
         if not item.passed:
             reasons.append(f"{item.label} validation failed: {item.detail}. Assembly stopped.")
-    reasons.extend(_summary_result_reasons(doc, selected))
+    reasons.extend(_summary_result_reasons(doc, selected, profile.plan_type))
     if "cover_excel" in selected:
         reasons.extend(_excel_cover_reasons(
             excel_company=excel_company,
@@ -408,13 +408,17 @@ def _package_reasons(
         if not order_check.passed:
             reasons.append("Report pages do not follow TEST23 order: " + order_check.detail + ". Assembly stopped.")
     if "coverage_results" in selected:
-        coverage = _coverage_reason(doc)
+        coverage = _coverage_reason(doc, profile.plan_type)
         if coverage:
             reasons.append(coverage)
     return reasons
 
 
-def _summary_result_reasons(doc: fitz.Document, selected: set[str] | None = None) -> list[str]:
+def _summary_result_reasons(
+    doc: fitz.Document,
+    selected: set[str] | None = None,
+    plan_type: str | None = None,
+) -> list[str]:
     """Stop if the tester's Result Summary conflicts with the test reports.
 
     Purpose:
@@ -422,6 +426,8 @@ def _summary_result_reasons(doc: fitz.Document, selected: set[str] | None = None
 
     Args:
         doc: Open PDF. Must not be closed.
+        selected: Selected validation ids.
+        plan_type: Plan type for 410(b) Result Summary norms.
 
     Returns:
         list[str].
@@ -439,7 +445,7 @@ def _summary_result_reasons(doc: fitz.Document, selected: set[str] | None = None
 
     selected = _VALIDATION_IDS if selected is None else selected
     failures = []
-    for item in _result_summary_checks(doc):
+    for item in _result_summary_checks(doc, plan_type):
         if item.passed:
             continue
         if item.code == "summary_410(b)":
@@ -1092,14 +1098,16 @@ def _summary_text(doc: fitz.Document) -> str:
     return "\n".join(parts)
 
 
-def _coverage_reason(doc: fitz.Document) -> str | None:
+def _coverage_reason(doc: fitz.Document, plan_type: str | None = None) -> str | None:
     """Coverage reason.
 
     Purpose:
-        Coverage reason.
+        Stop when required 410(b) Coverage Test lines are missing on the Result Summary.
+        403(b) packages require Standard / 401(m) only — not a 401(k) line.
 
     Args:
         doc: Open PDF. Must not be closed.
+        plan_type: Plan type. ``403b`` omits the 401(k) under-410(b) requirement.
 
     Returns:
         str | None.
@@ -1108,12 +1116,13 @@ def _coverage_reason(doc: fitz.Document) -> str | None:
         A closed PDF raises from PyMuPDF.
 
     Example:
-        _coverage_reason(doc) returns str | None.
+        _coverage_reason(doc, "403b") returns str | None.
 
     Side effects:
         None. This function only reads data and returns a value.
     """
     from services.package_polish import is_compliance_overview
+    from services.plan_config import is_403b_plan
 
     full = "\n".join(
         text
@@ -1125,17 +1134,23 @@ def _coverage_reason(doc: fitz.Document) -> str | None:
     summary = _summary_text(doc)
     if not summary:
         return None
-    missing = [
-        label
-        for label, pattern in (
-            ("Standard", r"standard"),
-            ("401(k)", r"401\s*\(?k\)?"),
-            ("401(m)", r"401\s*\(?m\)?"),
-        )
-        if not _resolved_result(summary, pattern)
+    labels = [
+        ("Standard", r"standard"),
+        ("401(m)", r"401\s*\(\s*m\s*\)"),
     ]
+    if not is_403b_plan(plan_type):
+        labels.insert(1, ("401(k)", r"401\s*\(\s*k\s*\)"))
+    missing = [label for label, pattern in labels if not _resolved_result(summary, pattern)]
     if not missing:
         return None
+    if is_403b_plan(plan_type):
+        return (
+            "The plan has contributions other than deferrals and Roth, so the Result Summary "
+            "needs a resolved 410(b) line for "
+            + ", ".join(missing)
+            + " (Standard for profit sharing and SHNE, 401(m) for match; "
+            "401(k) must not appear under 410(b) Coverage Test for 403(b)). Assembly stopped."
+        )
     return (
         "The plan has contributions other than deferrals and Roth, so the Result Summary "
         "needs a resolved 410(b) line for "
