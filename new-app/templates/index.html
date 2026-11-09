@@ -510,7 +510,7 @@
     #source-order li { display: inline; }
     #source-order li:not(:last-child)::after { content: " · "; }
     #tab-warnings { margin: 0; padding-left: 16px; font-size: 0.72rem; color: var(--muted); }
-    .preview-wrap { padding: 0; display: none; }
+    .preview-wrap { padding: 0; display: none; flex-direction: column; }
     .workspace.preview-on .preview-wrap { display: flex; }
     .preview-bar {
       display: flex;
@@ -532,6 +532,80 @@
     }
     .preview-tools > button, .preview-tools > a { padding: 5px 7px; font-size: 0.72rem; }
     .preview-note { color: var(--muted); font-size: 0.7rem; }
+    .editor-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 4px 6px;
+      padding: 6px 10px;
+      border-bottom: 1px solid var(--line);
+      background: #f8fafc;
+      flex: 0 0 auto;
+    }
+    .editor-group {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      padding-right: 8px;
+      margin-right: 2px;
+      border-right: 1px solid var(--line);
+    }
+    .editor-group:last-child { border-right: 0; padding-right: 0; margin-right: 0; }
+    .editor-toolbar button,
+    .editor-toolbar select,
+    .editor-toolbar input[type="search"] {
+      font-size: 0.7rem;
+      line-height: 1.2;
+      padding: 4px 7px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: #fff;
+      color: var(--text);
+      cursor: pointer;
+    }
+    .editor-toolbar button.active {
+      background: #dbeafe;
+      border-color: #93c5fd;
+      color: var(--accent);
+      font-weight: 700;
+    }
+    .editor-toolbar button:disabled { opacity: 0.45; cursor: default; }
+    .editor-toolbar select { padding-right: 4px; }
+    .editor-toolbar input[type="search"] {
+      width: 140px;
+      cursor: text;
+    }
+    .editor-hint {
+      color: var(--muted);
+      font-size: 0.68rem;
+      white-space: nowrap;
+    }
+    .page-line.selected {
+      background: rgba(29, 78, 216, 0.22);
+      outline: 1px solid rgba(29, 78, 216, 0.7);
+      outline-offset: 1px;
+    }
+    .draw-overlay {
+      position: absolute;
+      inset: 0;
+      z-index: 5;
+      cursor: crosshair;
+      display: none;
+    }
+    .preview-scroll.draw-mode .draw-overlay { display: block; }
+    .preview-scroll.draw-mode .page-lines { pointer-events: none; }
+    .draw-rect {
+      position: absolute;
+      border: 1.5px dashed #1d4ed8;
+      background: rgba(29, 78, 216, 0.12);
+      pointer-events: none;
+    }
+    .draw-rect.line-tool {
+      border: 0;
+      background: transparent;
+      border-top: 2px solid #111;
+      height: 0 !important;
+    }
     .preview-body {
       flex: 1 1 auto;
       min-height: 0;
@@ -595,7 +669,7 @@
       margin: 0;
       cursor: text;
     }
-    .page-line:hover { background: rgba(29, 78, 216, 0.14); }
+    .page-line:hover { background: rgba(29, 78, 216, 0.18); }
     .mark-box {
       position: absolute;
       display: none;
@@ -608,13 +682,17 @@
       z-index: 6;
       box-sizing: border-box;
       margin: 0;
-      padding: 0 3px;
+      padding: 1px 4px;
       border: 2px solid #1d4ed8;
       border-radius: 2px;
-      background: #fff;
+      background: #fffef5;
       color: #111;
       font-family: "Times New Roman", Times, serif;
       line-height: 1.15;
+      caret-color: #dc2626;
+      outline: none;
+      box-shadow: 0 0 0 3px rgba(29, 78, 216, 0.25);
+      min-height: 1.4em;
     }
     .hidden { display: none !important; }
     @media (max-width: 900px) {
@@ -745,13 +823,66 @@
             <button type="button" class="btn ghost" id="page-up" title="Move this page earlier">Earlier</button>
             <button type="button" class="btn ghost" id="page-down" title="Move this page later">Later</button>
             <button type="button" class="btn ghost" id="page-rotate" title="Rotate this page">Rotate</button>
+            <button type="button" class="btn ghost" id="page-delete" title="Delete this page">Delete page</button>
             <button type="button" class="btn ghost" id="undo-edit" title="Undo the last change">Undo</button>
+            <button type="button" class="btn ghost" id="redo-edit" title="Redo the last undone change">Redo</button>
+            <button type="button" class="btn ghost" id="save-edited" title="Save a separate edited PDF copy">Save edited copy</button>
             <a class="btn ghost" id="preview-download" href="#">Download</a>
             <button type="button" class="btn ghost" id="zoom-out" title="Smaller">−</button>
             <button type="button" class="btn ghost" id="zoom-in" title="Larger">+</button>
             <span class="preview-note" id="edit-status"></span>
             <button type="button" class="btn ghost" id="close-preview">Close preview</button>
           </div>
+        </div>
+        <div class="editor-toolbar" id="editor-toolbar" role="toolbar" aria-label="PDF editor">
+          <div class="editor-group">
+            <button type="button" class="tool-btn active" data-tool="select" title="Select and edit text">Select</button>
+            <button type="button" class="tool-btn" data-tool="text" title="Click the page to add text">Add text</button>
+            <button type="button" id="remove-spaces" title="Remove spaces between words on the selected line">Remove spaces</button>
+            <button type="button" id="shift-newline" title="Move text after the caret onto the next line">New line</button>
+            <button type="button" id="join-up" title="Join this line with the line above. Cursor at front + Delete also does this.">Join up</button>
+          </div>
+          <div class="editor-group">
+            <button type="button" id="fmt-bold" title="Bold selected line"><b>B</b></button>
+            <button type="button" id="fmt-italic" title="Italic selected line"><i>I</i></button>
+            <select id="fmt-size" title="Font size for selected or new text" aria-label="Font size">
+              <option value="">Size</option>
+              <option value="8">8</option>
+              <option value="9">9</option>
+              <option value="10">10</option>
+              <option value="11">11</option>
+              <option value="12">12</option>
+              <option value="14">14</option>
+              <option value="16">16</option>
+              <option value="18">18</option>
+              <option value="24">24</option>
+            </select>
+          </div>
+          <div class="editor-group">
+            <button type="button" id="align-left" title="Align selected line left">Left</button>
+            <button type="button" id="align-center" title="Align selected line center">Center</button>
+            <button type="button" id="align-right" title="Align selected line right">Right</button>
+          </div>
+          <div class="editor-group">
+            <button type="button" class="tool-btn" data-tool="hline" title="Drag to draw a horizontal line">H-Line</button>
+            <button type="button" class="tool-btn" data-tool="line" title="Drag to draw a diagonal line">Line</button>
+            <button type="button" class="tool-btn" data-tool="rectangle" title="Drag to draw a rectangle">Rect</button>
+            <button type="button" class="tool-btn" data-tool="circle" title="Drag to draw a circle">Circle</button>
+          </div>
+          <div class="editor-group">
+            <button type="button" class="tool-btn" data-tool="highlight" title="Drag to highlight">Highlight</button>
+            <button type="button" class="tool-btn" data-tool="note" title="Drag to place a note">Note</button>
+            <button type="button" class="tool-btn" data-tool="stamp" title="Drag to place a stamp">Stamp</button>
+            <button type="button" class="tool-btn" data-tool="redact" title="Drag to permanently redact">Redact</button>
+            <button type="button" class="tool-btn" data-tool="signature" title="Draw a signature">Sign</button>
+          </div>
+          <div class="editor-group">
+            <input type="search" id="preview-search" placeholder="Find in PDF" aria-label="Search PDF text" />
+            <button type="button" id="search-prev" title="Previous match">‹</button>
+            <button type="button" id="search-next" title="Next match">›</button>
+            <span class="editor-hint" id="search-status"></span>
+          </div>
+          <span class="editor-hint" id="tool-hint">Click a line. Cursor at front + Delete joins with the line above. Enter moves text down.</span>
         </div>
         <div class="preview-body">
           <aside class="bookmark-panel" id="bookmark-panel">
@@ -811,7 +942,27 @@
     let selectedButton = null;
     let inlineInput = null;
     let inlineSkipBlur = false;
+    let activeTool = "select";
+    let drawState = null;
+    let searchMatches = [];
+    let searchIndex = -1;
+    let fmtBold = false;
+    let fmtItalic = false;
     const pageLoads = new Map();
+    const dragTools = new Set(["hline", "line", "rectangle", "circle", "highlight", "note", "stamp", "redact", "signature"]);
+    const toolHints = {
+      select: "Click a line to edit. Cursor at the front + Delete/Backspace joins with the line above. Enter moves text down.",
+      text: "Click on the page to place new text. Set Bold / Size / Align first if needed.",
+      hline: "Drag across the page to draw a horizontal line.",
+      line: "Drag from one point to another to draw a line.",
+      rectangle: "Drag to draw a rectangle.",
+      circle: "Drag to draw a circle.",
+      highlight: "Drag over text to highlight it.",
+      note: "Drag a box, then enter note text.",
+      stamp: "Drag a box, then enter stamp text.",
+      redact: "Drag over content to permanently remove it.",
+      signature: "Click and drag to draw a signature stroke.",
+    };
     let pageObserver = null;
 
     document.getElementById("hide-upload").addEventListener("click", () => setUploadOpen(false));
@@ -1559,12 +1710,15 @@
       results.classList.add("preview-on");
       previewLink.textContent = "Hide preview";
       previewScroll.classList.toggle("show-marks", highlightChanges.checked);
-      editStatus.textContent = "Double-click a line. Enter moves that text down onto the next line.";
+      setActiveTool(activeTool || "select");
+      editStatus.textContent = toolHints[activeTool] || "";
       if (currentJob && viewerJobId !== currentJob.job_id) buildViewer();
     }
 
     function hidePreview() {
       closeInline();
+      clearSelection();
+      endDraw();
       results.classList.remove("preview-on");
       previewLink.textContent = "Preview";
     }
@@ -1608,9 +1762,17 @@
         image.alt = "Page " + page;
         image.draggable = false;
         sheet.appendChild(image);
+        const overlay = document.createElement("div");
+        overlay.className = "draw-overlay";
+        overlay.dataset.page = String(page);
+        sheet.appendChild(overlay);
         sheet.addEventListener("dblclick", (event) => onPageDoubleClick(event, sheet));
+        sheet.addEventListener("click", (event) => onPageClick(event, sheet));
+        overlay.addEventListener("pointerdown", (event) => onDrawStart(event, sheet));
         previewScroll.appendChild(sheet);
       }
+      applyZoom();
+      syncDrawMode();
       pageObserver = new IntersectionObserver((entries) => {
         entries.forEach((entry) => {
           const page = Number(entry.target.dataset.page);
@@ -1697,6 +1859,22 @@
         button.style.height = (Math.max(line.y1 - line.y0, 8) / meta.height * 100 + padY * 2) + "%";
         button.title = line.text;
         button.dataset.line = JSON.stringify(line);
+        if (
+          selectedLine
+          && selectedLine.page === Number(sheet.dataset.page)
+          && Math.abs(selectedLine.x0 - line.x0) < 0.5
+          && Math.abs(selectedLine.y0 - line.y0) < 0.5
+          && selectedLine.text === line.text
+        ) {
+          button.classList.add("selected");
+          selectedButton = button;
+        }
+        button.addEventListener("click", (event) => {
+          if (activeTool !== "select") return;
+          event.preventDefault();
+          event.stopPropagation();
+          openLineEditor(Number(sheet.dataset.page), line, button, event);
+        });
         layer.appendChild(button);
       });
       sheet.querySelector(".page-lines")?.remove();
@@ -1743,28 +1921,22 @@
     }
 
     async function onPageDoubleClick(event, sheet) {
+      if (activeTool !== "select") return;
       if (event.target.closest(".inline-edit")) return;
       event.preventDefault();
       const page = Number(sheet.dataset.page);
       const clicked = event.target.closest(".page-line");
-      let pending = null;
-      if (inlineInput && selectedLine && inlineInput.value !== selectedLine.text) {
-        pending = { line: selectedLine, value: inlineInput.value };
-      }
-      inlineSkipBlur = true;
-      closeInline();
-      if (pending && !await applyLineEdit(pending.value, pending.line)) return;
       const liveSheet = document.getElementById("pdf-page-" + page);
       if (!liveSheet) return;
       if (!liveSheet.querySelector(".page-line")) await loadPage(page);
       const button = (clicked && clicked.isConnected) ? clicked : nearestLine(liveSheet, event);
       if (!button) {
         editStatus.textContent = liveSheet.querySelector(".page-line")
-          ? "Double-click closer to the words."
+          ? "Click closer to the words to edit them."
           : "This page has no text to change.";
         return;
       }
-      beginEdit(page, JSON.parse(button.dataset.line), button);
+      await openLineEditor(page, JSON.parse(button.dataset.line), button, event);
     }
 
     function closeInline() {
@@ -1772,13 +1944,52 @@
       inlineInput = null;
     }
 
-    function beginEdit(page, line, button) {
+    function caretIndexFromClick(button, event, text) {
+      const value = text || "";
+      if (!value) return 0;
+      const rect = button.getBoundingClientRect();
+      if (!rect.width) return value.length;
+      const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+      return Math.round(ratio * value.length);
+    }
+
+    async function openLineEditor(page, line, button, event) {
+      if (activeTool !== "select") return;
+      let pending = null;
+      if (inlineInput && selectedLine && inlineInput.value !== selectedLine.text) {
+        pending = { line: selectedLine, value: inlineInput.value };
+      }
+      const caret = event ? caretIndexFromClick(button, event, line.text) : null;
+      inlineSkipBlur = true;
+      closeInline();
+      if (pending && !await applyLineEdit(pending.value, pending.line)) {
+        inlineSkipBlur = false;
+        return;
+      }
+      const liveButton = button.isConnected
+        ? button
+        : [...(document.getElementById("pdf-page-" + page)?.querySelectorAll(".page-line") || [])]
+          .find((node) => {
+            const item = JSON.parse(node.dataset.line);
+            return Math.abs(item.x0 - line.x0) < 0.5 && Math.abs(item.y0 - line.y0) < 0.5;
+          });
+      if (!liveButton) {
+        editStatus.textContent = "Could not open that line for editing.";
+        inlineSkipBlur = false;
+        return;
+      }
+      beginEdit(page, JSON.parse(liveButton.dataset.line), liveButton, caret);
+    }
+
+    function beginEdit(page, line, button, caretIndex = null) {
       const sheet = button.closest(".page-sheet");
       if (!sheet) return;
       inlineSkipBlur = true;
       closeInline();
+      clearSelection();
       selectedButton = button;
       selectedLine = { page, x0: line.x0, y0: line.y0, x1: line.x1, y1: line.y1, text: line.text };
+      button.classList.add("selected");
       inlineInput = document.createElement("input");
       inlineInput.type = "text";
       inlineInput.className = "inline-edit";
@@ -1786,26 +1997,127 @@
       const left = parseFloat(button.style.left) || 0;
       inlineInput.style.left = left + "%";
       inlineInput.style.top = button.style.top;
-      inlineInput.style.width = Math.max(parseFloat(button.style.width) || 10, Math.min(80, 97 - left)) + "%";
-      inlineInput.style.height = Math.max(parseFloat(button.style.height) || 2, 2.4) + "%";
-      inlineInput.style.fontSize = Math.max(12, button.getBoundingClientRect().height * 0.72) + "px";
+      inlineInput.style.width = Math.max(parseFloat(button.style.width) || 10, Math.min(92, 98 - left)) + "%";
+      inlineInput.style.height = Math.max(parseFloat(button.style.height) || 2, 3.2) + "%";
+      inlineInput.style.fontSize = Math.max(13, button.getBoundingClientRect().height * 0.78) + "px";
       inlineInput.value = line.text;
       inlineInput.addEventListener("keydown", onInlineKey);
       inlineInput.addEventListener("blur", onInlineBlur);
+      inlineInput.addEventListener("click", (event) => event.stopPropagation());
       sheet.appendChild(inlineInput);
       inlineInput.focus();
-      inlineInput.select();
-      editStatus.textContent = "Enter moves this text down onto the next line. Escape cancels.";
-      setTimeout(() => { inlineSkipBlur = false; }, 0);
+      const pos = caretIndex == null ? line.text.length : Math.max(0, Math.min(line.text.length, caretIndex));
+      inlineInput.setSelectionRange(pos, pos);
+      editStatus.textContent = "Cursor ready. At the front, press Delete or Backspace to join with the line above. Enter moves text down.";
+      setTimeout(() => {
+        if (inlineInput) {
+          inlineInput.focus();
+          inlineInput.setSelectionRange(pos, pos);
+        }
+        inlineSkipBlur = false;
+      }, 0);
+    }
+
+    function currentEditText() {
+      if (inlineInput) return inlineInput.value;
+      return selectedLine ? selectedLine.text : "";
+    }
+
+    function splitCaretForNewLine(text) {
+      if (inlineInput) return inlineInput.selectionStart ?? text.length;
+      const value = text || "";
+      if (!value.trim()) return 0;
+      const mid = Math.floor(value.length / 2);
+      let caret = value.lastIndexOf(" ", mid);
+      if (caret < 1) caret = value.indexOf(" ", mid);
+      if (caret < 1) caret = Math.max(1, mid);
+      return caret;
+    }
+
+    function removeSpaceNearCaret(text, caret) {
+      const value = text || "";
+      const pos = Math.max(0, Math.min(caret ?? value.length, value.length));
+      if (pos < value.length && /\s/.test(value[pos])) {
+        return value.slice(0, pos) + value.slice(pos + 1);
+      }
+      if (pos > 0 && /\s/.test(value[pos - 1])) {
+        return value.slice(0, pos - 1) + value.slice(pos);
+      }
+      return value.replace(/[ \t]+/g, "");
+    }
+
+    async function removeSpacesFromSelection() {
+      const line = selectedLine;
+      if (!line) {
+        editStatus.textContent = "Click a line first so the cursor appears, then use Remove spaces.";
+        return;
+      }
+      const source = currentEditText();
+      const caret = inlineInput ? inlineInput.selectionStart : null;
+      const cleaned = caret == null
+        ? source.replace(/[ \t]+/g, "")
+        : removeSpaceNearCaret(source, caret);
+      if (cleaned === source) {
+        editStatus.textContent = "No spaces to remove on that line.";
+        return;
+      }
+      inlineSkipBlur = true;
+      closeInline();
+      const ok = await applyLineEdit(cleaned, line);
+      inlineSkipBlur = false;
+      if (ok) {
+        selectedLine = { ...line, text: cleaned };
+        editStatus.textContent = caret == null || cleaned === source.replace(/[ \t]+/g, "")
+          ? "Removed spaces between words."
+          : "Removed the space at the cursor.";
+      }
+    }
+
+    async function shiftSelectionToNewLine() {
+      const line = selectedLine;
+      if (!line) {
+        editStatus.textContent = "Click a line first so the cursor appears, place it, then click New line.";
+        return;
+      }
+      if (!inlineInput) {
+        const button = selectedButton
+          || [...previewScroll.querySelectorAll(".page-line")].find((node) => {
+            const item = JSON.parse(node.dataset.line);
+            return item.text === line.text
+              && Math.abs(item.x0 - line.x0) < 0.5
+              && Math.abs(item.y0 - line.y0) < 0.5;
+          });
+        if (!button) {
+          editStatus.textContent = "Click the line to show the cursor, then click New line.";
+          return;
+        }
+        beginEdit(line.page, line, button, Math.floor((line.text || "").length / 2));
+        editStatus.textContent = "Cursor is ready. Move it to the split point, then click New line again (or press Enter).";
+        return;
+      }
+      const text = currentEditText();
+      const caret = splitCaretForNewLine(text);
+      if (!text.slice(caret).trim()) {
+        editStatus.textContent = "Move the cursor before the words you want on the next line.";
+        return;
+      }
+      inlineSkipBlur = true;
+      closeInline();
+      await applyLineShift(line, text, caret);
+      inlineSkipBlur = false;
     }
 
     function onInlineBlur() {
       if (inlineSkipBlur || !inlineInput || !selectedLine) return;
       const line = selectedLine;
       const value = inlineInput.value;
-      inlineSkipBlur = true;
-      closeInline();
-      if (value !== line.text) applyLineEdit(value, line);
+      // Delay so toolbar buttons can read the caret before the field closes.
+      setTimeout(() => {
+        if (inlineSkipBlur || !inlineInput) return;
+        inlineSkipBlur = true;
+        closeInline();
+        if (value !== line.text) applyLineEdit(value, line);
+      }, 120);
     }
 
     async function onInlineKey(event) {
@@ -1817,14 +2129,31 @@
         editStatus.textContent = "Cancelled.";
         return;
       }
+      const caret = inlineInput.selectionStart ?? 0;
+      const atFront = caret === 0 && (inlineInput.selectionEnd ?? 0) === 0;
+      if (atFront && (event.key === "Backspace" || event.key === "Delete")) {
+        event.preventDefault();
+        inlineSkipBlur = true;
+        const line = selectedLine;
+        const value = inlineInput.value;
+        closeInline();
+        await applyMergeUp(line, value);
+        inlineSkipBlur = false;
+        return;
+      }
+      if (event.key === "Home") {
+        // Keep default Home behavior so the cursor can sit at the front of the line.
+        editStatus.textContent = "Cursor at front. Press Delete or Backspace to join with the line above.";
+        return;
+      }
       if (event.key === "Enter") {
         event.preventDefault();
         inlineSkipBlur = true;
         const line = selectedLine;
         const value = inlineInput.value;
-        const caret = inlineInput.selectionStart;
+        const splitAt = inlineInput.selectionStart;
         closeInline();
-        await applyLineShift(line, value, caret);
+        await applyLineShift(line, value, splitAt);
         return;
       }
       if (event.key !== "Tab") return;
@@ -1912,13 +2241,97 @@
       }
     }
 
-    async function applyLineEdit(text, line) {
-      editStatus.textContent = "Saving…";
+    async function applyMergeUp(line, text) {
+      editStatus.textContent = "Joining with the line above…";
       try {
         const response = await fetch(jobApi("/edit"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ page: line.page, x0: line.x0, y0: line.y0, x1: line.x1, y1: line.y1, text }),
+          body: JSON.stringify({
+            page: line.page,
+            x0: line.x0,
+            y0: line.y0,
+            x1: line.x1,
+            y1: line.y1,
+            text,
+            merge_up: true,
+          }),
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(formatDetail(payload.detail) || "Could not join with the line above");
+        currentJob.highlights = payload.highlights || [];
+        highlightCount = currentJob.highlights.length;
+        syncHighlightLabel();
+        pageLoads.delete(line.page);
+        previewVersion += 1;
+        const sheet = document.getElementById("pdf-page-" + line.page);
+        if (sheet) delete sheet.dataset.ready;
+        await loadPage(line.page);
+        selectedLine = null;
+        selectedButton = null;
+        editStatus.textContent = payload.detail || "Joined with the line above.";
+        return true;
+      } catch (err) {
+        editStatus.textContent = err.message || String(err);
+        return false;
+      }
+    }
+
+    async function joinSelectionUp() {
+      const line = selectedLine;
+      if (!line) {
+        editStatus.textContent = "Click a line first, move the cursor to the front, then press Delete or click Join up.";
+        return;
+      }
+      if (!inlineInput) {
+        const button = selectedButton
+          || [...previewScroll.querySelectorAll(".page-line")].find((node) => {
+            const item = JSON.parse(node.dataset.line);
+            return item.text === line.text
+              && Math.abs(item.x0 - line.x0) < 0.5
+              && Math.abs(item.y0 - line.y0) < 0.5;
+          });
+        if (!button) {
+          editStatus.textContent = "Click the line, put the cursor at the front, then press Delete.";
+          return;
+        }
+        beginEdit(line.page, line, button, 0);
+        editStatus.textContent = "Cursor is at the front. Press Delete/Backspace or click Join up again.";
+        return;
+      }
+      const caret = inlineInput.selectionStart ?? 0;
+      if (caret !== 0) {
+        inlineInput.setSelectionRange(0, 0);
+        editStatus.textContent = "Cursor moved to the front. Press Delete/Backspace or click Join up again.";
+        inlineInput.focus();
+        return;
+      }
+      const text = currentEditText();
+      inlineSkipBlur = true;
+      closeInline();
+      await applyMergeUp(line, text);
+      inlineSkipBlur = false;
+    }
+
+    async function applyLineEdit(text, line, style = {}) {
+      editStatus.textContent = "Saving…";
+      try {
+        const body = {
+          page: line.page,
+          x0: line.x0,
+          y0: line.y0,
+          x1: line.x1,
+          y1: line.y1,
+          text,
+        };
+        if (style.bold != null) body.bold = style.bold;
+        if (style.italic != null) body.italic = style.italic;
+        if (style.align) body.align = style.align;
+        if (style.fontsize) body.fontsize = style.fontsize;
+        const response = await fetch(jobApi("/edit"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
         });
         const payload = await response.json();
         if (!response.ok) throw new Error(formatDetail(payload.detail) || "Could not update that line");
@@ -1927,6 +2340,8 @@
         syncHighlightLabel();
         pageLoads.delete(line.page);
         previewVersion += 1;
+        const sheet = document.getElementById("pdf-page-" + line.page);
+        if (sheet) delete sheet.dataset.ready;
         await loadPage(line.page);
         editStatus.textContent = "Saved.";
         return true;
@@ -1935,6 +2350,314 @@
         return false;
       }
     }
+
+    function clearSelection() {
+      previewScroll.querySelectorAll(".page-line.selected").forEach((node) => node.classList.remove("selected"));
+      selectedLine = null;
+      selectedButton = null;
+    }
+
+    function selectLine(page, line, button) {
+      clearSelection();
+      selectedLine = { page, x0: line.x0, y0: line.y0, x1: line.x1, y1: line.y1, text: line.text };
+      selectedButton = button;
+      if (button) button.classList.add("selected");
+      editStatus.textContent = "Selected: “" + (line.text || "").slice(0, 60) + "”. Use Remove spaces, New line, Bold, or Align.";
+    }
+
+    function setActiveTool(tool) {
+      activeTool = tool;
+      document.querySelectorAll(".tool-btn").forEach((btn) => {
+        btn.classList.toggle("active", btn.dataset.tool === tool);
+      });
+      const hint = document.getElementById("tool-hint");
+      if (hint) hint.textContent = toolHints[tool] || "";
+      syncDrawMode();
+      editStatus.textContent = toolHints[tool] || "";
+    }
+
+    function syncDrawMode() {
+      previewScroll.classList.toggle("draw-mode", dragTools.has(activeTool) || activeTool === "text");
+      previewScroll.querySelectorAll(".draw-overlay").forEach((overlay) => {
+        overlay.style.cursor = activeTool === "text" ? "text" : (dragTools.has(activeTool) ? "crosshair" : "default");
+        overlay.style.display = (dragTools.has(activeTool) || activeTool === "text") ? "block" : "none";
+      });
+    }
+
+    function pdfPointFromEvent(sheet, event) {
+      const rect = sheet.getBoundingClientRect();
+      const width = Number(sheet.dataset.pdfWidth) || rect.width;
+      const height = Number(sheet.dataset.pdfHeight) || rect.height;
+      const x = ((event.clientX - rect.left) / rect.width) * width;
+      const y = ((event.clientY - rect.top) / rect.height) * height;
+      return {
+        x: Math.max(0, Math.min(width, x)),
+        y: Math.max(0, Math.min(height, y)),
+        width,
+        height,
+      };
+    }
+
+    function endDraw() {
+      if (drawState?.box) drawState.box.remove();
+      if (drawState) {
+        window.removeEventListener("pointermove", onDrawMove);
+        window.removeEventListener("pointerup", onDrawEnd);
+      }
+      drawState = null;
+    }
+
+    async function onPageClick(event, sheet) {
+      if (activeTool !== "text") return;
+      if (event.target.closest(".inline-edit")) return;
+      event.preventDefault();
+      const page = Number(sheet.dataset.page);
+      const point = pdfPointFromEvent(sheet, event);
+      const text = window.prompt("Text to add on this page:");
+      if (text == null || !text.trim()) {
+        editStatus.textContent = "Add text cancelled.";
+        return;
+      }
+      await postAnnotation({
+        action: "text",
+        page,
+        x: point.x,
+        y: point.y,
+        text: text.trim(),
+        bold: fmtBold || null,
+        italic: fmtItalic || null,
+        align: document.querySelector("[data-align].active")?.dataset.align || null,
+        fontsize: Number(document.getElementById("fmt-size").value) || null,
+      });
+    }
+
+    function onDrawStart(event, sheet) {
+      if (activeTool === "text") {
+        event.preventDefault();
+        onPageClick(event, sheet);
+        return;
+      }
+      if (!dragTools.has(activeTool)) return;
+      event.preventDefault();
+      const page = Number(sheet.dataset.page);
+      const start = pdfPointFromEvent(sheet, event);
+      const box = document.createElement("div");
+      box.className = "draw-rect" + (activeTool === "hline" || activeTool === "line" ? " line-tool" : "");
+      sheet.appendChild(box);
+      drawState = {
+        sheet,
+        page,
+        tool: activeTool,
+        start,
+        box,
+        points: [[start.x, start.y]],
+      };
+      window.addEventListener("pointermove", onDrawMove);
+      window.addEventListener("pointerup", onDrawEnd);
+    }
+
+    function onDrawMove(event) {
+      if (!drawState) return;
+      const current = pdfPointFromEvent(drawState.sheet, event);
+      drawState.current = current;
+      if (drawState.tool === "signature") {
+        drawState.points.push([current.x, current.y]);
+      }
+      const x0 = Math.min(drawState.start.x, current.x);
+      const y0 = Math.min(drawState.start.y, current.y);
+      const x1 = Math.max(drawState.start.x, current.x);
+      const y1 = Math.max(drawState.start.y, current.y);
+      const width = drawState.start.width;
+      const height = drawState.start.height;
+      if (drawState.tool === "hline") {
+        const mid = ((drawState.start.y + current.y) / 2 / height) * 100;
+        drawState.box.style.left = (x0 / width * 100) + "%";
+        drawState.box.style.top = mid + "%";
+        drawState.box.style.width = ((x1 - x0) / width * 100) + "%";
+        drawState.box.style.height = "0";
+      } else if (drawState.tool === "line") {
+        drawState.box.style.left = (drawState.start.x / width * 100) + "%";
+        drawState.box.style.top = (drawState.start.y / height * 100) + "%";
+        drawState.box.style.width = (Math.hypot(current.x - drawState.start.x, current.y - drawState.start.y) / width * 100) + "%";
+        drawState.box.style.height = "0";
+        const angle = Math.atan2(current.y - drawState.start.y, current.x - drawState.start.x) * 180 / Math.PI;
+        drawState.box.style.transformOrigin = "0 50%";
+        drawState.box.style.transform = "rotate(" + angle + "deg)";
+      } else {
+        drawState.box.style.left = (x0 / width * 100) + "%";
+        drawState.box.style.top = (y0 / height * 100) + "%";
+        drawState.box.style.width = (Math.max(x1 - x0, 2) / width * 100) + "%";
+        drawState.box.style.height = (Math.max(y1 - y0, 2) / height * 100) + "%";
+        drawState.box.style.transform = "";
+      }
+    }
+
+    async function onDrawEnd() {
+      if (!drawState) return;
+      const state = drawState;
+      const current = state.current || state.start;
+      endDraw();
+      const x0 = Math.min(state.start.x, current.x);
+      const y0 = Math.min(state.start.y, current.y);
+      const x1 = Math.max(state.start.x, current.x);
+      const y1 = Math.max(state.start.y, current.y);
+      if (state.tool === "signature") {
+        if ((state.points || []).length < 2) {
+          editStatus.textContent = "Draw a longer signature stroke.";
+          return;
+        }
+        await postAnnotation({
+          action: "signature",
+          page: state.page,
+          x0, y0, x1: Math.max(x1, x0 + 2), y1: Math.max(y1, y0 + 2),
+          points: state.points,
+        });
+        return;
+      }
+      if (Math.abs(x1 - x0) < 2 && Math.abs(y1 - y0) < 2 && state.tool !== "hline") {
+        editStatus.textContent = "Drag a larger area.";
+        return;
+      }
+      let text = "";
+      if (state.tool === "note" || state.tool === "stamp") {
+        text = window.prompt(state.tool === "note" ? "Note text:" : "Stamp text:") || "";
+        if (!text.trim()) {
+          editStatus.textContent = state.tool + " cancelled.";
+          return;
+        }
+      }
+      const payload = {
+        action: state.tool,
+        page: state.page,
+        x0: state.tool === "line" ? state.start.x : x0,
+        y0: state.tool === "line" ? state.start.y : (state.tool === "hline" ? (state.start.y + current.y) / 2 - 1 : y0),
+        x1: state.tool === "line" ? current.x : x1,
+        y1: state.tool === "line" ? current.y : (state.tool === "hline" ? (state.start.y + current.y) / 2 + 1 : y1),
+        text,
+      };
+      await postAnnotation(payload);
+    }
+
+    async function postAnnotation(body) {
+      editStatus.textContent = "Saving…";
+      try {
+        const response = await fetch(jobApi("/annotate"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(formatDetail(payload.detail) || "Could not annotate the page");
+        pageLoads.delete(body.page);
+        previewVersion += 1;
+        const sheet = document.getElementById("pdf-page-" + body.page);
+        if (sheet) delete sheet.dataset.ready;
+        await loadPage(body.page);
+        editStatus.textContent = payload.detail || "Saved.";
+        setActiveTool("select");
+      } catch (err) {
+        editStatus.textContent = err.message || String(err);
+      }
+    }
+
+    async function applyFormat(style) {
+      if (!selectedLine) {
+        editStatus.textContent = "Select a text line first.";
+        return;
+      }
+      await applyLineEdit(selectedLine.text, selectedLine, style);
+    }
+
+    async function runSearch(direction) {
+      const query = document.getElementById("preview-search").value.trim();
+      const status = document.getElementById("search-status");
+      if (!query) {
+        searchMatches = [];
+        searchIndex = -1;
+        status.textContent = "";
+        return;
+      }
+      if (!searchMatches.length || searchMatches.query !== query) {
+        editStatus.textContent = "Searching…";
+        const response = await fetch(jobApi("/search?q=" + encodeURIComponent(query)));
+        const payload = await response.json();
+        if (!response.ok) throw new Error(formatDetail(payload.detail) || "Search failed");
+        searchMatches = payload.matches || [];
+        searchMatches.query = query;
+        searchIndex = -1;
+      }
+      if (!searchMatches.length) {
+        status.textContent = "0 matches";
+        editStatus.textContent = "No matches.";
+        return;
+      }
+      searchIndex = (searchIndex + direction + searchMatches.length) % searchMatches.length;
+      const match = searchMatches[searchIndex];
+      status.textContent = (searchIndex + 1) + " / " + searchMatches.length;
+      await scrollToPage(match.page);
+      editStatus.textContent = "Match on page " + match.page + ": “" + (match.text || query).slice(0, 50) + "”";
+    }
+
+    document.getElementById("editor-toolbar").addEventListener("mousedown", (event) => {
+      if (!inlineInput) return;
+      if (event.target.closest("button, select")) {
+        inlineSkipBlur = true;
+      }
+    });
+    document.querySelectorAll(".tool-btn").forEach((btn) => {
+      btn.addEventListener("click", () => setActiveTool(btn.dataset.tool));
+    });
+    document.getElementById("remove-spaces").addEventListener("click", () => {
+      removeSpacesFromSelection().catch((err) => {
+        editStatus.textContent = err.message || String(err);
+      });
+    });
+    document.getElementById("shift-newline").addEventListener("click", () => {
+      shiftSelectionToNewLine().catch((err) => {
+        editStatus.textContent = err.message || String(err);
+      });
+    });
+    document.getElementById("join-up").addEventListener("click", () => {
+      joinSelectionUp().catch((err) => {
+        editStatus.textContent = err.message || String(err);
+      });
+    });
+    document.getElementById("fmt-bold").addEventListener("click", async () => {
+      fmtBold = !fmtBold;
+      document.getElementById("fmt-bold").classList.toggle("active", fmtBold);
+      if (selectedLine) await applyFormat({ bold: fmtBold });
+    });
+    document.getElementById("fmt-italic").addEventListener("click", async () => {
+      fmtItalic = !fmtItalic;
+      document.getElementById("fmt-italic").classList.toggle("active", fmtItalic);
+      if (selectedLine) await applyFormat({ italic: fmtItalic });
+    });
+    document.getElementById("fmt-size").addEventListener("change", async (event) => {
+      const size = Number(event.target.value);
+      if (!size) return;
+      if (selectedLine) await applyFormat({ fontsize: size });
+    });
+    ["left", "center", "right"].forEach((align) => {
+      const button = document.getElementById("align-" + align);
+      button.dataset.align = align;
+      button.addEventListener("click", async () => {
+        document.querySelectorAll("[data-align]").forEach((node) => node.classList.toggle("active", node === button));
+        if (selectedLine) await applyFormat({ align });
+      });
+    });
+    document.getElementById("search-next").addEventListener("click", () => {
+      runSearch(1).catch((err) => { editStatus.textContent = err.message || String(err); });
+    });
+    document.getElementById("search-prev").addEventListener("click", () => {
+      runSearch(-1).catch((err) => { editStatus.textContent = err.message || String(err); });
+    });
+    document.getElementById("preview-search").addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        searchMatches = [];
+        runSearch(1).catch((err) => { editStatus.textContent = err.message || String(err); });
+      }
+    });
 
     previewLink.addEventListener("click", (event) => {
       event.preventDefault();
@@ -1978,6 +2701,10 @@
     }
 
     document.getElementById("page-rotate").addEventListener("click", () => runPageOperation("rotate"));
+    document.getElementById("page-delete").addEventListener("click", () => {
+      if (!window.confirm("Delete page " + activePage + " from the edited working copy?")) return;
+      runPageOperation("delete");
+    });
     document.getElementById("page-up").addEventListener("click", () => {
       if (activePage > 1) runPageOperation("reorder", activePage - 1);
     });
@@ -1985,18 +2712,36 @@
       const count = previewScroll.querySelectorAll(".page-sheet").length;
       if (activePage < count) runPageOperation("reorder", activePage + 1);
     });
-    document.getElementById("undo-edit").addEventListener("click", async () => {
+    async function runHistory(action) {
       if (!currentJob) return;
       try {
-        const response = await fetch(jobApi("/history/undo"), { method: "POST" });
+        const response = await fetch(jobApi("/history/" + action), { method: "POST" });
         const payload = await response.json();
-        if (!response.ok) throw new Error(formatDetail(payload.detail) || "Nothing to undo");
+        if (!response.ok) throw new Error(formatDetail(payload.detail) || ("Nothing to " + action));
         currentJob.highlights = payload.highlights || [];
         highlightCount = currentJob.highlights.length;
         syncHighlightLabel();
         await buildViewer();
         await scrollToPage(activePage);
-        editStatus.textContent = payload.detail || "Undone.";
+        editStatus.textContent = payload.detail || (action + " complete.");
+      } catch (err) {
+        editStatus.textContent = err.message || String(err);
+      }
+    }
+    document.getElementById("undo-edit").addEventListener("click", () => runHistory("undo"));
+    document.getElementById("redo-edit").addEventListener("click", () => runHistory("redo"));
+    document.getElementById("save-edited").addEventListener("click", async () => {
+      if (!currentJob) return;
+      editStatus.textContent = "Saving edited copy…";
+      try {
+        const response = await fetch(jobApi("/save-edited"), { method: "POST" });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(formatDetail(payload.detail) || "Could not save edited copy");
+        if (payload.url) {
+          previewDownload.href = apiBase() + payload.url;
+          previewDownload.setAttribute("download", payload.filename || "edited.pdf");
+        }
+        editStatus.textContent = payload.detail || "Edited copy saved.";
       } catch (err) {
         editStatus.textContent = err.message || String(err);
       }
