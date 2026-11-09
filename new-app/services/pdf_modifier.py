@@ -79,7 +79,7 @@ def apply_decisions(
             _apply_redact_boxes(page, boxes, cover=False)
     if touched:
         _restack_pages(doc, touched)
-        _pull_kept_action_forward(doc)
+        _pack_action_across_pages(doc)
         _strip_im_fragments(doc)
         _drop_empty_pages(doc)
         _finalize_no_immediate_pages(doc)
@@ -916,19 +916,37 @@ def _action_blocks_to_move(page: fitz.Page) -> list[dict]:
     return blocks
 
 
-def _write_action_heading(page: fitz.Page, cursor: float) -> float:
+def _action_column_x(page: fitz.Page) -> float:
+    """Left edge used by Action Required headings on this page (client packages ~40, built ~54)."""
+    xs: list[float] = []
+    for block in _text_blocks(page):
+        text = " ".join(span["text"] for span in block["spans"]).strip()
+        if re.match(
+            r"^(ACTION REQUIRED|IMMEDIATE ACTION REQUIRED|ATTENTION REQUIRED|NO IMMEDIATE ACTION IS REQUIRED)",
+            text,
+            re.I,
+        ):
+            xs.append(float(block["bbox"].x0))
+    if not xs:
+        return 54.0
+    xs.sort()
+    return xs[len(xs) // 2]
+
+
+def _write_action_heading(page: fitz.Page, cursor: float, x: float | None = None) -> float:
     """Write the ACTION REQUIRED heading. ``cursor`` is the text baseline."""
-    page.insert_text((54, cursor), "ACTION REQUIRED", fontsize=11, fontname="hebo", color=(0, 0, 0))
+    left = 54.0 if x is None else float(x)
+    page.insert_text((left, cursor), "ACTION REQUIRED", fontsize=11, fontname="hebo", color=(0, 0, 0))
     width = fitz.get_text_length("ACTION REQUIRED", fontname="hebo", fontsize=11)
     # Place the rule under the glyph box (baseline + descent), not through the letters.
     underline_y = cursor + 4
     for word in page.get_text("words") or []:
-        if abs(float(word[0]) - 54) < 2 and str(word[4]).upper() == "ACTION":
+        if abs(float(word[0]) - left) < 2 and str(word[4]).upper() == "ACTION":
             underline_y = max(underline_y, float(word[3]) + 2)
             break
     page.draw_line(
-        fitz.Point(54, underline_y),
-        fitz.Point(54 + width, underline_y),
+        fitz.Point(left, underline_y),
+        fitz.Point(left + width, underline_y),
         color=(0, 0, 0),
         width=0.8,
     )
@@ -1018,6 +1036,7 @@ def _finalize_no_immediate_pages(doc: fitz.Document) -> None:
         green_text = "".join(span["text"] for span in green_spans)
         size = float(green_spans[0]["size"]) if green_spans else 11.0
         color = _rgb(green_spans[0]["color"]) if green_spans else (0, 0.45, 0.15)
+        column_x = _action_column_x(page)
         # Pack under the header divider (not at the green line's current y, which left
         # a hole and overlapped any trailing paragraph that restack had already pulled up).
         heading_baseline = (header_rule_y + 40.0) if header_rule_y is not None else 90.0
@@ -1025,9 +1044,9 @@ def _finalize_no_immediate_pages(doc: fitz.Document) -> None:
         _apply_redact_boxes(page, wipe, cover=False)
         if header_rule_y is not None:
             _clear_short_rules_below(page, header_rule_y, redact=True)
-        cursor = _write_action_heading(page, heading_baseline)
+        cursor = _write_action_heading(page, heading_baseline, x=column_x)
         page.insert_text(
-            fitz.Point(54, cursor),
+            fitz.Point(column_x, cursor),
             green_text,
             fontsize=size,
             fontname="hebo",
@@ -1041,6 +1060,113 @@ def _finalize_no_immediate_pages(doc: fitz.Document) -> None:
             for span in block["spans"]:
                 _write_span(page, span, delta)
             cursor += block["bbox"].height + 12.0
+
+
+def _pack_action_across_pages(doc: fitz.Document) -> None:
+    """Pull Action Required content up: fill earlier pages that still have whitespace.
+
+    First moves kept action onto an empty Annual Valuation anchor page. Then repeatedly
+    packs leftover paragraphs from later pages into prior pages that still have room
+    above the footer.
+    """
+    _pull_kept_action_forward(doc)
+    for _ in range(12):
+        if not _pack_one_action_overflow(doc):
+            break
+
+
+def _is_action_flow_page(page: fitz.Page) -> bool:
+    """Pages that participate in Action Required reflow (not cover; recap only if it holds action)."""
+    text = page.get_text("text") or ""
+    # Cover letter pages are not part of Action Required reflow.
+    if re.search(r"we are pleased to provide|dear plan sponsor", text, re.I) and not re.search(
+        r"annual valuation report", text, re.I
+    ):
+        return False
+    if _is_recap_text(text) and not _KEPT_ACTION.search(text):
+        return False
+    return bool(
+        re.search(
+            r"annual valuation report|immediate action required|attention required|"
+            r"no immediate action|^\s*ACTION REQUIRED\s*$",
+            text,
+            re.I | re.M,
+        )
+    )
+
+
+def _action_content_bottom(page: fitz.Page) -> float:
+    """Lowest content edge on the page, ignoring page numbers."""
+    bottom = 0.0
+    for block in _text_blocks(page):
+        if _is_page_number_block(page, block):
+            continue
+        text = " ".join(span["text"] for span in block["spans"]).strip()
+        if not text or _is_noise_text(text):
+            continue
+        bottom = max(bottom, float(block["bbox"].y1))
+    header_rule_y = _top_header_rule_y(page)
+    if bottom <= 0 and header_rule_y is not None:
+        return header_rule_y + 24.0
+    return bottom
+
+
+def _movable_action_overflow(page: fitz.Page) -> list[dict]:
+    """Paragraphs on a later action page that can fill whitespace on a prior page."""
+    header_rule_y = _top_header_rule_y(page)
+    blocks: list[dict] = []
+    for block in _text_blocks(page):
+        if _is_page_number_block(page, block):
+            continue
+        text = " ".join(span["text"] for span in block["spans"]).strip()
+        if not text or _is_noise_text(text):
+            continue
+        if re.search(r"annual valuation report", text, re.I):
+            continue
+        if header_rule_y is not None and block["bbox"].y1 <= header_rule_y + 2:
+            continue
+        if re.fullmatch(r"ACTION REQUIRED", text, re.I):
+            # Keep the section label with its page; move body paragraphs only.
+            continue
+        if _is_recap_text(text):
+            break
+        if re.fullmatch(r"\d{5,7}", text) and block["bbox"].y0 < (header_rule_y or 200):
+            continue
+        blocks.append(block)
+    return blocks
+
+
+def _pack_one_action_overflow(doc: fitz.Document) -> bool:
+    """Move as many leading overflow blocks as fit from one later page onto the prior page."""
+    flow = [page for page in doc if _is_action_flow_page(page)]
+    for dest, source in zip(flow, flow[1:]):
+        footer_limit = float(dest.rect.y1) - 52.0
+        cursor = _action_content_bottom(dest) + 14.0
+        free = footer_limit - cursor
+        if free < 40:
+            continue
+        overflow = _movable_action_overflow(source)
+        if not overflow:
+            continue
+        moved: list[dict] = []
+        for block in overflow:
+            height = float(block["bbox"].height)
+            if height + 10 > free:
+                break
+            target_top = cursor
+            delta = target_top - float(block["bbox"].y0)
+            for span in block["spans"]:
+                _write_span(dest, span, delta)
+            moved.append(block)
+            cursor = target_top + height + 14.0
+            free = footer_limit - cursor
+        if not moved:
+            continue
+        boxes = [block["bbox"] for block in moved]
+        _apply_redact_boxes(source, boxes, cover=False)
+        _restack_pages(doc, {source.number: boxes})
+        return True
+    return False
 
 
 def _pull_kept_action_forward(doc: fitz.Document) -> None:
@@ -1085,8 +1211,9 @@ def _pull_kept_action_forward(doc: fitz.Document) -> None:
     baseline = (anchor_blocks[-1]["bbox"].y1 + 24) if anchor_blocks else 90
     if header_rule_y is not None:
         baseline = max(baseline, header_rule_y + 40)
+    column_x = _action_column_x(anchor)
     if not re.search(r"(?m)^\s*ACTION REQUIRED\s*$", anchor.get_text("text") or ""):
-        baseline = _write_action_heading(anchor, baseline)
+        baseline = _write_action_heading(anchor, baseline, x=column_x)
     delete_numbers: list[int] = []
     for page in later:
         blocks = _action_blocks_to_move(page)

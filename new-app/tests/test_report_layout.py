@@ -50,6 +50,19 @@ def test_aligns_client_action_headings_from_x24_to_expected_columns() -> None:
     assert round(_line_x(page, "NO IMMEDIATE ACTION IS REQUIRED AT THIS TIME")) == 39
 
 
+def test_aligns_immediate_action_headings_to_action_column() -> None:
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((36, 60), "Annual Valuation Report", fontsize=12)
+    page.insert_text((24, 130), "IMMEDIATE ACTION REQUIRED - ADP/ACP TEST FAILURE", fontsize=11)
+    page.insert_text((30, 160), "ATTENTION REQUIRED - VARIANCE", fontsize=11)
+
+    normalize_report_layout(doc)
+
+    assert round(_line_x(page, "IMMEDIATE ACTION REQUIRED - ADP/ACP TEST FAILURE")) == 40
+    assert round(_line_x(page, "ATTENTION REQUIRED - VARIANCE")) == 40
+
+
 def test_shifts_universal_availability_block_and_nested_bullets() -> None:
     doc = fitz.open()
     page = doc.new_page()

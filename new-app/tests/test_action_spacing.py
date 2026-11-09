@@ -67,6 +67,47 @@ def test_restack_collapses_middle_removal_without_leaving_large_gap() -> None:
     assert "REMOVE HEADING" not in page.get_text()
 
 
+def test_action_overflow_packs_onto_previous_page_with_whitespace() -> None:
+    """Removed paragraphs leave room on page 1; kept action on page 2 must move up."""
+    doc = fitz.open()
+    page1 = doc.new_page()
+    page1.insert_text((40, 80), "Annual Valuation Report", fontsize=16, fontname="hebo")
+    page1.insert_text((40, 100), "Plan Year End: 12/31/2025", fontsize=11)
+    page1.insert_text((40, 120), "555001", fontsize=11)
+    page1.draw_line(fitz.Point(48, 140), fitz.Point(page1.rect.width - 48, 140), width=1)
+    page1.insert_text((40, 180), "ACTION REQUIRED", fontsize=11, fontname="hebo")
+    page1.insert_text((40, 210), "IMMEDIATE ACTION REQUIRED - KEEP ONE", fontsize=11, fontname="hebo")
+    page1.insert_text((40, 230), "Keep body one stays on the first page.", fontsize=10)
+    # Large removal band below leaves whitespace on page 1.
+    page1.insert_text((40, 500), "IMMEDIATE ACTION REQUIRED - REMOVE LOCAL", fontsize=11, fontname="hebo")
+    page1.insert_text((40, 520), "Remove this local paragraph.", fontsize=10)
+    page_width = float(page1.rect.width)
+
+    page2 = doc.new_page()
+    page2.insert_text((40, 80), "Annual Valuation Report", fontsize=16, fontname="hebo")
+    page2.insert_text((40, 100), "Plan Year End: 12/31/2025", fontsize=11)
+    page2.insert_text((40, 120), "555001", fontsize=11)
+    page2.draw_line(fitz.Point(48, 140), fitz.Point(page2.rect.width - 48, 140), width=1)
+    page2.insert_text((40, 180), "ACTION REQUIRED", fontsize=11, fontname="hebo")
+    page2.insert_text((40, 210), "IMMEDIATE ACTION REQUIRED - KEEP TWO", fontsize=11, fontname="hebo")
+    page2.insert_text((40, 230), "Keep body two should move onto page one.", fontsize=10)
+
+    # Simulate removals already applied on page 1, then restack + cross-page pack.
+    removed = fitz.Rect(18, 480, page_width - 28, 560)
+    page1 = doc[0]
+    page1.add_redact_annot(removed, fill=(1, 1, 1))
+    page1.apply_redactions(images=0)
+    from services.pdf_modifier import _pack_action_across_pages, _restack_pages
+
+    _restack_pages(doc, {0: [removed]})
+    _pack_action_across_pages(doc)
+
+    text1 = doc[0].get_text()
+    assert "KEEP TWO" in text1
+    assert "Keep body two should move onto page one." in text1
+    assert "REMOVE LOCAL" not in text1
+
+
 def test_apply_decisions_packs_no_immediate_under_action_heading() -> None:
     doc = fitz.open()
     page = doc.new_page()

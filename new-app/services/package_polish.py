@@ -545,6 +545,7 @@ def _rewrite_adp_acp_phrases(page: fitz.Page) -> bool:
 def normalize_report_layout(doc: fitz.Document) -> list[str]:
     """Normalize known text offsets and split merged Amount / % column headings."""
     from services.pdf_modifier import _base_font, _rgb
+    from services.source_rewrite import _tight_span_rect
 
     changed = False
     for page in doc:
@@ -564,22 +565,28 @@ def normalize_report_layout(doc: fitz.Document) -> list[str]:
         ]
         shifts: list[tuple[dict, float]] = []
         if re.search(r"annual valuation report", page_text, re.I):
+            # Client packages often print Action Required copy near x=24/30/36.
+            # Bring headings onto the shared column (~40) so rewritten lines match.
+            target_action_x = 40.0
+            target_green_x = 39.0
             for line, text in lines:
-                if text.upper() == "ACTION REQUIRED":
-                    x = float(line["bbox"][0])
-                    if abs(x - 24) < 0.5:
-                        shifts.append((line, 16.0))
-                    elif abs(x - 36) < 0.5:
-                        shifts.append((line, 4.0))
-                elif (
-                    text.upper() == "NO IMMEDIATE ACTION IS REQUIRED AT THIS TIME"
+                upper = text.upper()
+                x = float(line["bbox"][0])
+                if upper == "ACTION REQUIRED" or upper.startswith("IMMEDIATE ACTION REQUIRED") or upper.startswith(
+                    "ATTENTION REQUIRED"
                 ):
-                    x = float(line["bbox"][0])
-                    if abs(x - 24) < 0.5:
-                        shifts.append((line, 15.0))
-                    elif abs(x - 30) < 0.5:
-                        shifts.append((line, 9.0))
+                    delta = target_action_x - x
+                    if abs(delta) >= 0.5 and abs(delta) <= 24:
+                        shifts.append((line, delta))
+                elif upper == "NO IMMEDIATE ACTION IS REQUIRED AT THIS TIME":
+                    delta = target_green_x - x
+                    if abs(delta) >= 0.5 and abs(delta) <= 24:
+                        shifts.append((line, delta))
         if re.search(r"year end recap", page_text, re.I):
+            for line, text in lines:
+                x = float(line["bbox"][0])
+                if text.lower() == "important information" and abs(x - 54) >= 0.5 and abs(x - 54) <= 20:
+                    shifts.append((line, 54.0 - x))
             start = next(
                 (line["bbox"][1] for line, text in lines if "UNIVERSAL AVAILABILITY RULE" in text.upper()),
                 None,
@@ -601,6 +608,15 @@ def normalize_report_layout(doc: fitz.Document) -> list[str]:
                     if start - 1 <= line["bbox"][1] and line["bbox"][3] <= end + 1
                     and 60 <= line["bbox"][0] < 98
                 )
+            # Recap body paragraphs that sit left of the MOA hanging-indent column.
+            for line, text in lines:
+                if not text or text.lower() == "important information":
+                    continue
+                if text.upper() == "YEAR END RECAP":
+                    continue
+                x = float(line["bbox"][0])
+                if 40 <= x < 54 and float(line["bbox"][1]) > 120:
+                    shifts.append((line, 54.0 - x))
         if re.search(r"\bcensus\b", " ".join(text for _line, text in lines[:8]), re.I):
             shifts.extend(
                 (line, 6.0)
@@ -612,7 +628,11 @@ def normalize_report_layout(doc: fitz.Document) -> list[str]:
         if shifts:
             unique = {id(line): (line, delta) for line, delta in shifts}
             for line, _delta in unique.values():
-                page.add_redact_annot(fitz.Rect(line["bbox"]) + (-1, -1, 1, 1), fill=(1, 1, 1))
+                spans = [span for span in line.get("spans", []) if span.get("text", "").strip()]
+                if spans:
+                    page.add_redact_annot(_tight_span_rect(spans), fill=(1, 1, 1))
+                else:
+                    page.add_redact_annot(fitz.Rect(line["bbox"]), fill=(1, 1, 1))
             page.apply_redactions(images=0, graphics=0)
             for line, delta in unique.values():
                 for span in line.get("spans", []):
@@ -621,14 +641,24 @@ def normalize_report_layout(doc: fitz.Document) -> list[str]:
                         continue
                     origin = span.get("origin") or (span["bbox"][0], span["bbox"][3])
                     font = _base_font(str(span.get("font") or ""), int(span.get("flags") or 0))
-                    page.insert_text(
-                        (origin[0] + delta, origin[1]),
-                        text,
-                        fontsize=float(span.get("size") or 10),
-                        fontname=font,
-                        color=_rgb(span.get("color") or 0),
-                        overlay=True,
-                    )
+                    try:
+                        page.insert_text(
+                            (origin[0] + delta, origin[1]),
+                            text,
+                            fontsize=float(span.get("size") or 10),
+                            fontname=font,
+                            color=_rgb(span.get("color") or 0),
+                            overlay=True,
+                        )
+                    except Exception:
+                        page.insert_text(
+                            (origin[0] + delta, origin[1]),
+                            text,
+                            fontsize=float(span.get("size") or 10),
+                            fontname="helv",
+                            color=_rgb(span.get("color") or 0),
+                            overlay=True,
+                        )
             changed = True
 
         for block in page.get_text("dict").get("blocks", []):
@@ -640,7 +670,8 @@ def normalize_report_layout(doc: fitz.Document) -> list[str]:
                 if not re.fullmatch(r"Amount\s{2,}%", original) or not spans:
                     continue
                 span = spans[0]
-                box = fitz.Rect(line["bbox"]) + (-1, -1, 1, 1)
+                ink = [item for item in spans if item.get("text", "").strip()]
+                box = _tight_span_rect(ink) if ink else fitz.Rect(line["bbox"])
                 origin = span.get("origin") or (span["bbox"][0], span["bbox"][3])
                 size = float(span.get("size") or 8)
                 font = _base_font(str(span.get("font") or ""), int(span.get("flags") or 0))
