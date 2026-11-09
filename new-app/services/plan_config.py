@@ -1,14 +1,16 @@
 """Plan configuration. Every YAML file is read here.
 
 Input for the plan functions is the plan type: "401k", "403b", "457", or empty.
-A 401(k) plan uses the page files only. A 403(b) or 457 plan then replaces
-matching rule ids from its own file.
+A 401(k) plan uses the shared page files plus year_end_recap.yaml.
+A 403(b) plan uses plan_403b.yaml ``recap_rules`` instead of year_end_recap.yaml.
+A 457 plan starts from year_end_recap.yaml and merges plan_457.yaml ``recap_rules``.
 
 Files and what they return:
 - action_required.yaml: Action Required paragraphs, keep/remove plus headings.
-- excess_return_notice.yaml, failure_letters.yaml, excess_summary.yaml,
-  year_end_recap.yaml: the other keep/remove pages.
-- plan_403b.yaml and plan_457.yaml: plan-type replacements.
+- excess_return_notice.yaml, failure_letters.yaml, excess_summary.yaml:
+  shared keep/remove pages after Action Required.
+- year_end_recap.yaml: 401(k) Year End Recap rules (457 baseline).
+- plan_403b.yaml and plan_457.yaml: plan-type package flags, overlays, and recap rules.
 - package_order.yaml: page order and bookmark titles.
 - compliance_summary.yaml: what each Compliance Testing Summary line means.
 """
@@ -16,6 +18,7 @@ Files and what they return:
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 
 import yaml
 
@@ -36,13 +39,13 @@ _PARAGRAPH_KEYS = (
     "recap_bullets",
 )
 
-# One file for each page that has keep-or-remove text. Action Required is loaded separately.
+# Pages after Action Required, excluding Year End Recap (loaded per plan type).
 _PAGE_FILES = (
     "excess_return_notice.yaml",
     "failure_letters.yaml",
     "excess_summary.yaml",
-    "year_end_recap.yaml",
 )
+_RECAP_FILE = "year_end_recap.yaml"
 
 _PACKAGE_DEFAULTS = {
     "keep_brf": False,
@@ -218,12 +221,13 @@ def rules_for(plan_type: str | None) -> dict:
 
     Args:
         plan_type: ``"401k"``, ``"403b"``, ``"457"``, or empty.
-            A 403(b) or 457 plan replaces rules that share an id.
+            Year End Recap rules are plan-family specific. Other page rules may still
+            be replaced by matching ids from plan_403b.yaml / plan_457.yaml.
 
     Returns:
         ``{"rules": [...]}``. Each rule has ``id``, ``section``, ``keep_when``, and ``else``.
-        Reads config/action_required.yaml, excess_return_notice.yaml, failure_letters.yaml,
-        excess_summary.yaml, year_end_recap.yaml, then plan_403b.yaml or plan_457.yaml.
+        Reads Action Required, notice/letter/summary pages, then Year End Recap for the
+        plan family, then non-recap overlays from plan_403b.yaml or plan_457.yaml.
 
     Raises:
         OSError: A YAML file cannot be read.
@@ -231,17 +235,17 @@ def rules_for(plan_type: str | None) -> dict:
 
     Example:
         ``rules_for("401k")["rules"][0]["id"]`` returns ``"A"``, the compliance-failure paragraph.
-        ``rules_for("403b")`` uses the ACP wording for rules B, C, D, and E.
+        ``rules_for("403b")`` uses 403(b) Year End Recap rules from plan_403b.yaml.
 
     Side effects:
         None. This function only reads configuration and returns a value.
     """
-    rules = _action_required_rules(plan_type) + _page_rules()
+    rules = _action_required_rules(plan_type) + _page_rules() + _recap_rules_for(plan_type)
     extra: list[dict] = []
     if is_403b_plan(plan_type):
-        extra = list(_load_403b().get("rules") or [])
+        extra = [item for item in (_load_403b().get("rules") or []) if isinstance(item, dict)]
     elif is_457_plan(plan_type):
-        extra = list(_load_457().get("rules") or [])
+        extra = [item for item in (_load_457().get("rules") or []) if isinstance(item, dict)]
     if not extra:
         return {"rules": rules}
     replacements = {str(item.get("id")): item for item in extra}
@@ -260,7 +264,7 @@ def paragraphs_for(plan_type: str | None) -> dict:
 
     Args:
         plan_type: ``"401k"``, ``"403b"``, ``"457"``, or empty.
-            A 403(b) or 457 plan replaces headings that share an id.
+            Year End Recap bullet matches are plan-family specific.
 
     Returns:
         A dict with ``action_required_headings``, ``notices``, ``sample_letters``,
@@ -280,6 +284,7 @@ def paragraphs_for(plan_type: str | None) -> dict:
     """
     base = _page_paragraphs()
     base["action_required_headings"] = _action_required_headings(plan_type)
+    base["recap_bullets"] = _recap_paragraphs_for(plan_type)
     overlay: dict = {}
     if is_403b_plan(plan_type):
         overlay = _load_403b().get("paragraphs") or {}
@@ -289,6 +294,9 @@ def paragraphs_for(plan_type: str | None) -> dict:
         return base
     merged = dict(base)
     for key in _PARAGRAPH_KEYS:
+        if key == "recap_bullets":
+            # Already resolved exclusively / merged in _recap_paragraphs_for.
+            continue
         extra = list(overlay.get(key) or [])
         if not extra:
             continue
@@ -300,6 +308,52 @@ def paragraphs_for(plan_type: str | None) -> dict:
         ]
         merged[key] = kept + extra
     return merged
+
+
+def _recap_rules_for(plan_type: str | None) -> list[dict]:
+    """Year End Recap keep/remove rules for one plan family."""
+    if is_403b_plan(plan_type):
+        return [item for item in (_load_403b().get("recap_rules") or []) if isinstance(item, dict)]
+    base = [item for item in (_load_yaml(_RECAP_FILE).get("rules") or []) if isinstance(item, dict)]
+    if not is_457_plan(plan_type):
+        return base
+    data = _load_457()
+    extra = [item for item in (data.get("recap_rules") or []) if isinstance(item, dict)]
+    if not extra:
+        # Legacy: Y* rules used to live under `rules` in plan_457.yaml.
+        extra = [
+            item
+            for item in (data.get("rules") or [])
+            if isinstance(item, dict) and str(item.get("id") or "").upper().startswith("Y")
+        ]
+    if not extra:
+        return base
+    replacements = {str(item.get("id")): item for item in extra}
+    merged: list[dict] = []
+    for rule in base:
+        merged.append(replacements.pop(str(rule.get("id")), rule))
+    merged.extend(replacements.values())
+    return merged
+
+
+def _recap_paragraphs_for(plan_type: str | None) -> list[dict]:
+    """Year End Recap bullet match specs for one plan family."""
+    if is_403b_plan(plan_type):
+        paragraphs = (_load_403b().get("paragraphs") or {}).get("recap_bullets") or []
+        return [item for item in paragraphs if isinstance(item, dict)]
+    base = [item for item in (_load_yaml(_RECAP_FILE).get("recap_bullets") or []) if isinstance(item, dict)]
+    if not is_457_plan(plan_type):
+        return base
+    extra = [
+        item
+        for item in ((_load_457().get("paragraphs") or {}).get("recap_bullets") or [])
+        if isinstance(item, dict)
+    ]
+    if not extra:
+        return base
+    replace_ids = {str(item.get("id")) for item in extra}
+    kept = [item for item in base if str(item.get("id")) not in replace_ids]
+    return kept + extra
 
 
 def load_package_order() -> dict:
@@ -488,17 +542,17 @@ def _action_required_headings(plan_type: str | None) -> list[dict]:
 
 
 def _page_rules() -> list[dict]:
-    """Load the keep-or-remove rules for the pages after Action Required.
+    """Load shared keep-or-remove rules after Action Required (not Year End Recap).
 
     Purpose:
-        Add the Excess Return Notice, letters, Excess Summary, and Year End Recap rules.
+        Add the Excess Return Notice, letters, and Excess Summary rules.
 
     Args:
         None.
 
     Returns:
         The ``rules`` lists from excess_return_notice.yaml, failure_letters.yaml,
-        excess_summary.yaml, and year_end_recap.yaml, in that order.
+        and excess_summary.yaml, in that order.
 
     Raises:
         OSError: One of those files cannot be read.
@@ -517,7 +571,7 @@ def _page_rules() -> list[dict]:
 
 
 def _page_paragraphs() -> dict:
-    """Load the headings for the pages after Action Required.
+    """Load the headings for the shared pages after Action Required.
 
     Purpose:
         Give each later rule the heading text printed on its page.
@@ -526,8 +580,8 @@ def _page_paragraphs() -> dict:
         None.
 
     Returns:
-        ``notices``, ``sample_letters``, ``excess_summary``, and ``recap_bullets``
-        from the same four YAML files as ``_page_rules``.
+        ``notices``, ``sample_letters``, and ``excess_summary`` from the same
+        YAML files as ``_page_rules``. Year End Recap matches are loaded separately.
 
     Raises:
         OSError: One of those files cannot be read.
@@ -551,13 +605,14 @@ def _load_403b() -> dict:
     """Read the 403(b) plan file.
 
     Purpose:
-        Supply the 403(b) package flags, bookmark titles, rules, and headings.
+        Supply the 403(b) package flags, bookmark titles, overlays, and exclusive Year End Recap rules.
 
     Args:
         None.
 
     Returns:
-        The mapping in config/plan_403b.yaml: ``package``, ``bookmarks``, ``rules``, and ``paragraphs``.
+        The mapping in config/plan_403b.yaml: ``package``, ``bookmarks``, ``rules``,
+        ``recap_rules``, and ``paragraphs``.
 
     Raises:
         OSError: The file cannot be read.
@@ -565,6 +620,7 @@ def _load_403b() -> dict:
 
     Example:
         ``_load_403b()["bookmarks"]["ADP/ACP"]`` returns ``"ACP Test"``.
+        ``_load_403b()["recap_rules"][0]["id"]`` returns ``"Y1"``.
 
     Side effects:
         None.
@@ -589,7 +645,7 @@ def _load_457() -> dict:
         yaml.YAMLError: The file is not valid YAML.
 
     Example:
-        ``_load_457()["rules"][0]["id"]`` returns ``"Y11"``.
+        ``_load_457()["recap_rules"][0]["id"]`` returns ``"Y11"``.
 
     Side effects:
         None.
@@ -597,11 +653,14 @@ def _load_457() -> dict:
     return _load_yaml("plan_457.yaml")
 
 
+@lru_cache(maxsize=None)
 def _load_yaml(name: str) -> dict:
     """Read one YAML file from the config folder.
 
     Purpose:
         Turn a configuration file into a dictionary the other functions can use.
+        Parsed files stay in memory for the process so assembly does not re-read
+        the same YAML on every file match.
 
     Args:
         name: File name inside config/, such as ``"action_required.yaml"``.
@@ -622,3 +681,8 @@ def _load_yaml(name: str) -> dict:
     """
     data = yaml.safe_load((CONFIG_DIR / name).read_text(encoding="utf-8")) or {}
     return data if isinstance(data, dict) else {}
+
+
+def clear_yaml_cache() -> None:
+    """Drop cached config YAML. Used by tests that rewrite config files."""
+    _load_yaml.cache_clear()

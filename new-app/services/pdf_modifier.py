@@ -49,7 +49,7 @@ def apply_decisions(
     keep_ids = {item.rule_id for item in decisions if item.action == "keep"}
     headings = [str(spec["heading"]) for spec in specs if spec.get("heading")]
     removed: list[str] = []
-    touched: set[int] = set()
+    touched: dict[int, list[fitz.Rect]] = {}
     for page in doc:
         boxes: list[fitz.Rect] = []
         for spec in specs:
@@ -69,16 +69,20 @@ def apply_decisions(
                     continue
                 if _kept_by_other_spec(page, page_text, specs, heading, hit.y0, end_y, keep_ids):
                     continue
-                boxes.append(fitz.Rect(40, max(36, hit.y0 - 2), page.rect.x1 - 40, end_y))
+                removal = fitz.Rect(18, max(28, hit.y0 - 2), page.rect.x1 - 28, end_y)
+                boxes.append(removal)
+                touched.setdefault(page.number, []).append(removal)
                 if rule_id not in removed:
                     removed.append(rule_id)
         if boxes:
-            _apply_redact_boxes(page, boxes)
-            touched.add(page.number)
+            # No lasting white cover: restack rewrites surviving text into these bands.
+            _apply_redact_boxes(page, boxes, cover=False)
     if touched:
         _restack_pages(doc, touched)
         _pull_kept_action_forward(doc)
+        _strip_im_fragments(doc)
         _drop_empty_pages(doc)
+        _finalize_no_immediate_pages(doc)
         for page in doc:
             text = page.get_text("text") or ""
             if re.search(r"annual valuation report|immediate action required|attention required|no immediate action", text, re.I):
@@ -392,15 +396,15 @@ def _block_matches(page: fitz.Page, spec: dict, y0: float, y1: float) -> bool:
     return True
 
 
-def _restack_pages(doc: fitz.Document, touched: set[int]) -> None:
-    """Shift leftover text up, keeping font/size/color. Images stay put.
+def _restack_pages(doc: fitz.Document, touched: dict[int, list[fitz.Rect]]) -> None:
+    """Collapse removed regions by their exact height while keeping each surviving span at its source x-position and style.
 
     Purpose:
         Shift leftover text up, keeping font/size/color. Images stay put.
 
     Args:
         doc: Open PDF. Must not be closed.
-        touched: Touched. Type: set[int].
+        touched: Page-index to removed vertical regions.
 
     Returns:
         None.
@@ -409,37 +413,82 @@ def _restack_pages(doc: fitz.Document, touched: set[int]) -> None:
         A closed PDF raises from PyMuPDF.
 
     Example:
-        _restack_pages(doc, touched) returns None.
+        Text below one removed region moves up by exactly that region's height; text above it stays put.
 
     Side effects:
-        None. This function only reads data and returns a value.
+        Changes the PDF passed in. Does not save the file by itself.
     """
     for page in doc:
-        if page.number not in touched:
+        removed = touched.get(page.number)
+        if not removed:
             continue
         blocks = _text_blocks(page)
         if not blocks:
             continue
         body = [block for block in blocks if not _is_page_number_block(page, block)]
         footer = [block for block in blocks if _is_page_number_block(page, block)]
-        header_bottom, footer_top = _image_bands(page)
-        _apply_redact_boxes(
-            page,
-            [block["bbox"] for block in blocks]
-            + [fitz.Rect(drawing["rect"]) for drawing in page.get_drawings()],
-        )
-        cursor = header_bottom
+        removed_bands = _merged_vertical_bands(removed)
+        header_rule_y = _top_header_rule_y(page)
+        # Wipe text without lasting white overlays — overlays at old y-positions would
+        # hide content that shifts up into those bands.
+        _apply_redact_boxes(page, [block["bbox"] for block in blocks], cover=False)
         for block in body:
-            height = block["bbox"].height
-            if cursor + height > footer_top:
-                break
-            delta = cursor - block["bbox"].y0
+            delta = _upshift_delta(block["bbox"].y0, removed_bands)
+            if header_rule_y is not None and block["bbox"].y0 > header_rule_y:
+                # Keep a small gap under the header divider; do not cap later blocks by
+                # the first post-header gap (that left large white holes after mid-page removals).
+                minimum_y = header_rule_y + 30.0
+                delta = max(delta, minimum_y - block["bbox"].y0)
             for span in block["spans"]:
                 _write_span(page, span, delta)
-            cursor += height + 8
         for block in footer:
             for span in block["spans"]:
                 _write_span(page, span, 0)
+        # Restack rewrites text but leaves vector underlines from removed headings.
+        if header_rule_y is not None:
+            _clear_short_rules_below(page, header_rule_y)
+
+
+def _upshift_delta(y0: float, bands: list[tuple[float, float]]) -> float:
+    """Vertical shift for a block whose top is at ``y0`` after removing ``bands``."""
+    total = 0.0
+    for top, bottom in bands:
+        if top >= y0:
+            continue
+        total += min(bottom, y0) - top
+    return -total
+
+
+def _merged_vertical_bands(boxes: list[fitz.Rect]) -> list[tuple[float, float]]:
+    """Merge overlapping redaction bands so their heights are not subtracted twice."""
+    intervals = sorted((float(box.y0), float(box.y1)) for box in boxes if box.y1 > box.y0)
+    merged: list[tuple[float, float]] = []
+    for top, bottom in intervals:
+        if merged and top <= merged[-1][1]:
+            previous_top, previous_bottom = merged[-1]
+            merged[-1] = (previous_top, max(previous_bottom, bottom))
+        else:
+            merged.append((top, bottom))
+    return merged
+
+
+def _top_header_rule_y(page: fitz.Page) -> float | None:
+    """Find the full-width header divider near the top of an Annual Valuation Report page."""
+    text = page.get_text("text") or ""
+    if not re.search(r"annual valuation report", text, re.I):
+        return None
+    found: list[float] = []
+    for drawing in page.get_drawings():
+        for item in drawing.get("items", []):
+            if not item or item[0] != "l" or len(item) < 3:
+                continue
+            start, end = fitz.Point(item[1]), fitz.Point(item[2])
+            if abs(start.y - end.y) > 1.5:
+                continue
+            left, right = sorted((start.x, end.x))
+            if left <= 52 and right >= page.rect.width - 52 and start.y < page.rect.height * 0.4:
+                found.append(start.y)
+    return max(found) if found else None
 
 
 def _is_page_number_block(page: fitz.Page, block: dict) -> bool:
@@ -692,6 +741,37 @@ def _is_recap_text(text: str) -> bool:
     return bool(re.search(r"year[- ]end recap|important information", text or "", re.I))
 
 
+def _strip_im_fragments(doc: fitz.Document) -> None:
+    """Remove the clipped 'IM' left when IMMEDIATE is only partly covered.
+
+    Purpose:
+        Remove the clipped 'IM' left when IMMEDIATE is only partly covered.
+
+    Args:
+        doc: Open PDF. Must not be closed.
+
+    Returns:
+        None.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _strip_im_fragments(doc) returns None.
+
+    Side effects:
+        Changes the PDF passed in. Does not save the file by itself.
+    """
+    for page in doc:
+        boxes = [
+            fitz.Rect(word[:4])
+            for word in (page.get_text("words") or [])
+            if str(word[4]).upper() in {"IM", "MEDIATE"}
+        ]
+        if boxes:
+            _apply_redact_boxes(page, boxes)
+
+
 def _is_noise_text(text: str) -> bool:
     """A page number or a stray letter such as 'i' is not a paragraph.
 
@@ -714,7 +794,11 @@ def _is_noise_text(text: str) -> bool:
         None. This function only reads data and returns a value.
     """
     words = re.findall(r"[A-Za-z0-9]+", text or "")
-    return not any(len(word) >= 2 and re.search(r"[A-Za-z]", word) for word in words)
+    # "IM" is the clipped start of IMMEDIATE after a redact. It is not a paragraph.
+    return not any(
+        len(word) >= 2 and re.search(r"[A-Za-z]", word) and word.upper() not in {"IM", "MEDIATE"}
+        for word in words
+    )
 
 
 def _pad_rect(rect: fitz.Rect, page: fitz.Page) -> fitz.Rect:
@@ -743,7 +827,7 @@ def _pad_rect(rect: fitz.Rect, page: fitz.Page) -> fitz.Rect:
     return (fitz.Rect(rect) + (-1, -3, 1, 1)) & page.rect
 
 
-def _apply_redact_boxes(page: fitz.Page, boxes: list[fitz.Rect]) -> None:
+def _apply_redact_boxes(page: fitz.Page, boxes: list[fitz.Rect], *, cover: bool = True) -> None:
     """Apply redact boxes.
 
     Purpose:
@@ -752,6 +836,9 @@ def _apply_redact_boxes(page: fitz.Page, boxes: list[fitz.Rect]) -> None:
     Args:
         page: One PDF page.
         boxes: Boxes. Type: list[fitz.Rect].
+        cover: When True, paint lasting white rectangles over the redacted bands.
+            Use False when leftover text will be rewritten into those bands (restack),
+            because the overlays would hide the shifted content.
 
     Returns:
         None.
@@ -781,8 +868,9 @@ def _apply_redact_boxes(page: fitz.Page, boxes: list[fitz.Rect]) -> None:
         for rect in leftover:
             page.add_redact_annot(rect, fill=(1, 1, 1))
         page.apply_redactions(images=0)
-    for rect in rects:
-        page.draw_rect(rect, color=(1, 1, 1), fill=(1, 1, 1), width=0, overlay=True)
+    if cover:
+        for rect in rects:
+            page.draw_rect(rect, color=(1, 1, 1), fill=(1, 1, 1), width=0, overlay=True)
 
 
 def _action_blocks_to_move(page: fitz.Page) -> list[dict]:
@@ -829,36 +917,130 @@ def _action_blocks_to_move(page: fitz.Page) -> list[dict]:
 
 
 def _write_action_heading(page: fitz.Page, cursor: float) -> float:
-    """Write action heading.
-
-    Purpose:
-        Write action heading.
-
-    Args:
-        page: One PDF page.
-        cursor: Cursor. Type: float.
-
-    Returns:
-        a float.
-
-    Raises:
-        A closed PDF raises from PyMuPDF.
-
-    Example:
-        _write_action_heading(page, 1.0) returns a float.
-
-    Side effects:
-        Changes the PDF passed in. Does not save the file by itself.
-    """
+    """Write the ACTION REQUIRED heading. ``cursor`` is the text baseline."""
     page.insert_text((54, cursor), "ACTION REQUIRED", fontsize=11, fontname="hebo", color=(0, 0, 0))
     width = fitz.get_text_length("ACTION REQUIRED", fontname="hebo", fontsize=11)
+    # Place the rule under the glyph box (baseline + descent), not through the letters.
+    underline_y = cursor + 4
+    for word in page.get_text("words") or []:
+        if abs(float(word[0]) - 54) < 2 and str(word[4]).upper() == "ACTION":
+            underline_y = max(underline_y, float(word[3]) + 2)
+            break
     page.draw_line(
-        fitz.Point(54, cursor + 2),
-        fitz.Point(54 + width, cursor + 2),
+        fitz.Point(54, underline_y),
+        fitz.Point(54 + width, underline_y),
         color=(0, 0, 0),
         width=0.8,
     )
-    return cursor + 22
+    return underline_y + 18
+
+
+def _short_rule_boxes_below(page: fitz.Page, below_y: float) -> list[fitz.Rect]:
+    """Return thin heading-underline rects below the header divider."""
+    boxes: list[fitz.Rect] = []
+    for drawing in page.get_drawings():
+        if drawing.get("color") in {(1, 1, 1), (1.0, 1.0, 1.0)}:
+            continue
+        for item in drawing.get("items") or []:
+            if not item or item[0] != "l" or len(item) < 3:
+                continue
+            start, end = fitz.Point(item[1]), fitz.Point(item[2])
+            if abs(start.y - end.y) > 1.5:
+                continue
+            y = start.y
+            if y <= below_y + 2:
+                continue
+            width = abs(end.x - start.x)
+            if width >= page.rect.width * 0.7:
+                continue
+            left, right = sorted((start.x, end.x))
+            boxes.append(fitz.Rect(left - 1, y - 1.5, right + 1, y + 1.5))
+    return boxes
+
+
+def _clear_short_rules_below(page: fitz.Page, below_y: float, *, redact: bool = False) -> None:
+    """Remove leftover heading underlines below the header divider.
+
+    Prefer white cover while text may still overlap the band. After that text
+    has been redacted, ``redact=True`` deletes the strokes from the page.
+    """
+    boxes = _short_rule_boxes_below(page, below_y)
+    if not boxes:
+        return
+    if redact:
+        for rect in boxes:
+            page.add_redact_annot(rect, fill=(1, 1, 1))
+        page.apply_redactions(images=0, graphics=2)
+        return
+    for rect in boxes:
+        page.draw_line(
+            fitz.Point(rect.x0, (rect.y0 + rect.y1) / 2),
+            fitz.Point(rect.x1, (rect.y0 + rect.y1) / 2),
+            color=(1, 1, 1),
+            width=2.4,
+            overlay=True,
+        )
+
+
+def _finalize_no_immediate_pages(doc: fitz.Document) -> None:
+    """Match the package sample: ACTION REQUIRED, then the green no-action line under it."""
+    for page in doc:
+        text = page.get_text("text") or ""
+        if not re.search(r"no immediate action is required at this time", text, re.I):
+            continue
+        if not re.search(r"annual valuation report", text, re.I):
+            continue
+        # Leave pages that still have other action blocks; only pack the all-clear page.
+        if re.search(r"IMMEDIATE ACTION REQUIRED|ATTENTION REQUIRED", text, re.I):
+            continue
+        has_heading = bool(re.search(r"(?m)^\s*ACTION REQUIRED\s*$", text))
+        green = None
+        trailing: list[dict] = []
+        started = False
+        for block in _text_blocks(page):
+            joined = " ".join(span["text"] for span in block["spans"]).strip()
+            if re.match(r"NO IMMEDIATE ACTION IS REQUIRED AT THIS TIME", joined, re.I):
+                green = block
+                started = True
+                continue
+            if started and not _is_page_number_block(page, block) and not _is_noise_text(joined):
+                trailing.append(block)
+        header_rule_y = _top_header_rule_y(page)
+        if green is None:
+            if header_rule_y is not None:
+                _clear_short_rules_below(page, header_rule_y)
+            continue
+        if has_heading:
+            if header_rule_y is not None:
+                _clear_short_rules_below(page, header_rule_y)
+            continue
+        green_spans = [dict(span) for span in green["spans"]]
+        green_text = "".join(span["text"] for span in green_spans)
+        size = float(green_spans[0]["size"]) if green_spans else 11.0
+        color = _rgb(green_spans[0]["color"]) if green_spans else (0, 0.45, 0.15)
+        # Pack under the header divider (not at the green line's current y, which left
+        # a hole and overlapped any trailing paragraph that restack had already pulled up).
+        heading_baseline = (header_rule_y + 40.0) if header_rule_y is not None else 90.0
+        wipe = [green["bbox"], *[block["bbox"] for block in trailing]]
+        _apply_redact_boxes(page, wipe, cover=False)
+        if header_rule_y is not None:
+            _clear_short_rules_below(page, header_rule_y, redact=True)
+        cursor = _write_action_heading(page, heading_baseline)
+        page.insert_text(
+            fitz.Point(54, cursor),
+            green_text,
+            fontsize=size,
+            fontname="hebo",
+            color=color,
+            overlay=True,
+        )
+        cursor += size + 14.0
+        for block in trailing:
+            # Place each trailing block so its top sits just under the running cursor.
+            delta = (cursor - 11.0) - block["bbox"].y0
+            for span in block["spans"]:
+                _write_span(page, span, delta)
+            cursor += block["bbox"].height + 12.0
 
 
 def _pull_kept_action_forward(doc: fitz.Document) -> None:
@@ -895,20 +1077,28 @@ def _pull_kept_action_forward(doc: fitz.Document) -> None:
             later.append(page)
     if anchor is None or not later or _KEPT_ACTION.search(anchor.get_text("text") or ""):
         return
+    header_rule_y = _top_header_rule_y(anchor)
+    if header_rule_y is not None:
+        _clear_short_rules_below(anchor, header_rule_y)
     anchor_blocks = _text_blocks(anchor)
-    cursor = anchor_blocks[-1]["bbox"].y1 + 18 if anchor_blocks else 90
-    if not re.search(r"action required", anchor.get_text("text") or "", re.I):
-        cursor = _write_action_heading(anchor, cursor)
+    # insert_text points are baselines; keep a gap under the header divider.
+    baseline = (anchor_blocks[-1]["bbox"].y1 + 24) if anchor_blocks else 90
+    if header_rule_y is not None:
+        baseline = max(baseline, header_rule_y + 40)
+    if not re.search(r"(?m)^\s*ACTION REQUIRED\s*$", anchor.get_text("text") or ""):
+        baseline = _write_action_heading(anchor, baseline)
     delete_numbers: list[int] = []
     for page in later:
         blocks = _action_blocks_to_move(page)
         if not blocks:
             continue
         for block in blocks:
-            delta = cursor - block["bbox"].y0
+            # Place the block so its top sits near the current baseline gap.
+            target_top = baseline - 11
+            delta = target_top - block["bbox"].y0
             for span in block["spans"]:
                 _write_span(anchor, span, delta)
-            cursor += block["bbox"].height + 8
+            baseline = target_top + block["bbox"].height + 16
         if _is_recap_text(page.get_text("text") or ""):
             _apply_redact_boxes(page, [block["bbox"] for block in blocks])
             continue
@@ -944,14 +1134,11 @@ def _redraw_action_rules(page: fitz.Page) -> None:
     for group in lines.values():
         group.sort(key=lambda item: item[0])
         text = " ".join(item[4] for item in group)
-        y = max(item[3] for item in group) + 1.5
+        top = min(item[1] for item in group)
+        bottom = max(item[3] for item in group)
+        # Sit just under the glyph box so the rule cannot cut through the letters.
+        y = bottom + 2.0
         if re.fullmatch(r"\d{5,7}", text):
-            page.draw_line(
-                fitz.Point(48, y + 4),
-                fitz.Point(page.rect.width - 48, y + 4),
-                color=(0, 0, 0),
-                width=1,
-            )
             continue
         if not re.match(
             r"^(ACTION REQUIRED|IMMEDIATE ACTION REQUIRED|ATTENTION REQUIRED|NO IMMEDIATE ACTION IS REQUIRED)",
@@ -961,12 +1148,67 @@ def _redraw_action_rules(page: fitz.Page) -> None:
         color = (0, 0.45, 0.15) if text.startswith("NO IMMEDIATE") else (0, 0, 0)
         if text.startswith("IMMEDIATE ACTION"):
             color = (0.8, 0, 0)
+        # Cover any leftover rule that still cuts through this heading.
+        _cover_rules_through_band(page, top, y, group[0][0], group[-1][2])
+        if _has_horizontal_rule(page, y, group[0][0], group[-1][2]):
+            continue
         page.draw_line(
             fitz.Point(group[0][0], y),
             fitz.Point(group[-1][2], y),
             color=color,
             width=0.8,
         )
+
+
+def _has_horizontal_rule(page: fitz.Page, y: float, x0: float, x1: float) -> bool:
+    """Check whether a horizontal vector rule already underlines this heading."""
+    for drawing in page.get_drawings():
+        if drawing.get("color") in {(1, 1, 1), (1.0, 1.0, 1.0)}:
+            continue
+        for item in drawing.get("items", []):
+            if not item or item[0] != "l" or len(item) < 3:
+                continue
+            start, end = fitz.Point(item[1]), fitz.Point(item[2])
+            if abs(start.y - end.y) > 1.5 or abs(start.y - y) > 4:
+                continue
+            left, right = sorted((start.x, end.x))
+            if right >= x0 - 2 and left <= x1 + 2:
+                return True
+    return False
+
+
+def _cover_rules_through_band(
+    page: fitz.Page,
+    top: float,
+    bottom: float,
+    x0: float,
+    x1: float,
+) -> None:
+    """White-out short horizontal rules that cut through a heading band."""
+    for drawing in page.get_drawings():
+        if drawing.get("color") in {(1, 1, 1), (1.0, 1.0, 1.0)}:
+            continue
+        for item in drawing.get("items") or []:
+            if not item or item[0] != "l" or len(item) < 3:
+                continue
+            start, end = fitz.Point(item[1]), fitz.Point(item[2])
+            if abs(start.y - end.y) > 1.5:
+                continue
+            y = start.y
+            if y < top - 0.5 or y > bottom + 0.5:
+                continue
+            if abs(end.x - start.x) >= page.rect.width * 0.7:
+                continue
+            left, right = sorted((start.x, end.x))
+            if right < x0 - 4 or left > x1 + 4:
+                continue
+            page.draw_line(
+                fitz.Point(left - 1, y),
+                fitz.Point(right + 1, y),
+                color=(1, 1, 1),
+                width=2.4,
+                overlay=True,
+            )
 
 
 def _drop_empty_pages(doc: fitz.Document) -> None:
@@ -1135,15 +1377,18 @@ def fill_qnec_placeholders(
         Changes the PDF passed in. Does not save the file by itself.
     """
     filled: list[str] = []
+    flags = package_flags(profile.plan_type)
+    acp_only_notice = bool(flags.get("acp_notice_amount"))
     both = [value for value in (profile.adp_qnec, profile.acp_qnec) if value is not None]
     total = round(sum(both), 2) if both else profile.total_qnec
+    # 403(b) Excess Return notice uses ACP QNEC only (“ACP test is $…”).
     amounts = {
-        "total": total,
-        "adp": profile.adp_qnec,
+        "total": None if acp_only_notice else total,
+        "adp": None if acp_only_notice else profile.adp_qnec,
         "acp": profile.acp_qnec,
         "deferral": profile.deferral_refund,
         "match": profile.match_refund,
-        "acp-notice": profile.acp_qnec if package_flags(profile.plan_type).get("acp_notice_amount") else None,
+        "acp-notice": profile.acp_qnec if acp_only_notice else None,
     }
     for page in doc:
         if "$X,XXX,XXX.XX" not in (page.get_text("text") or ""):
@@ -1172,6 +1417,8 @@ def _fill_notice_amounts(page: fitz.Page, amounts: dict[str, float | None]) -> l
 
     Purpose:
         Replace each $X,XXX,XXX.XX in place. A missing amount takes its label with it.
+        All placeholders on the page are collected first, then redacted together, so filling
+        one amount cannot wipe another placeholder on the same line.
 
     Args:
         page: One PDF page.
@@ -1184,38 +1431,70 @@ def _fill_notice_amounts(page: fitz.Page, amounts: dict[str, float | None]) -> l
         A closed PDF raises from PyMuPDF.
 
     Example:
-        _fill_notice_amounts(page, 1.0) returns a list of tuple[str, float | None].
+        _fill_notice_amounts(page, {"total": 1.0}) returns a list of tuple[str, float | None].
 
     Side effects:
         Changes the PDF passed in. Does not save the file by itself.
     """
-    done: list[tuple[str, float | None]] = []
-    while True:
-        hits = page.search_for("$X,XXX,XXX.XX")
-        if not hits:
-            return done
-        hit = sorted(hits, key=lambda item: (item.y0, item.x0))[0]
-        words = page.get_text("words") or []
+    hits = sorted(page.search_for("$X,XXX,XXX.XX"), key=lambda item: (item.y0, item.x0))
+    if not hits:
+        return []
+    words = page.get_text("words") or []
+    jobs: list[dict] = []
+    for hit in hits:
         kind, label_words, token = _notice_placeholder(words, hit)
         value = amounts.get(kind) if kind else None
-        rects = [fitz.Rect(token[:4])] if token else [hit]
+        token_rect = fitz.Rect(token[:4]) if token else fitz.Rect(hit)
         if value is None:
-            rects = [fitz.Rect(word[:4]) for word in label_words] or rects
-        for rect in rects:
+            rects = [_tighten_qnec_rect(fitz.Rect(word[:4])) for word in label_words] or [
+                _tighten_qnec_rect(token_rect)
+            ]
+            jobs.append({"kind": kind or "amount", "value": None, "rects": rects, "insert": None})
+            continue
+        money = _money(value)
+        if token and str(token[4]).endswith("."):
+            money += "."
+        fontsize = _qnec_fontsize(token_rect)
+        baseline = float(token[3]) - max(0.8, (token_rect.y1 - token_rect.y0) * 0.12) if token else hit.y1 - 1
+        jobs.append(
+            {
+                "kind": kind or "amount",
+                "value": value,
+                "rects": [_tighten_qnec_rect(token_rect)],
+                "insert": (float(token_rect.x0), baseline, money, fontsize),
+            }
+        )
+
+    for job in jobs:
+        for rect in job["rects"]:
             page.add_redact_annot(rect, fill=(1, 1, 1))
-        page.apply_redactions()
-        if value is not None and token:
-            money = _money(value)
-            if str(token[4]).endswith("."):
-                money += "."
+    page.apply_redactions(images=0, graphics=0)
+    done: list[tuple[str, float | None]] = []
+    for job in jobs:
+        insert = job["insert"]
+        if insert is not None:
+            x, y, money, fontsize = insert
             page.insert_text(
-                (float(token[0]), float(token[3]) - 1),
+                (x, y),
                 money,
-                fontsize=10,
+                fontsize=fontsize,
                 fontname="helv",
                 color=(0, 0, 0),
+                overlay=True,
             )
-        done.append((kind or "amount", value))
+        done.append((job["kind"], job["value"]))
+    return done
+
+
+def _tighten_qnec_rect(rect: fitz.Rect) -> fitz.Rect:
+    """Keep QNEC redaction on the placeholder ink so neighbor text/lines survive."""
+    return fitz.Rect(rect.x0 - 0.4, rect.y0 + 0.2, rect.x1 + 0.4, rect.y1 - 0.2)
+
+
+def _qnec_fontsize(rect: fitz.Rect) -> float:
+    """Estimate notice body font size from the placeholder box height."""
+    height = max(1.0, float(rect.y1 - rect.y0))
+    return max(8.0, min(11.0, height * 0.72))
 
 
 def _notice_placeholder(words: list[tuple], hit: fitz.Rect) -> tuple[str, list[tuple], tuple | None]:
@@ -1241,14 +1520,26 @@ def _notice_placeholder(words: list[tuple], hit: fitz.Rect) -> tuple[str, list[t
         None. This function only reads data and returns a value.
     """
     ordered = sorted(words, key=lambda word: (word[1], word[0]))
-    index = next(
-        (
-            pos
-            for pos, word in enumerate(ordered)
-            if abs(word[0] - hit.x0) < 3 and abs(word[1] - hit.y0) < 3
-        ),
-        None,
-    )
+    index = None
+    best_overlap = 0.0
+    for pos, word in enumerate(ordered):
+        word_rect = fitz.Rect(word[:4])
+        overlap = word_rect & hit
+        if overlap.is_empty:
+            continue
+        area = float(overlap.width * overlap.height)
+        if area > best_overlap:
+            best_overlap = area
+            index = pos
+    if index is None:
+        index = next(
+            (
+                pos
+                for pos, word in enumerate(ordered)
+                if abs(word[0] - hit.x0) < 4 and abs(word[1] - hit.y0) < 4
+            ),
+            None,
+        )
     if index is None:
         return "", [], None
     token = ordered[index]
@@ -1369,31 +1660,149 @@ def apply_recap_bullets(
     removed: list[str] = []
     for page in doc:
         original = page.get_text("text") or ""
-        if "important information" not in original.lower():
+        if not _is_recap_text(original):
             continue
         header, bullets = _split_recap(original)
         kept: list[str] = []
+        dropped: list[str] = []
         for bullet in bullets:
             spec = _matching_recap(bullet, specs)
+            if spec is None and re.search(r"(?:^|\s)%(?:\s|$)", bullet):
+                dropped.append(bullet)
+                continue
             if spec and str(spec["id"]) in remove_ids:
                 if spec["id"] not in removed:
                     removed.append(str(spec["id"]))
+                dropped.append(bullet)
                 continue
             if spec and str(spec["id"]) == "Y2":
                 bullet = _fill_prior_rates(bullet, nhce)
             kept.append(bullet)
+        # In-place redaction of dropped bullets leaves large white gaps (Kaagaz page 3
+        # vs packed page 4). Always rebuild whenever anything was removed, when the
+        # header/bullet columns do not already match the MOA layout, or when kept
+        # bullets are still spaced with large holes.
+        if not dropped and _recap_layout_matches(page) and not _recap_has_sparse_bullets(page):
+            continue
         header_lines = [line.strip() for line in header.splitlines() if line.strip()]
         if not header_lines:
             header_lines = ["Important Information"]
-        updated_text = "\n".join(header_lines + kept)
-        if updated_text.strip() == re.sub(r"\s+", " ", original).strip():
-            continue
-        _apply_redact_boxes(page, [page.rect])
+        # Full-page wipe without a lasting white overlay (that overlay can hide the
+        # header rule redrawn by write_recap_page in some viewers).
+        page.add_redact_annot(page.rect, fill=(1, 1, 1))
+        page.apply_redactions(images=0, graphics=1)
         from services.package_builder import write_recap_page
 
         number = _recap_page_number(original)
-        write_recap_page(page, header_lines, kept, number=number)
+        write_recap_page(page, header_lines, kept, number=number, plan_type=plan_type)
     return removed
+
+
+def _recap_has_sparse_bullets(page: fitz.Page) -> bool:
+    """True when Important Information bullets still have large vertical holes."""
+    starts: list[float] = []
+    for block in page.get_text("dict").get("blocks", []):
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []):
+            spans = [span for span in line.get("spans", []) if span.get("text", "").strip()]
+            if not spans:
+                continue
+            text = _strip_recap_mark("".join(span.get("text", "") for span in spans).strip())
+            if not _recap_paragraph_start(text):
+                continue
+            starts.append(float(line["bbox"][1]))
+    starts = sorted(set(round(y, 1) for y in starts))
+    if len(starts) < 2:
+        return False
+    return max(starts[i + 1] - starts[i] for i in range(len(starts) - 1)) >= 90.0
+
+
+def _recap_has_header_rule(page: fitz.Page) -> bool:
+    """True when the full-width divider under the plan headings is present."""
+    for drawing in page.get_drawings():
+        for item in drawing.get("items", []):
+            if not item or item[0] != "l" or len(item) < 3:
+                continue
+            start, end = fitz.Point(item[1]), fitz.Point(item[2])
+            if abs(start.y - end.y) > 1.5:
+                continue
+            left, right = sorted((start.x, end.x))
+            if abs(start.y - 109.0) <= 3 and left <= 56 and right >= page.rect.width - 56:
+                return True
+    return False
+
+
+def _recap_solid_bullet_count(page: fitz.Page) -> int:
+    """Count filled black discs used as Year End Recap bullet marks."""
+    count = 0
+    for drawing in page.get_drawings():
+        fill = drawing.get("fill")
+        if fill not in ((0, 0, 0), (0.0, 0.0, 0.0)):
+            continue
+        rect = fitz.Rect(drawing.get("rect") or (0, 0, 0, 0))
+        if 2.5 <= rect.width <= 6 and 2.5 <= rect.height <= 6 and 50 <= rect.x0 <= 60:
+            count += 1
+    return count
+
+
+def _recap_layout_matches(page: fitz.Page) -> bool:
+    """True when the Year End Recap header and bullet columns already match the MOA layout."""
+    title_ok = False
+    important_ok = False
+    glyph_bullets = 0
+    for block in page.get_text("dict").get("blocks", []):
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []):
+            spans = [span for span in line.get("spans", []) if span.get("text", "").strip()]
+            if not spans:
+                continue
+            text = "".join(span.get("text", "") for span in spans).strip()
+            size = float(spans[0].get("size") or 0)
+            x = float(line["bbox"][0])
+            if text.upper() == "YEAR END RECAP":
+                title_ok = abs(size - 13.0) <= 0.8
+            elif text.lower() == "important information":
+                important_ok = abs(x - 54) <= 3 and abs(size - 11.0) <= 0.8
+            if re.match(r"^[·•\u00b7\u2022]", text):
+                glyph_bullets += 1
+    if not title_ok or not important_ok or not _recap_has_header_rule(page):
+        return False
+    # Faint Helvetica middle-dots must be replaced with solid drawn discs.
+    if glyph_bullets:
+        return False
+    if _recap_solid_bullet_count(page) < 1:
+        return False
+    return _recap_bullets_have_marks(page)
+
+
+def _recap_bullets_have_marks(page: fitz.Page) -> bool:
+    """Check bullets use the divider column with body text on a hanging indent."""
+    paragraph_starts: list[tuple[float, float, float]] = []
+    filled_discs = _recap_solid_bullet_count(page)
+    for block in page.get_text("dict").get("blocks", []):
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []):
+            spans = [span for span in line.get("spans", []) if span.get("text", "").strip()]
+            text = "".join(span.get("text", "") for span in spans).strip()
+            if not spans:
+                continue
+            if not _recap_paragraph_start(_strip_recap_mark(text)):
+                continue
+            body_x = float(spans[0]["bbox"][0])
+            paragraph_starts.append((body_x, float(line["bbox"][1]), float(spans[0].get("size") or 0)))
+    if not paragraph_starts:
+        return False
+    for body_x, _body_y, body_size in paragraph_starts:
+        if body_x < 48 or body_x > 72:
+            return False
+        if body_size and abs(body_size - 8.0) > 1.5:
+            return False
+    if filled_discs < len(paragraph_starts):
+        return False
+    return True
 
 
 def _recap_specs(plan_type: str | None = None) -> list[dict]:
@@ -1421,6 +1830,11 @@ def _recap_specs(plan_type: str | None = None) -> list[dict]:
     return list(data.get("recap_bullets") or [])
 
 
+def _fold_recap_text(value: str) -> str:
+    """Lowercase and normalize curly/garbled quotes so YAML matches still hit."""
+    return re.sub(r"[\u2018\u2019\u201c\u201d'`╖]", "'", (value or "").lower())
+
+
 def _matching_recap(bullet: str, specs: list[dict]) -> dict | None:
     """Matching recap.
 
@@ -1443,11 +1857,11 @@ def _matching_recap(bullet: str, specs: list[dict]) -> dict | None:
     Side effects:
         None. This function only reads data and returns a value.
     """
-    text = bullet.lower()
+    text = _fold_recap_text(bullet)
     hits = [
         spec
         for spec in specs
-        if (match := str(spec.get("match") or "").lower()) and match in text
+        if (match := _fold_recap_text(str(spec.get("match") or ""))) and match in text
     ]
     if not hits:
         return None
@@ -1604,6 +2018,158 @@ def _split_recap(text: str) -> tuple[str, list[str]]:
     Side effects:
         None. This function only reads data and returns a value.
     """
+    lines = [line.strip() for line in text.splitlines() if line.strip() and not re.fullmatch(r"\d{1,3}", line.strip())]
+    first = next((index for index, line in enumerate(lines) if _recap_paragraph_start(line)), None)
+    if first is None:
+        return _split_marked_bullets(text)
+    header = lines[:first]
+    bullets: list[str] = []
+    current: list[str] = []
+    for line in lines[first:]:
+        for piece in _pieces_at_starts(line):
+            if _recap_paragraph_start(piece):
+                if current:
+                    bullets.append(" ".join(current).strip())
+                current = [piece]
+                continue
+            if current:
+                current.append(piece)
+            else:
+                header.append(piece)
+    if current:
+        bullets.append(" ".join(current).strip())
+    return "\n".join(header).strip() or "Important Information", [item for item in bullets if item]
+
+
+_RECAP_START = re.compile(
+    r"^(?:your plan is not subject to (?:adp|acp)|"
+    r"based on the definition of highly compensated|"
+    r"your plan is designed to allow participants|"
+    r"your plan may also permit participants with over 15|"
+    r"participants with fifteen or more years of service|"
+    r"universal availability rule|"
+    r"the ['\u2018\u2019`\"\u201c\u201d]?universal availability|"
+    r"based on the top heavy|"
+    r"your plan will be considered top heavy|"
+    r"if you sponsor a qualified retirement plan|"
+    r"the plan['\u2019`╖]s employer match contribution|"
+    r"reallocation of forfeitures|"
+    r"no forfeitures available to reallocate)",
+    re.I,
+)
+
+
+def _recap_paragraph_start(line: str) -> bool:
+    """A Year End Recap template paragraph, with or without a bullet mark.
+
+    Purpose:
+        A Year End Recap template paragraph, with or without a bullet mark.
+
+    Args:
+        line: Line. Type: str.
+
+    Returns:
+        True or False.
+
+    Raises:
+        None.
+
+    Example:
+        _recap_paragraph_start("Your plan is not subject to ADP/ACP testing") returns True.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
+    return bool(_RECAP_START.match(_strip_recap_mark(line)))
+
+
+_RECAP_MARK = re.compile(
+    r"^(?:[\u2022•\u00b7\u25cf\u25e6\u2219\uf0b7╖■□▪▫*?\-]\s*)+",
+)
+
+
+def _strip_recap_mark(line: str) -> str:
+    """Strip recap mark.
+
+    Purpose:
+        Strip recap mark.
+
+    Args:
+        line: Line. Type: str.
+
+    Returns:
+        a str.
+
+    Raises:
+        None.
+
+    Example:
+        _strip_recap_mark("text") returns a str.
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
+    # Strip only known bullet markers (including font-substituted glyphs such as ╖).
+    # Removing every leading non-letter also erased standalone currency amounts
+    # such as "$7,500." during recap rebuilds.
+    return _RECAP_MARK.sub("", line or "").strip()
+
+
+def _pieces_at_starts(line: str) -> list[str]:
+    """Pieces at starts.
+
+    Purpose:
+        Pieces at starts.
+
+    Args:
+        line: Line. Type: str.
+
+    Returns:
+        list[str].
+
+    Raises:
+        None.
+
+    Example:
+        _pieces_at_starts("text") returns list[str].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
+    body = _strip_recap_mark(line)
+    matches = list(_RECAP_START.finditer(body))
+    if not matches:
+        return [body] if body else []
+    pieces: list[str] = []
+    if matches[0].start() > 0:
+        pieces.append(body[: matches[0].start()].strip())
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(body)
+        pieces.append(body[match.start() : end].strip())
+    return [piece for piece in pieces if piece]
+
+
+def _split_marked_bullets(text: str) -> tuple[str, list[str]]:
+    """Split marked bullets.
+
+    Purpose:
+        Split marked bullets.
+
+    Args:
+        text: Text taken from a page or a file.
+
+    Returns:
+        tuple[str, list[str]].
+
+    Raises:
+        None.
+
+    Example:
+        _split_marked_bullets("text") returns tuple[str, list[str]].
+
+    Side effects:
+        None. This function only reads data and returns a value.
+    """
     lines = [line.strip() for line in text.splitlines()]
     header: list[str] = []
     bullets: list[str] = []
@@ -1612,11 +2178,11 @@ def _split_recap(text: str) -> tuple[str, list[str]]:
     for line in lines:
         if re.fullmatch(r"\d{1,3}", line):
             continue
-        if re.match(r"^[\u2022•\u00b7\-\*\?]\s+", line):
+        if _RECAP_MARK.match(line):
             if current:
                 bullets.append(" ".join(current).strip())
             started = True
-            current = [re.sub(r"^[\u2022•\u00b7\-\*\?]\s*", "", line)]
+            current = [_strip_recap_mark(line)]
             continue
         if not started:
             header.append(line)
@@ -1629,4 +2195,64 @@ def _split_recap(text: str) -> tuple[str, list[str]]:
     if current:
         bullets.append(" ".join(current).strip())
     return "\n".join(header).strip() or "Important Information", [item for item in bullets if item]
+
+
+def _redact_recap_paragraphs(page: fitz.Page, paragraphs: list[str]) -> bool:
+    """Cover the template paragraphs that do not apply, and leave the others where they are.
+
+    Purpose:
+        Cover the template paragraphs that do not apply, and leave the others where they are.
+
+    Args:
+        page: One PDF page.
+        paragraphs: Paragraphs. Type: list[str].
+
+    Returns:
+        True when every paragraph was found and covered.
+
+    Raises:
+        A closed PDF raises from PyMuPDF.
+
+    Example:
+        _redact_recap_paragraphs(page, []) returns True or False.
+
+    Side effects:
+        Changes the PDF passed in. Does not save the file by itself.
+    """
+    lines = _page_lines(page)
+    used: set[int] = set()
+    boxes: list[fitz.Rect] = []
+    for paragraph in paragraphs:
+        target = _squash(paragraph)
+        if not target:
+            continue
+        found = False
+        for start in range(len(lines)):
+            if start in used:
+                continue
+            joined = ""
+            rect: fitz.Rect | None = None
+            consumed: list[int] = []
+            for index in range(start, len(lines)):
+                if index in used:
+                    break
+                joined += _squash(lines[index][0])
+                line_rect = fitz.Rect(lines[index][1])
+                rect = line_rect if rect is None else rect | line_rect
+                consumed.append(index)
+                if joined.startswith(target):
+                    boxes.append(fitz.Rect(18, rect.y0 - 1, page.rect.x1 - 18, rect.y1 + 2))
+                    used.update(consumed)
+                    found = True
+                    break
+                if len(joined) > len(target):
+                    break
+            if found:
+                break
+        if not found:
+            return False
+    if not boxes:
+        return False
+    _apply_redact_boxes(page, boxes)
+    return True
 

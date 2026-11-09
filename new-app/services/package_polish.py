@@ -51,7 +51,7 @@ _KEEP_PAGE = re.compile(
 )
 _SOC_PAGE = re.compile(r"statement of contribution", re.I)
 _DISALLOWED_LINE = re.compile(
-    r"escalat|form\s+5500|5500\s+wording|audited\s+wording|statement of contribution|\bSOC\b",
+    r"escalat|form\s+5500|5500\s+wording|audited\s+wording|statement of contribution|(?-i:\bSOC\b)(?!\.?\s*sec)",
     re.I,
 )
 _DISALLOWED_EXCEPT_SOC = re.compile(
@@ -283,7 +283,16 @@ def reorder_inner_pages(doc: fitz.Document) -> list[str]:
     Side effects:
         Changes the PDF passed in. Does not save the file by itself.
     """
-    kinds = [_page_kind(page.get_text("text") or "") for page in doc]
+    texts = [page.get_text("text") or "" for page in doc]
+    kinds = [_page_kind(text) for text in texts]
+    for number in range(1, len(kinds)):
+        # A second employee-listing page has no heading. It stays behind its first page.
+        if (
+            kinds[number] is None
+            and kinds[number - 1] == ("ADP/ACP", 1)
+            and _LISTING_CONTINUATION.search(_head(texts[number]) + " " + texts[number][:600])
+        ):
+            kinds[number] = ("ADP/ACP", 1)
     order = list(range(doc.page_count))
     changed: list[str] = []
     index = 0
@@ -350,6 +359,16 @@ def remove_disallowed_wording(doc: fitz.Document, keep_soc: bool = False) -> lis
 
 
 _ADP_PHRASES = ("ADP/ACP", "ADP / ACP", "ADP and/or ACP", "ADP and ACP")
+# Pages of the ADP/ACP test report keep their printed wording.
+_ADP_ACP_REPORT_PAGE = re.compile(
+    r"nondiscrimination test for plan year end|this plan (?:passes|fails) the", re.I
+)
+# Excess Return / Failure notice: convert ADP/ACP → ACP, drop ADP QNEC clauses only.
+_EXCESS_RETURN_NOTICE_PAGE = re.compile(
+    r"excess return notice|failed compliance testing",
+    re.I,
+)
+_LISTING_CONTINUATION = re.compile(r"\b(?:ADP|ACP)\b[\s\S]*compensation[\s\S]*amount", re.I)
 
 
 def _is_recap_page(text: str) -> bool:
@@ -381,6 +400,8 @@ def rewrite_403b_adp_mentions(doc: fitz.Document) -> list[str]:
 
     Purpose:
         403(b) packages mention ACP only. ADP/ACP becomes ACP. A Year End Recap page stays, including the bullet that says the plan is not subject to ADP/ACP testing. Other leftover ADP lines are removed.
+        Excess Return / Failed Compliance Testing pages only rewrite ADP/ACP → ACP and drop
+        ADP QNEC clauses — they are not line-wiped, so QNEC fill can still run.
 
     Args:
         doc: Open PDF. Must not be closed.
@@ -399,22 +420,17 @@ def rewrite_403b_adp_mentions(doc: fitz.Document) -> list[str]:
     """
     changed = False
     for page in doc:
-        recap = _is_recap_page(page.get_text("text") or "")
-        hits: list[fitz.Rect] = []
-        for phrase in _ADP_PHRASES:
-            hits.extend(page.search_for(phrase))
-        if hits:
-            for rect in hits:
-                page.add_redact_annot(rect + (-1, -2, 1, 1), fill=(1, 1, 1))
-            page.apply_redactions(images=0)
-            for rect in hits:
-                page.insert_text(
-                    (rect.x0, rect.y1 - 1),
-                    "ACP",
-                    fontsize=max(8.0, min(11.0, rect.height * 0.85)),
-                    fontname="helv",
-                    color=(0, 0, 0),
-                )
+        page_text = page.get_text("text") or ""
+        if _ADP_ACP_REPORT_PAGE.search(page_text):
+            continue
+        recap = _is_recap_page(page_text)
+        notice = bool(_EXCESS_RETURN_NOTICE_PAGE.search(page_text))
+        if notice:
+            # Whole-line rewrite: partial redaction destroys shared text objects on this page.
+            if _rewrite_403b_excess_notice_page(page):
+                changed = True
+            continue
+        if _rewrite_adp_acp_phrases(page):
             changed = True
         if recap:
             continue
@@ -439,7 +455,7 @@ def rewrite_403b_adp_mentions(doc: fitz.Document) -> list[str]:
             continue
         for rect in boxes:
             page.add_redact_annot(rect & page.rect, fill=(1, 1, 1))
-        page.apply_redactions(images=0)
+        page.apply_redactions(images=0, graphics=0)
         for rect in boxes:
             page.draw_rect(rect & page.rect, color=(1, 1, 1), fill=(1, 1, 1), width=0, overlay=True)
         changed = True
@@ -450,6 +466,191 @@ def rewrite_403b_adp_mentions(doc: fitz.Document) -> list[str]:
     if not changed:
         return []
     return ["403(b) package uses ACP only. ADP testing wording was removed."]
+
+
+def _rewrite_403b_excess_notice_page(page: fitz.Page) -> bool:
+    """Rewrite Excess Return notice lines to ACP-only wording without mangling neighbors."""
+    from services.pdf_modifier import _base_font, _rgb
+
+    jobs: list[tuple[dict, list[dict], str]] = []
+    for block in page.get_text("dict").get("blocks", []):
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []):
+            spans = [span for span in line.get("spans", []) if span.get("text")]
+            if not spans:
+                continue
+            text = "".join(str(span.get("text") or "") for span in spans)
+            updated = text
+            for phrase in _ADP_PHRASES:
+                updated = re.sub(re.escape(phrase), "ACP", updated, flags=re.I)
+            # Drop ADP QNEC clause even if the placeholder was clipped at the page edge.
+            updated = re.sub(
+                r"\s*The ADP QNEC is\s*\$\S*\.?",
+                "",
+                updated,
+                flags=re.I,
+            )
+            if updated == text:
+                continue
+            jobs.append((line, spans, updated))
+    if not jobs:
+        return False
+    for line, _spans, _updated in jobs:
+        box = fitz.Rect(line["bbox"])
+        page.add_redact_annot(
+            fitz.Rect(box.x0 - 0.4, box.y0 + 0.2, box.x1 + 0.4, box.y1 - 0.2),
+            fill=(1, 1, 1),
+        )
+    page.apply_redactions(images=0, graphics=0)
+    for _line, spans, updated in jobs:
+        span = spans[0]
+        origin = span.get("origin") or (span["bbox"][0], span["bbox"][3])
+        page.insert_text(
+            (float(origin[0]), float(origin[1])),
+            updated,
+            fontsize=float(span.get("size") or 10),
+            fontname=_base_font(str(span.get("font") or ""), int(span.get("flags") or 0)),
+            color=_rgb(span.get("color") or 0),
+            overlay=True,
+        )
+    return True
+
+
+def _rewrite_adp_acp_phrases(page: fitz.Page) -> bool:
+    """Replace ADP/ACP phrases with ACP using line-safe inserts."""
+    hits: list[fitz.Rect] = []
+    for phrase in _ADP_PHRASES:
+        hits.extend(page.search_for(phrase))
+    if not hits:
+        return False
+    for rect in hits:
+        page.add_redact_annot(
+            fitz.Rect(rect.x0 - 0.4, rect.y0 + 0.2, rect.x1 + 0.4, rect.y1 - 0.2),
+            fill=(1, 1, 1),
+        )
+    page.apply_redactions(images=0, graphics=0)
+    for rect in hits:
+        page.insert_text(
+            (rect.x0, rect.y1 - 1),
+            "ACP",
+            fontsize=max(8.0, min(11.0, rect.height * 0.85)),
+            fontname="helv",
+            color=(0, 0, 0),
+            overlay=True,
+        )
+    return True
+
+
+def normalize_report_layout(doc: fitz.Document) -> list[str]:
+    """Normalize known text offsets and split merged Amount / % column headings."""
+    from services.pdf_modifier import _base_font, _rgb
+
+    changed = False
+    for page in doc:
+        page_text = page.get_text("text") or ""
+        # Most pages need no layout fix; skip the expensive dict extract.
+        if not re.search(
+            r"annual valuation report|year end recap|Amount\s{2,}%|\bcensus\b",
+            page_text,
+            re.I,
+        ):
+            continue
+        lines = [
+            (line, "".join(span.get("text", "") for span in line.get("spans", [])).strip())
+            for block in page.get_text("dict").get("blocks", [])
+            if block.get("type") == 0
+            for line in block.get("lines", [])
+        ]
+        shifts: list[tuple[dict, float]] = []
+        if re.search(r"annual valuation report", page_text, re.I):
+            for line, text in lines:
+                if text.upper() == "ACTION REQUIRED":
+                    x = float(line["bbox"][0])
+                    if abs(x - 24) < 0.5:
+                        shifts.append((line, 16.0))
+                    elif abs(x - 36) < 0.5:
+                        shifts.append((line, 4.0))
+                elif (
+                    text.upper() == "NO IMMEDIATE ACTION IS REQUIRED AT THIS TIME"
+                ):
+                    x = float(line["bbox"][0])
+                    if abs(x - 24) < 0.5:
+                        shifts.append((line, 15.0))
+                    elif abs(x - 30) < 0.5:
+                        shifts.append((line, 9.0))
+        if re.search(r"year end recap", page_text, re.I):
+            start = next(
+                (line["bbox"][1] for line, text in lines if "UNIVERSAL AVAILABILITY RULE" in text.upper()),
+                None,
+            )
+            end = next(
+                (
+                    line["bbox"][3]
+                    for line, text in lines
+                    if start is not None
+                    and line["bbox"][1] >= start
+                    and "representative to discuss" in text.lower()
+                ),
+                None,
+            )
+            if start is not None and end is not None:
+                shifts.extend(
+                    (line, 5.0)
+                    for line, _text in lines
+                    if start - 1 <= line["bbox"][1] and line["bbox"][3] <= end + 1
+                    and 60 <= line["bbox"][0] < 98
+                )
+        if re.search(r"\bcensus\b", " ".join(text for _line, text in lines[:8]), re.I):
+            shifts.extend(
+                (line, 6.0)
+                for line, text in lines
+                if text.casefold() == "name"
+                and line["bbox"][1] > 100
+                and abs(line["bbox"][0] - 36) < 0.5
+            )
+        if shifts:
+            unique = {id(line): (line, delta) for line, delta in shifts}
+            for line, _delta in unique.values():
+                page.add_redact_annot(fitz.Rect(line["bbox"]) + (-1, -1, 1, 1), fill=(1, 1, 1))
+            page.apply_redactions(images=0, graphics=0)
+            for line, delta in unique.values():
+                for span in line.get("spans", []):
+                    text = span.get("text", "")
+                    if not text:
+                        continue
+                    origin = span.get("origin") or (span["bbox"][0], span["bbox"][3])
+                    font = _base_font(str(span.get("font") or ""), int(span.get("flags") or 0))
+                    page.insert_text(
+                        (origin[0] + delta, origin[1]),
+                        text,
+                        fontsize=float(span.get("size") or 10),
+                        fontname=font,
+                        color=_rgb(span.get("color") or 0),
+                        overlay=True,
+                    )
+            changed = True
+
+        for block in page.get_text("dict").get("blocks", []):
+            if block.get("type") != 0:
+                continue
+            for line in block.get("lines", []):
+                spans = line.get("spans", [])
+                original = "".join(span.get("text", "") for span in spans).strip()
+                if not re.fullmatch(r"Amount\s{2,}%", original) or not spans:
+                    continue
+                span = spans[0]
+                box = fitz.Rect(line["bbox"]) + (-1, -1, 1, 1)
+                origin = span.get("origin") or (span["bbox"][0], span["bbox"][3])
+                size = float(span.get("size") or 8)
+                font = _base_font(str(span.get("font") or ""), int(span.get("flags") or 0))
+                color = _rgb(span.get("color") or 0)
+                page.add_redact_annot(box, fill=(1, 1, 1))
+                page.apply_redactions(images=0, graphics=0)
+                page.insert_text((288, origin[1]), "Amount", fontsize=size, fontname=font, color=color)
+                page.insert_text((360, origin[1]), "%", fontsize=size, fontname=font, color=color)
+                changed = True
+    return ["Aligned report text and separated merged column headings."] if changed else []
 
 
 def drop_brf_pages(doc: fitz.Document) -> list[str]:
@@ -542,6 +743,59 @@ def renumber_footers(doc: fitz.Document) -> list[str]:
     return [f"Renumbered {changed} page footer(s) to match the final page order."] if changed else []
 
 
+def ensure_summary_heading_rule(doc: fitz.Document) -> list[str]:
+    """Add the horizontal divider below a Result Summary title block if it is absent."""
+    changed = 0
+    title_pattern = re.compile(
+        r"^(?:compliance testing summary of results|compliance summary|result summary|test summary)$",
+        re.I,
+    )
+    section_pattern = re.compile(
+        r"^(?:416\s+top heavy|410\s*\(?b\)?\s+coverage|401\s*\(|402\s*\(?g\)?|"
+        r"415(?:\s*\(\s*c\s*\))?|414\s*\(?s\)?|average\s+(?:deferral|contribution|benefit)|"
+        r"benefits?,?\s+rights|plan\s+number\s*:)",
+        re.I,
+    )
+    for page in doc:
+        text_lines = [
+            (line, "".join(span.get("text", "") for span in line.get("spans", [])).strip())
+            for block in page.get_text("dict").get("blocks", [])
+            if block.get("type") == 0
+            for line in block.get("lines", [])
+        ]
+        text_lines.sort(key=lambda item: (item[0]["bbox"][1], item[0]["bbox"][0]))
+        title_index = next((i for i, (_line, value) in enumerate(text_lines) if title_pattern.fullmatch(value)), None)
+        if title_index is None:
+            continue
+        header_lines = []
+        for line, value in text_lines[title_index:]:
+            if header_lines and section_pattern.match(value):
+                break
+            if value:
+                header_lines.append(line)
+            if len(header_lines) >= 8:
+                break
+        if not header_lines:
+            continue
+        bottom = max(line["bbox"][3] for line in header_lines)
+        y = bottom + 7
+        has_rule = any(
+            abs(float(drawing["rect"].y0) - y) <= 3
+            and float(drawing["rect"].width) >= page.rect.width * 0.65
+            and float(drawing["rect"].height) <= 2
+            for drawing in page.get_drawings()
+        )
+        if not has_rule and y < page.rect.y1 - 40:
+            page.draw_line(
+                fitz.Point(48, y),
+                fitz.Point(page.rect.width - 48, y),
+                color=(0, 0, 0),
+                width=1,
+            )
+            changed += 1
+    return [f"Added a divider below {changed} Result Summary heading block(s)."] if changed else []
+
+
 def package_checks(doc: fitz.Document, profile: PlanProfile) -> list[ValidationItem]:
     """Checking the package pages against the profile.
 
@@ -570,7 +824,7 @@ def package_checks(doc: fitz.Document, profile: PlanProfile) -> list[ValidationI
         _brf_check(doc, profile),
         _assembly_order_check(doc, profile),
     ]
-    items.extend(_result_summary_checks(doc))
+    items.extend(_result_summary_checks(doc, profile.plan_type))
     items.extend(_variance_checks(doc, profile))
     items.extend(_identity_checks(doc, profile))
     return items
@@ -599,6 +853,7 @@ def _assembly_order_check(doc: fitz.Document, profile: "PlanProfile") -> Validat
         None. This function only reads data and returns a value.
     """
     from services.file_order import load_section_specs
+    from services.pdf_assembler import page_section
     if package_flags(profile.plan_type).get("rewrite_adp_mentions"):
         names = [
             "Cover Letter", "Test Summary", "Compensation Limit Failure Summary",
@@ -647,6 +902,10 @@ def _assembly_order_check(doc: fitz.Document, profile: "PlanProfile") -> Validat
             continue
         if any(re.search(r"combined testing report", line, re.I) for line in head_lines):
             recognized.append((page_index + 1, "Combined Testing Report", order["Combined Testing Report"]))
+            continue
+        source_section = page_section(page)
+        if source_section in {"HCE/Key", "Future HCE"} and source_section in order:
+            recognized.append((page_index + 1, source_section, order[source_section]))
             continue
         for spec in specs:
             name = str(spec.get("name") or "")
@@ -721,6 +980,9 @@ def _page_kind(text: str) -> tuple[str, int] | None:
             head,
             ((r"correction", 3), (r"excluded", 2), (r"\bdetail\b", 1), (r"\bsummary\b", 0)),
         )
+        if rank is None:
+            wider = " ".join([line.strip() for line in text.splitlines() if line.strip()][:8])
+            rank = _ranked(wider, ((r"test results", 0), (r"employee listing", 1)))
         if rank is not None:
             return ("ADP/ACP", rank)
     return None
@@ -1073,14 +1335,19 @@ def _brf_check(doc: fitz.Document, profile: PlanProfile) -> ValidationItem:
     )
 
 
-def _result_summary_checks(doc: fitz.Document) -> list[ValidationItem]:
+def _result_summary_checks(
+    doc: fitz.Document,
+    plan_type: str | None = None,
+) -> list[ValidationItem]:
     """Result summary checks.
 
     Purpose:
-        Result summary checks.
+        Result summary checks, including the 410(b) Coverage Test checkpoint.
 
     Args:
         doc: Open PDF. Must not be closed.
+        plan_type: ``401k``, ``403b``, ``457``, or empty. 403(b) summaries must not
+            show a 401(k) line under 410(b).
 
     Returns:
         list[ValidationItem].
@@ -1089,7 +1356,7 @@ def _result_summary_checks(doc: fitz.Document) -> list[ValidationItem]:
         A closed PDF raises from PyMuPDF.
 
     Example:
-        _result_summary_checks(doc) returns list[ValidationItem].
+        _result_summary_checks(doc, "403b") returns list[ValidationItem].
 
     Side effects:
         None. This function only reads data and returns a value.
@@ -1107,7 +1374,7 @@ def _result_summary_checks(doc: fitz.Document) -> list[ValidationItem]:
             )
         ]
     items = [_top_heavy_check(doc, summary)]
-    items.extend(_pass_fail_checks(doc, summary))
+    items.extend(_pass_fail_checks(doc, summary, plan_type))
     return items
 
 
@@ -1223,7 +1490,11 @@ def _top_heavy_check(doc: fitz.Document, summary: str) -> ValidationItem:
     )
 
 
-def _pass_fail_checks(doc: fitz.Document, summary: str) -> list[ValidationItem]:
+def _pass_fail_checks(
+    doc: fitz.Document,
+    summary: str,
+    plan_type: str | None = None,
+) -> list[ValidationItem]:
     """Pass fail checks.
 
     Purpose:
@@ -1232,6 +1503,7 @@ def _pass_fail_checks(doc: fitz.Document, summary: str) -> list[ValidationItem]:
     Args:
         doc: Open PDF. Must not be closed.
         summary: Summary. Type: str.
+        plan_type: Plan type for 410(b) Result Summary norms.
 
     Returns:
         a list of ValidationItem.
@@ -1270,7 +1542,7 @@ def _pass_fail_checks(doc: fitz.Document, summary: str) -> list[ValidationItem]:
                 detail=detail,
             )
         )
-    coverage = _coverage_item(doc, summary)
+    coverage = _coverage_item(doc, summary, plan_type)
     if coverage is not None:
         items.append(coverage)
     brf = _brf_summary_item(summary)
@@ -1295,15 +1567,22 @@ _410_LABELS = (
 )
 
 
-def _coverage_item(doc: fitz.Document, summary: str) -> ValidationItem | None:
-    """Coverage item.
+def _coverage_item(
+    doc: fitz.Document,
+    summary: str,
+    plan_type: str | None = None,
+) -> ValidationItem | None:
+    """410(b) Coverage Test checkpoint on the Result Summary.
 
     Purpose:
-        Coverage item.
+        Compare Standard / 401(k) / 401(m) lines to the 410(b) report, require ABPT
+        wording when 410(b) fails, and for 403(b) plans reject a 401(k) line under
+        410(b) Coverage Test (assemble guide: Standard and 401(m) only).
 
     Args:
         doc: Open PDF. Must not be closed.
-        summary: Summary. Type: str.
+        summary: Result Summary text.
+        plan_type: Plan type. ``403b`` applies the no-401(k)-under-410(b) rule.
 
     Returns:
         a ValidationItem | None.
@@ -1312,27 +1591,40 @@ def _coverage_item(doc: fitz.Document, summary: str) -> ValidationItem | None:
         A closed PDF raises from PyMuPDF.
 
     Example:
-        _coverage_item(doc, "text") returns a ValidationItem | None.
+        _coverage_item(doc, summary, "403b") returns a ValidationItem | None.
 
     Side effects:
         None. This function only reads data and returns a value.
     """
+    from services.plan_config import is_403b_plan
+
     summary_lines = _410_lines(summary)
     report_lines = _410_report_lines(doc)
     report_text = _report_text(doc)
+    plan_403b = is_403b_plan(plan_type)
     required = {
         key
         for key, _label, _code, pattern in _410_LABELS
         if key in report_lines or re.search(pattern, report_text, re.I)
     }
+    # 403(b): 401(k) deferral/Roth line must not appear under 410(b) Coverage Test.
+    if plan_403b:
+        required.discard("401k")
     if not summary_lines and not required:
         return None
     problems: list[str] = []
     notes: list[str] = []
+    if plan_403b and "401k" in summary_lines:
+        problems.append(
+            "401(k) result should not appear under 410(b) Coverage Test on a 403(b) Result Summary "
+            "(use Standard for PS/SHNE and 401(m) for match when contributions exist)"
+        )
     for key, label, code, _pattern in _410_LABELS:
         shown = summary_lines.get(key)
         report = report_lines.get(key)
         meaning = _means(code)
+        if plan_403b and key == "401k":
+            continue
         if shown is None:
             if key in required:
                 problems.append(f"{label} is missing from the Result Summary. {meaning}")
@@ -1355,7 +1647,11 @@ def _coverage_item(doc: fitz.Document, summary: str) -> ValidationItem | None:
             )
         ratio = f" {shown['ratio_text']}%" if shown["ratio_text"] else ""
         notes.append(f"{label} {shown['result']}{ratio} ({meaning})")
-    failed = [row for row in summary_lines.values() if row["result"] == "fail"]
+    failed = [
+        row
+        for key, row in summary_lines.items()
+        if row["result"] == "fail" and not (plan_403b and key == "401k")
+    ]
     if failed:
         if not _ABPT_PASSED.search(summary):
             problems.append(

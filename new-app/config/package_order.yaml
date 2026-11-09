@@ -115,9 +115,9 @@ expected_order:
   - name: HCE/Key
     aliases: ["HCE/Key", "HCE Key", "HCEKey"]
   - name: Future HCE
-    aliases: ["Future HCE", "Future Year HCE", "FYHCE", "HCE"]
+    aliases: ["Future HCE", "Future Year HCE", "FYHCE"]
   - name: ADP/ACP
-    aliases: ["ADP/ACP", "ADP ACP", "ADP Test", "ACP Test", "ADP"]
+    aliases: ["ADP/ACP", "ADP ACP", "ADP Test", "ACP Test", "ADP", "ACP"]
   - name: "410(b)"
     aliases: ["410(b)", "410b", "410B", "410"]
   - name: Variance

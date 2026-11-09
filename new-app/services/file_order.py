@@ -1,8 +1,19 @@
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import re
 
 from services.plan_config import load_package_order
+
+# Names passed together so 2026HCE and 2027HCE can be told apart.
+_MATCH_NAMES: contextvars.ContextVar[tuple[str, ...]] = contextvars.ContextVar(
+    "match_names",
+    default=(),
+)
+_HCE_YEAR = re.compile(r"(?<!\d)(20\d{2})(?!\d)")
+_HCE_KEY_FILE = re.compile(r"hce\s*/?\s*key", re.I)
+_HCE_TOKEN = re.compile(r"(?<![a-z])hce(?:key)?(?![a-z])", re.I)
 
 
 def load_section_specs() -> list[dict]:
@@ -107,6 +118,83 @@ def _rank(spec: dict, fallback: int) -> int:
         return len(order) + fallback
 
 
+def _plain_hce_year(filename: str) -> int | None:
+    """Year from a year-tagged HCE report name, including HCEKey variants."""
+    stem = re.sub(r"\.[^.]+$", "", filename or "")
+    if not _HCE_TOKEN.search(stem):
+        return None
+    match = _HCE_YEAR.search(stem)
+    return int(match.group(1)) if match else None
+
+
+def _has_future_hce_marker(filename: str) -> bool:
+    """Recognize explicit Future/FY markers even when a year occurs between the words."""
+    stem = re.sub(r"\.[^.]+$", "", filename or "")
+    tokens = re.findall(r"[a-z0-9]+", stem.lower())
+    has_hce = any(token in {"hce", "hcekey"} for token in tokens)
+    has_future = "future" in tokens or "fyhce" in tokens or ("fy" in tokens and has_hce)
+    return has_hce and has_future
+
+
+def _valuation_year(names: tuple[str, ...]) -> int | None:
+    """Plan year printed in the valuation package file name, such as 2026 in a 403(b) package."""
+    for name in names:
+        if not re.search(r"valuation", name, re.I):
+            continue
+        years = re.findall(r"20\d{2}", name)
+        if years:
+            return int(years[0])
+    return None
+
+
+def hce_section_name(filename: str) -> str | None:
+    """Choose the current or future section for year-tagged HCE report filenames.
+
+    An explicit Future/FY marker always wins. Otherwise a year later than the
+    valuation year, or later than a companion current-year HCEKey/HCE report, is future.
+    An explicitly named HCEKey stays current.
+    """
+    if _has_future_hce_marker(filename):
+        return "Future HCE"
+    if _HCE_KEY_FILE.search(filename):
+        return None
+    year = _plain_hce_year(filename)
+    if year is None:
+        return None
+    names = _MATCH_NAMES.get() or (filename,)
+    plain_years = [found for name in names if (found := _plain_hce_year(name)) is not None]
+    package_year = _valuation_year(names)
+    key_years = [
+        found
+        for name in names
+        if _HCE_KEY_FILE.search(name) and (found := _plain_hce_year(name)) is not None
+    ]
+    has_key_file = any(_HCE_KEY_FILE.search(name) for name in names)
+    later_than_another = any(other < year for other in plain_years)
+    later_than_package = package_year is not None and year > package_year
+    later_than_key = has_key_file and (not key_years or year > min(key_years))
+    if later_than_another or later_than_key or later_than_package:
+        return "Future HCE"
+    return "HCE/Key"
+
+
+def _spec_named(name: str) -> dict | None:
+    for spec in load_section_specs():
+        if str(spec.get("name") or "") == name:
+            return spec
+    return None
+
+
+@contextlib.contextmanager
+def use_filename_batch(names: list[str]):
+    """Let file matching see every uploaded name, so 2026HCE is not treated as 2027HCE."""
+    token = _MATCH_NAMES.set(tuple(names))
+    try:
+        yield
+    finally:
+        _MATCH_NAMES.reset(token)
+
+
 def _best_section(filename: str) -> tuple[int, dict] | None:
     """Longest keyword match wins so SHMaVar is not treated as MaVar, 401a4 is not 401k, etc.
 
@@ -128,6 +216,16 @@ def _best_section(filename: str) -> tuple[int, dict] | None:
     Side effects:
         None. This function only reads data and returns a value.
     """
+    forced = hce_section_name(filename)
+    if forced:
+        spec = _spec_named(forced)
+        if spec:
+            specs = load_section_specs()
+            index = next(
+                (item_index for item_index, item in enumerate(specs) if str(item.get("name") or "") == forced),
+                0,
+            )
+            return _rank(spec, index), spec
     name = _norm(filename)
     specs = load_section_specs()
     paged = re.search(r"_p0*(\d+)(?:\.[^.]+)?$", filename, re.I)
@@ -225,6 +323,35 @@ def matched_spec(filename: str) -> dict | None:
     """
     found = _best_section(filename)
     return found[1] if found else None
+
+
+def matched_sections(filenames: list[str]) -> dict[str, str]:
+    """Resolve filename sections as one batch so year-tagged HCE reports are classified consistently."""
+    with use_filename_batch(filenames):
+        return {
+            filename: str(spec["name"])
+            for filename in filenames
+            if (spec := matched_spec(filename)) and spec.get("name")
+        }
+
+
+def classify_file_rows(names: list[str], pages: list[int], page_counts: list[int]) -> list[dict[str, object]]:
+    """Classify UI rows as one filename batch, including year-tagged HCE reports."""
+    classified: list[dict[str, object]] = []
+    with use_filename_batch(names):
+        for index, filename in enumerate(names):
+            try:
+                page = max(0, int(pages[index])) if index < len(pages) else 0
+            except (TypeError, ValueError):
+                page = 0
+            try:
+                page_count = max(1, int(page_counts[index])) if index < len(page_counts) else 1
+            except (TypeError, ValueError):
+                page_count = 1
+            label = display_label(filename, page=page, page_count=page_count)
+            rank = rank_for_label(label, sop_rank(filename)) if page else sop_rank(filename)
+            classified.append({"name": filename, "page": page, "label": label, "rank": rank})
+    return classified
 
 
 def sop_rank(filename: str) -> int:
@@ -537,4 +664,5 @@ def order_uploads(uploads: list[tuple[str, bytes]]) -> list[tuple[str, bytes]]:
     Side effects:
         None. This function only reads data and returns a value.
     """
-    return sorted(uploads, key=lambda item: (sop_rank(item[0]), location_index(item[0]), item[0].lower()))
+    with use_filename_batch([name for name, _data in uploads]):
+        return sorted(uploads, key=lambda item: (sop_rank(item[0]), location_index(item[0]), item[0].lower()))

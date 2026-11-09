@@ -15,7 +15,9 @@ tests:
 
   - code: 410b_401k
     name: 410(b) 401(k)
-    means: Salary deferrals and Roth. The ratio percent is that result.
+    means: >
+      Salary deferrals and Roth. The ratio percent is that result.
+      On a 403(b) Result Summary this line must not appear under 410(b) Coverage Test.
 
   - code: 410b_401m
     name: 410(b) 401(m)

@@ -9,15 +9,18 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
-from config.settings import MAX_FILE_BYTES, MAX_FILES, OUTPUT_DIR
+from config.settings import LOG_DIR, MAX_FILE_BYTES, MAX_FILES, OUTPUT_DIR
 from models.job import HighlightMark, JobResult
+from models.plan_profile import PlanProfile
 from services.change_marks import apply_highlights, load_marks
 from services.file_order import list_file_meta
+from services.file_order import classify_file_rows
 from services.preview_view import add_annotation, add_highlight, add_secure_redaction, add_text, modify_pages
 from services.preview_view import outline as preview_outline
 from services.preview_view import page_lines, page_png, replace_line, replace_lines, search_pdf, shift_line_down, update_bookmark, validate_bookmarks
 from services.preview_history import abort as abort_edit
 from services.preview_history import active_path, commit as commit_edit, edited_copy_path, editable_path, history_state, redo as redo_edit, snapshot_before, undo as undo_edit
+from services.audit_log import audit_log_path, write_audit_log
 from services.folder_loader import apply_file_order, list_folder_files, load_pdfs_from_folder
 from services.pdf_pages import expand_uploads_by_page, pdf_page_count, pdf_page_texts
 from services.orchestrator import process_uploads
@@ -29,7 +32,9 @@ JOBS: dict[str, JobResult] = {}
 _PARTS: dict[str, dict] = {}
 _BLOBS: dict[str, tuple[str, bytes]] = {}
 _UPLOAD_ID = re.compile(r"[A-Za-z0-9_-]{8,80}")
-_CHUNK_LIMIT = 48 * 1024
+# Large client packages (census / valuation scans) are tens of MB. Tiny chunks
+# turn one Process into thousands of HTTP round-trips and dominate wall time.
+_CHUNK_LIMIT = 2 * 1024 * 1024
 
 
 def _saved_pdf(job_id: str) -> tuple[Path, str] | None:
@@ -58,6 +63,8 @@ async def create_job(
     auto_order: bool = Form(default=True),
     rewrite_sources: bool = Form(default=False),
     check_assembly_stops: bool = Form(default=True),
+    validation_checks: list[str] | None = Form(default=None),
+    validation_checks_configured: bool = Form(default=False),
     file_order: list[str] | None = Form(default=None),
     item_name: list[str] | None = Form(default=None),
     item_page: list[int] | None = Form(default=None),
@@ -115,6 +122,7 @@ async def create_job(
             detail="Upload PDF files or enter a Valuation Package folder path",
         )
 
+    validation_selection = (validation_checks or []) if validation_checks_configured else None
     if log_steps and trace_id and not _UPLOAD_ID.fullmatch(trace_id):
         raise HTTPException(400, "Console trace ID is not valid")
     options = dict(
@@ -123,6 +131,7 @@ async def create_job(
         source_folder=folder or None,
         rewrite_sources=rewrite_sources,
         check_assembly_stops=check_assembly_stops,
+        validation_checks=validation_selection,
     )
     try:
         if log_steps:
@@ -131,13 +140,74 @@ async def create_job(
             result = await asyncio.to_thread(run_traced, token, process_uploads, uploads, **options)
         else:
             result = await asyncio.to_thread(process_uploads, uploads, **options)
-    except HTTPException:
+    except HTTPException as exc:
+        audit_job_id = (
+            str(exc.detail.get("job_id"))
+            if isinstance(exc.detail, dict) and exc.detail.get("job_id")
+            else uuid.uuid4().hex[:12]
+        )
+        existing_audits = list(LOG_DIR.glob(f"*_{audit_job_id}.json"))
+        if not existing_audits:
+            audit_path = audit_log_path(PlanProfile(), audit_job_id)
+            write_audit_log(
+                audit_path,
+                job_id=audit_job_id,
+                filename="",
+                source_files=uploads,
+                options={
+                    "auto_order": auto_order,
+                    "rewrite_sources": rewrite_sources,
+                    "check_assembly_stops": check_assembly_stops,
+                    "validation_checks": validation_selection,
+                },
+                profile=PlanProfile(),
+                decisions=[],
+                validations=[],
+                warnings=warnings,
+                elapsed_seconds=0,
+                stop_reasons=[str(exc.detail)],
+            )
+        detail = dict(exc.detail) if isinstance(exc.detail, dict) else {"message": str(exc.detail), "validations": []}
+        detail["job_id"] = audit_job_id
+        detail["audit_log_url"] = f"{str(request.base_url).rstrip('/')}/api/jobs/{audit_job_id}/audit-log"
+        exc.detail = detail
         raise
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Could not process PDFs: {exc}") from exc
+        audit_job_id = uuid.uuid4().hex[:12]
+        audit_path = audit_log_path(PlanProfile(), audit_job_id)
+        try:
+            write_audit_log(
+                audit_path,
+                job_id=audit_job_id,
+                filename="",
+                source_files=uploads,
+                options={
+                    "auto_order": auto_order,
+                    "rewrite_sources": rewrite_sources,
+                    "check_assembly_stops": check_assembly_stops,
+                    "validation_checks": validation_selection,
+                },
+                profile=PlanProfile(),
+                decisions=[],
+                validations=[],
+                warnings=warnings,
+                elapsed_seconds=0,
+                stop_reasons=[f"Could not process PDFs: {exc}"],
+            )
+        except Exception:
+            pass
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": f"Could not process PDFs: {exc}",
+                "job_id": audit_job_id,
+                "audit_log_url": f"{str(request.base_url).rstrip('/')}/api/jobs/{audit_job_id}/audit-log",
+            },
+        ) from exc
     base = str(request.base_url).rstrip("/")
     result.download_url = f"{base}/api/jobs/{result.job_id}/pdf"
     result.preview_url = f"{base}/api/jobs/{result.job_id}/preview"
+    result.audit_log_url = f"{base}/api/jobs/{result.job_id}/audit-log" if result.audit_log_path else ""
     JOBS[result.job_id] = result
     return result
 
@@ -202,7 +272,7 @@ async def upload_part(
         raise HTTPException(status_code=400, detail="Choose a PDF or Excel file")
     if not filename.lower().endswith((".pdf", ".xlsx", ".xls")):
         raise HTTPException(status_code=400, detail=f"{filename} must be a PDF or Excel file")
-    if total < 1 or total > 4000 or index < 0 or index >= total:
+    if total < 1 or total > 500 or index < 0 or index >= total:
         raise HTTPException(status_code=400, detail="Upload piece is out of range")
     piece = await chunk.read() if chunk is not None else b""
     if len(piece) > _CHUNK_LIMIT:
@@ -234,6 +304,18 @@ async def upload_part(
         )
     _remember_blob(token, filename, data)
     return {"complete": True, "upload_id": token, "file": await _describe_file(filename, data)}
+
+
+@router.post("/classify-files")
+def classify_files(
+    item_name: list[str] = Form(default=[]),
+    item_page: list[int] = Form(default=[]),
+    item_page_count: list[int] = Form(default=[]),
+) -> dict:
+    """Resolve labels and order ranks using all currently listed filenames together."""
+    return {
+        "files": classify_file_rows(item_name, item_page, item_page_count),
+    }
 
 
 def _pdf_pages(data: bytes) -> tuple[int, list[str]]:
@@ -285,6 +367,25 @@ def download_job_pdf(job_id: str) -> FileResponse:
         active_path(original),
         media_type="application/pdf",
         filename=filename,
+        content_disposition_type="attachment",
+    )
+
+
+@router.get("/jobs/{job_id}/audit-log")
+def download_audit_log(job_id: str) -> FileResponse:
+    if not _UPLOAD_ID.fullmatch(job_id):
+        raise HTTPException(status_code=404, detail="Audit log not found for this assembly")
+    job = JOBS.get(job_id)
+    path = Path(job.audit_log_path) if job and job.audit_log_path else None
+    if path is None:
+        candidates = sorted(LOG_DIR.glob(f"*_{job_id}.json"), key=lambda item: item.stat().st_mtime, reverse=True)
+        path = candidates[0] if candidates else LOG_DIR / "missing-audit-log.json"
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Audit log file is no longer available")
+    return FileResponse(
+        path,
+        media_type="application/json",
+        filename=path.name,
         content_disposition_type="attachment",
     )
 

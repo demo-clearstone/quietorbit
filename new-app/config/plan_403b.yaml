@@ -1,6 +1,6 @@
 # 403(b) plan differences. Loaded only when the plan type is 403(b).
-# This is not one page. It changes the pages listed below for a 403(b) package.
-# Action Required paragraphs are in config/action_required.yaml.
+# Year End Recap rules here fully replace config/year_end_recap.yaml (401k).
+# Source: tests/test copy.docx — MOA 403b Valuation Package Assemble Explanation.
 
 package:
   keep_brf: true
@@ -9,13 +9,12 @@ package:
   ignore_adp_results: true
   acp_notice_amount: true
 
-
 bookmarks:
   HCE/Key: HCE
   ADP/ACP: ACP Test
   BRF: Benefits, Rights and Features test
 
-# These replace the 401(k) rule with the same id.
+# Non-recap overlays (replace matching Action Required / notice rule ids).
 rules:
   - id: I
     section: Excess Return Notice, current year ACP, within 12 months
@@ -39,12 +38,49 @@ rules:
           equals: 401k
     else: remove
 
+# Complete Year End Recap / Important Information rules for 403(b).
+# Does not use 401(k) Y2–Y5 / Y7 (prior/current ADP, safe harbor, top heavy).
+recap_rules:
+  - id: Y1
+    section: Year End Recap, no highly compensated employees (ACP)
+    keep_when:
+      all:
+        - field: hce_current
+          not_true: true
+        - field: hce_future
+          not_true: true
+    else: remove
+    missing: remove
+
+  - id: Y6
+    section: Year End Recap, age 50 catch-up
+    keep_when:
+      all:
+        - field: catchup_disallowed
+          not_true: true
+    else: remove
+
+  - id: Y8
+    section: Year End Recap, per-payroll match
+    keep_when:
+      all:
+        - field: per_payroll_match
+          equals: true
+    else: remove
+    missing: remove
+
   - id: Y10
     section: Year End Recap, 15-year catch-up
     keep_when:
       all:
         - field: special_catchup_disallowed
           not_true: true
+    else: remove
+
+  - id: Y14
+    section: Year End Recap, universal availability
+    keep_when:
+      all: []
     else: remove
 
 paragraphs:
@@ -58,6 +94,25 @@ paragraphs:
         - ACP test is
         - Form W-4P
 
+  # Exclusive 403(b) bullet matches (do not inherit 401(k) ADP/safe-harbor/top-heavy matches).
   recap_bullets:
+    - id: Y1
+      match: did not have any Highly Compensated Employees
+    - id: Y1
+      match: not subject to ACP
+    - id: Y1
+      match: ACP Nondiscrimination Testing
+    - id: Y6
+      match: designed to allow participants who were age 50
+    - id: Y8
+      match: employer match contribution is calculated on a participant's compensation
     - id: Y10
       match: fifteen or more years of service
+    - id: Y10
+      match: over 15 years of service
+    - id: Y14
+      match: UNIVERSAL AVAILABILITY RULE
+    - id: Y14
+      match: universal availability
+    - id: Y9
+      match: not administered by Mutual of America

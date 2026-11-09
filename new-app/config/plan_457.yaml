@@ -1,12 +1,16 @@
 # 457 plan differences. Loaded only when the plan type is 457.
-# A 457 package follows the 401(k) pages, then these Year End Recap edits.
-# 401(k) and 403(b) do not read this file.
+# Year End Recap starts from 401(k) year_end_recap.yaml, then these recap_rules
+# replace matching ids and add 457-only bullets.
 
 package:
   keep_soc: true
   require_full_reports: false
 
-rules:
+# Non-recap overlays (none today).
+rules: []
+
+# 457 Year End Recap additions / replacements on top of the 401(k) recap baseline.
+recap_rules:
   - id: Y11
     section: Year End Recap, 457 age 50 catch-up
     keep_when:

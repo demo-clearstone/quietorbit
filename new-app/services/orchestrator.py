@@ -28,6 +28,7 @@ from models.job import HighlightMark
 from services import (
     assembly_log,
     assembly_stops,
+    audit_log,
     bookmark_service,
     change_marks,
     file_order,
@@ -58,6 +59,7 @@ def process_uploads(
     source_folder: str | None = None,
     rewrite_sources: bool = False,
     check_assembly_stops: bool = False,
+    validation_checks: list[str] | None = None,
 ) -> JobResult:
     """Assemble one valuation package from the uploaded files.
 
@@ -72,6 +74,7 @@ def process_uploads(
         source_folder: Folder the PDFs were loaded from. None when the user uploaded files.
         rewrite_sources: True rewrites dates and other source text inside the PDF.
         check_assembly_stops: True stops assembly when a required check fails.
+        validation_checks: Selected stop checks; None means all configured checks.
 
     Returns:
         The saved package, warnings, and highlight rectangles.
@@ -91,6 +94,8 @@ def process_uploads(
     started = time.perf_counter()
     warnings = list(extra_warnings or [])
     highlights: list[dict] = []
+    audit_log_path = ""
+    audit_log_path = ""
 
     # 1. Sort the uploads.
     pdfs, excels = _split_uploads(uploads)
@@ -189,11 +194,7 @@ def process_uploads(
         if profile.top_heavy_percent is not None:
             profile.top_heavy = profile.top_heavy_percent > 60
             profile.extra.setdefault("field_sources", {})["top_heavy"] = "Top-heavy percentage; threshold is greater than 60%"
-        section_names = {
-            str(spec.get("name"))
-            for name, _data in ordered
-            if (spec := file_order.matched_spec(name))
-        }
+        section_names = set(file_order.matched_sections([name for name, _data in ordered]).values())
         if profile.hce_current is None and "HCE/Key" in section_names:
             profile.hce_current = True
             profile.extra["field_sources"]["hce_current"] = "Uploaded report filename"
@@ -238,22 +239,28 @@ def process_uploads(
         # 5. Edit the PDF.
         removed = pdf_modifier.apply_decisions(doc, decisions, profile.plan_type)
         recap_removed = pdf_modifier.apply_recap_bullets(doc, decisions, profile.plan_type)
-        filled = pdf_modifier.fill_qnec_placeholders(doc, profile, highlights)
         flags = package_flags(profile.plan_type)
         if is_457_plan(profile.plan_type):
             warnings.extend(plan_457.remove_contribution_overview(doc))
         if profile.midyear:
             warnings.extend(midyear.apply_letter(doc, profile))
         warnings.extend(package_polish.remove_disallowed_wording(doc, keep_soc=bool(flags.get("keep_soc"))))
+        # 403(b): rewrite ADP/ACP → ACP on the Excess Return notice before QNEC fill
+        # so amounts match “ACP test is $…”.
         if flags.get("rewrite_adp_mentions"):
             warnings.extend(package_polish.rewrite_403b_adp_mentions(doc))
         else:
             warnings.extend(package_polish.drop_brf_pages(doc))
+        filled = pdf_modifier.fill_qnec_placeholders(doc, profile, highlights)
         if rewrite_sources:
             warnings.extend(source_rewrite.apply_source_rewrites(doc, profile, highlights))
         else:
             warnings.extend(source_rewrite.apply_cover_date(doc, highlights))
             warnings.extend(source_rewrite.apply_402g_dates(doc, profile, highlights))
+        warnings.extend(source_rewrite.normalize_cover_address_spacing(doc))
+        warnings.extend(source_rewrite.normalize_cover_census_wrap(doc))
+        warnings.extend(source_rewrite.normalize_date_range_spacing(doc))
+        warnings.extend(source_rewrite.normalize_from_to_columns(doc))
         if not profile.midyear and not is_457_plan(profile.plan_type):
             warnings.extend(
                 package_builder.ensure_compliance_overview(
@@ -264,7 +271,9 @@ def process_uploads(
                     plan_year_end=profile.plan_year_end,
                 )
             )
+        warnings.extend(package_polish.ensure_summary_heading_rule(doc))
         warnings.extend(package_polish.renumber_footers(doc))
+        warnings.extend(package_polish.normalize_report_layout(doc))
         # 6. Bookmarks, SSN scan, and assembly stops.
         profile.detected_sections = pdf_extractor.detect_sections(doc)
         profile_debug_path = str(
@@ -321,9 +330,37 @@ def process_uploads(
                 cover_company=cover_company,
                 cover_address=cover_address,
                 cover_pye=cover_pye,
+                selected_checks=validation_checks,
             )
             if reasons:
-                raise HTTPException(status_code=400, detail="Assembly stopped.\n" + "\n".join(reasons))
+                audit_path = audit_log.audit_log_path(profile, job_id)
+                audit_log.write_audit_log(
+                    audit_path,
+                    job_id=job_id,
+                    filename=save_service.valuation_filename(profile),
+                    source_files=ordered + excels + summary_texts,
+                    options={
+                        "auto_order": auto_order,
+                        "rewrite_sources": rewrite_sources,
+                        "check_assembly_stops": check_assembly_stops,
+                        "validation_checks": validation_checks,
+                    },
+                    profile=profile,
+                    decisions=decisions,
+                    validations=review.items,
+                    warnings=warnings,
+                    elapsed_seconds=time.perf_counter() - started,
+                    stop_reasons=reasons,
+                )
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "message": "Assembly stopped. Uncheck failed validations you want to ignore, then process again.",
+                        "validations": assembly_stops.validation_failures(reasons),
+                        "job_id": job_id,
+                        "audit_log_url": f"/api/jobs/{job_id}/audit-log",
+                    },
+                )
         # 7. Save the package, the email draft, and the log.
         dest = save_service.testing_folder_from_source(source_folder)
         path = save_service.save_package(doc, job_id, profile, dest_dir=dest)
@@ -368,6 +405,25 @@ def process_uploads(
     if any(d.skipped for d in decisions):
         warnings.append("Some rules were skipped because extraction did not fill required fields.")
 
+    audit_path = audit_log.write_audit_log(
+        audit_log.audit_log_path(profile, job_id),
+        job_id=job_id,
+        filename=path.name,
+        source_files=ordered + excels + summary_texts,
+        options={
+            "auto_order": auto_order,
+            "rewrite_sources": rewrite_sources,
+            "check_assembly_stops": check_assembly_stops,
+            "validation_checks": validation_checks,
+        },
+        profile=profile,
+        decisions=decisions,
+        validations=review.items,
+        warnings=warnings,
+        elapsed_seconds=elapsed_seconds,
+    )
+    audit_log_path = str(audit_path)
+
     return JobResult(
         job_id=job_id,
         filename=path.name,
@@ -383,6 +439,7 @@ def process_uploads(
         email_subject=subject,
         email_path=email_path,
         log_path=log_file,
+        audit_log_path=audit_log_path,
         profile_debug_path=profile_debug_path,
         saved_copy_path=saved_copy,
         elapsed_seconds=round(elapsed_seconds, 1),

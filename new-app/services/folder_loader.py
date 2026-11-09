@@ -5,7 +5,7 @@ from pathlib import Path
 from fastapi import HTTPException
 
 from config.settings import MAX_FILE_BYTES, MAX_FILES
-from services.file_order import list_file_meta
+from services.file_order import list_file_meta, use_filename_batch
 from services.pdf_pages import pdf_page_count_path, pdf_page_texts_path
 
 
@@ -98,13 +98,14 @@ def list_folder_files(raw_path: str) -> dict:
     source_paths, skipped = _folder_entries(path)
     files = []
     warnings: list[str] = [f"Skipped non-PDF (convert to PDF before combine): {name}" for name in skipped]
-    for item in source_paths:
-        pages = pdf_page_count_path(item)
-        page_texts = pdf_page_texts_path(item) if item.suffix.lower() == ".pdf" else []
-        meta = list_file_meta(item.name, item.stat().st_size, pages, page_texts)
-        files.append(meta)
-        if meta["split"]:
-            warnings.append(f"{item.name} has {pages} pages; each page is listed so you can reorder.")
+    with use_filename_batch([item.name for item in source_paths]):
+        for item in source_paths:
+            pages = pdf_page_count_path(item)
+            page_texts = pdf_page_texts_path(item) if item.suffix.lower() == ".pdf" else []
+            meta = list_file_meta(item.name, item.stat().st_size, pages, page_texts)
+            files.append(meta)
+            if meta["split"]:
+                warnings.append(f"{item.name} has {pages} pages; each page is listed so you can reorder.")
     files.sort(key=lambda item: (item["rank"], item["name"].lower()))
     pdfs = [item for item in files if item["name"].lower().endswith(".pdf")]
     if not pdfs:

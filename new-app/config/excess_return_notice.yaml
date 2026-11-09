@@ -1,6 +1,12 @@
 # Excess Return Notice page.
 # "Failed Compliance Testing" and the after-12-month notices.
 # The after-12-month keep-or-remove decision is rule D or E in config/action_required.yaml.
+#
+# Norms (401(k) ADP/ACP + 403(b) ACP from assemble guide):
+# - Keep CURRENT-method notice only when returns are required and within 12 months.
+# - PRIOR-method failures do NOT get this current-year Failure notice.
+# - 403(b) overlays rule I to require ACP fail (see plan_403b.yaml) and fills
+#   “ACP test is $…” from the ACP correction QNEC; missing ACP QNEC clears that amount.
 
 rules:
   - id: I

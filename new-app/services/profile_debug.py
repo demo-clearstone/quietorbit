@@ -189,6 +189,7 @@ def _rule_source_matches(
     for key in ("action_required_headings", "notices", "sample_letters", "excess_summary"):
         block_specs.extend(specs.get(key) or [])
 
+    pages = [(page.number + 1, page.get_text("text") or "") for page in doc]
     found: dict[str, list[dict[str, Any]]] = {}
     for spec in block_specs:
         rule_id = str(spec.get("id") or "")
@@ -196,12 +197,14 @@ def _rule_source_matches(
         extra = str(spec.get("extra") or "")
         if not rule_id or not heading:
             continue
-        for page in doc:
-            text = page.get_text("text") or ""
-            if not page.search_for(heading) or (extra and not _fold(extra) in _fold(text)):
+        folded_extra = _fold(extra) if extra else ""
+        for page_number, text in pages:
+            if heading not in text:
+                continue
+            if folded_extra and folded_extra not in _fold(text):
                 continue
             found.setdefault(rule_id, []).append(
-                {"page": page.number + 1, "heading": heading, "extra": extra or None}
+                {"page": page_number, "heading": heading, "extra": extra or None}
             )
     return found
 
