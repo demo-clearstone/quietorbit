@@ -47,11 +47,50 @@ def test_aligns_client_action_headings_from_x24_to_expected_columns() -> None:
     page.insert_text((36, 60), "Annual Valuation Report", fontsize=12)
     page.insert_text((24, 130), "ACTION REQUIRED", fontsize=11)
     page.insert_text((24, 155), "NO IMMEDIATE ACTION IS REQUIRED AT THIS TIME", fontsize=11)
+    # Leftover underline at the old column; layout shift must redraw it under the new text.
+    page.draw_line(fitz.Point(24, 134), fitz.Point(158, 134), color=(0, 0, 0), width=0.8)
 
     normalize_report_layout(doc)
 
     assert round(_line_x(page, "ACTION REQUIRED")) == 40
     assert round(_line_x(page, "NO IMMEDIATE ACTION IS REQUIRED AT THIS TIME")) == 39
+    rules = []
+    for drawing in page.get_drawings():
+        if drawing.get("color") in {(1, 1, 1), (1.0, 1.0, 1.0)}:
+            continue
+        for item in drawing.get("items") or []:
+            if not item or item[0] != "l" or len(item) < 3:
+                continue
+            start, end = fitz.Point(item[1]), fitz.Point(item[2])
+            if abs(start.y - end.y) > 1.5:
+                continue
+            left, right = sorted((start.x, end.x))
+            if right - left < 80:
+                continue
+            rules.append((round(left), round(right)))
+    assert any(abs(left - 40) <= 1 for left, _right in rules)
+
+
+def test_recap_layout_does_not_shift_bullet_glyphs_onto_body_column() -> None:
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((250, 48), "YEAR END RECAP", fontsize=10.5, fontname="hebo")
+    page.insert_text((42, 123), "Important Information", fontsize=9.6, fontname="hebo")
+    page.insert_text((67, 141), "·", fontsize=7.3)
+    page.insert_text((78, 141), "Based on the definition of Highly Compensated Employee", fontsize=8.1)
+
+    normalize_report_layout(doc)
+
+    bullets = []
+    for block in page.get_text("dict")["blocks"]:
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []):
+            for span in line.get("spans", []):
+                if str(span.get("text") or "").strip() in {"·", "•", "╖", "●"}:
+                    bullets.append(round(span["bbox"][0]))
+    assert 67 in bullets
+    assert 78 not in bullets
 
 
 def test_aligns_immediate_action_headings_to_action_column() -> None:

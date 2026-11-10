@@ -1276,9 +1276,12 @@ def _action_heading_lines(page: fitz.Page) -> list[dict]:
     by ``round(y0)`` splits one phrase and draws a short or long underline. Prefer
     PDF text lines, then fall back to a tolerant y-cluster of words.
     """
+    # Client packages often continue IMMEDIATE/ATTENTION with " - …" detail text.
     heading_re = re.compile(
-        r"^(ACTION REQUIRED|IMMEDIATE ACTION REQUIRED|ATTENTION REQUIRED|"
-        r"NO IMMEDIATE ACTION IS REQUIRED(?: AT THIS TIME)?)\s*$",
+        r"^(?:ACTION REQUIRED\s*$|"
+        r"IMMEDIATE ACTION REQUIRED\b.*|"
+        r"ATTENTION REQUIRED\b.*|"
+        r"NO IMMEDIATE ACTION IS REQUIRED(?: AT THIS TIME)?\s*$)",
         re.I,
     )
     found: list[dict] = []

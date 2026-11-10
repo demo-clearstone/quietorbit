@@ -601,19 +601,24 @@ def normalize_report_layout(doc: fitz.Document) -> list[str]:
                 ),
                 None,
             )
+            bullet_only = re.compile(r"^[\u2022•\u00b7\u25cf\u25e6\u2219\uf0b7╖■□▪▫*\-·●]+$")
             if start is not None and end is not None:
                 shifts.extend(
                     (line, 5.0)
-                    for line, _text in lines
+                    for line, text in lines
                     if start - 1 <= line["bbox"][1] and line["bbox"][3] <= end + 1
                     and 60 <= line["bbox"][0] < 98
+                    and not bullet_only.match(text.strip())
                 )
-            # Client expected hanging body column is x≈78.
+            # Client expected hanging body column is x≈78. Never drag bullet glyphs
+            # from the x≈67 column onto the body column.
             hang_x = 78.0
             for line, text in lines:
                 if not text or text.lower() == "important information":
                     continue
                 if text.upper() == "YEAR END RECAP":
+                    continue
+                if bullet_only.match(text.strip()):
                     continue
                 x = float(line["bbox"][0])
                 if 40 <= x < hang_x - 0.5 and float(line["bbox"][1]) > 120:
@@ -626,6 +631,7 @@ def normalize_report_layout(doc: fitz.Document) -> list[str]:
                 and line["bbox"][1] > 100
                 and abs(line["bbox"][0] - 36) < 0.5
             )
+        action_shifted = False
         if shifts:
             unique = {id(line): (line, delta) for line, delta in shifts}
             for line, _delta in unique.values():
@@ -636,6 +642,15 @@ def normalize_report_layout(doc: fitz.Document) -> list[str]:
                     page.add_redact_annot(fitz.Rect(line["bbox"]), fill=(1, 1, 1))
             page.apply_redactions(images=0, graphics=0)
             for line, delta in unique.values():
+                line_text = "".join(span.get("text", "") for span in line.get("spans", [])).strip()
+                upper = line_text.upper()
+                if (
+                    upper == "ACTION REQUIRED"
+                    or upper.startswith("IMMEDIATE ACTION REQUIRED")
+                    or upper.startswith("ATTENTION REQUIRED")
+                    or upper == "NO IMMEDIATE ACTION IS REQUIRED AT THIS TIME"
+                ):
+                    action_shifted = True
                 for span in line.get("spans", []):
                     text = span.get("text", "")
                     if not text:
@@ -660,6 +675,19 @@ def normalize_report_layout(doc: fitz.Document) -> list[str]:
                             color=_rgb(span.get("color") or 0),
                             overlay=True,
                         )
+            changed = True
+        if action_shifted:
+            # Text moves to x≈40 but old underlines can remain at x≈24. Wipe short
+            # rules under the header, then redraw under the shifted headings.
+            from services.pdf_modifier import (
+                _clear_short_rules_below,
+                _redraw_action_rules,
+                _top_header_rule_y,
+            )
+
+            header_y = _top_header_rule_y(page)
+            _clear_short_rules_below(page, (header_y if header_y is not None else 90.0), redact=True)
+            _redraw_action_rules(page)
             changed = True
 
         for block in page.get_text("dict").get("blocks", []):
