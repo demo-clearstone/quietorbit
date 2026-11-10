@@ -1261,10 +1261,15 @@ def write_recap_page(
     """
     y = RECAP_TITLE_Y
     header_rule_drawn = False
+    bullet_only = re.compile(r"^[\u2022•\u00b7\u25cf\u25e6\u2219\uf0b7╖■□▪▫*\-·●]+$")
     for raw in header_lines:
         line = raw.strip()
         if not line:
             y += 6
+            continue
+        # Stray bullet glyphs from split_recap must not be centered as header text
+        # (that placed a ╖ near x≈296 at size 9.9).
+        if bullet_only.match(line):
             continue
         if line.upper() == "YEAR END RECAP":
             _center(page, "YEAR END RECAP", RECAP_TITLE_Y, RECAP_TITLE_SIZE, "hebo")

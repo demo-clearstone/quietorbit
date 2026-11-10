@@ -846,10 +846,10 @@ def ensure_summary_heading_rule(doc: fitz.Document) -> list[str]:
         if title_index is None:
             continue
         title_top = float(text_lines[title_index][0]["bbox"][1])
-        # Client expected packages place this divider at y≈109 under the top title block.
+        # Client expected packages place this divider at y≈110 under the top title block.
         if title_top > 120:
             continue
-        y = 109.0
+        y = 110.0
         if _page_has_full_width_rule(page, y):
             continue
         if y < page.rect.y1 - 40:
@@ -869,8 +869,12 @@ def normalize_coverage_satisfy_heading(doc: fitz.Document) -> list[str]:
     from services.source_rewrite import _tight_span_rect
 
     changed = 0
-    head_re = re.compile(r"^(?P<head>Summary of Coverage Test Results\s*\(Must Satisfy)\s*$", re.I)
-    tail_re = re.compile(r"^(?P<tail>I\s+or\s+II\)|or\s+II\))\s*$", re.I)
+    # Source PDFs wrap after "Satisfy" / "Satisfyo" / "Satisfy o"; tail may be "or II)" or "r II)".
+    head_re = re.compile(
+        r"^(?P<head>Summary of Coverage Test Results\s*\(Must Satisfy)\s*o?\s*$",
+        re.I,
+    )
+    tail_re = re.compile(r"^(?P<tail>I\s+or\s+II\)|o?r\s+II\))\s*$", re.I)
     for page in doc:
         page_text = page.get_text("text") or ""
         if "Must Satisfy" not in page_text:
@@ -897,11 +901,7 @@ def normalize_coverage_satisfy_heading(doc: fitz.Document) -> list[str]:
             # Same visual band / continuation column — not a later unrelated line.
             if abs(float(nxt["line"]["bbox"][1]) - float(item["line"]["bbox"][1])) > 14:
                 continue
-            tail_text = tail.group("tail")
-            if tail_text.lower().startswith("or "):
-                joined = "Summary of Coverage Test Results (Must Satisfy I or II)"
-            else:
-                joined = f"{head.group('head')} {tail_text}"
+            joined = "Summary of Coverage Test Results (Must Satisfy I or II)"
             targets.append((item, nxt, joined))
         if not targets:
             continue

@@ -189,7 +189,7 @@ def test_adds_summary_divider_below_header_and_does_not_duplicate_it() -> None:
     rules = [drawing for drawing in page.get_drawings() if drawing["rect"].width > 400 and drawing["rect"].height <= 2]
     assert len(rules) == 1
     rule_y = rules[0]["rect"].y0
-    assert abs(rule_y - 109) <= 1
+    assert abs(rule_y - 110) <= 1
     assert abs(rules[0]["rect"].x0 - 36) <= 1
     assert ensure_summary_heading_rule(doc) == []
     assert len([drawing for drawing in page.get_drawings() if drawing["rect"].width > 400 and drawing["rect"].height <= 2]) == 1
@@ -202,7 +202,7 @@ def test_adds_annual_valuation_header_divider_at_expected_y() -> None:
     assert ensure_summary_heading_rule(doc)
     rules = [drawing for drawing in page.get_drawings() if drawing["rect"].width > 400 and drawing["rect"].height <= 2]
     assert len(rules) == 1
-    assert abs(rules[0]["rect"].y0 - 109) <= 1
+    assert abs(rules[0]["rect"].y0 - 110) <= 1
 
 
 def test_does_not_add_summary_divider_to_other_pages() -> None:
@@ -396,6 +396,16 @@ def test_joins_wrapped_must_satisfy_coverage_heading() -> None:
     assert normalize_coverage_satisfy_heading(doc)
     assert "Summary of Coverage Test Results (Must Satisfy I or II)" in page.get_text()
     assert "Must Satisfy\n" not in page.get_text()
+
+
+def test_joins_must_satisfy_when_tail_loses_leading_o() -> None:
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((206, 300), "Summary of Coverage Test Results (Must Satisfy", fontsize=10, fontname="hebo")
+    page.insert_text((402, 300), "r II)", fontsize=10, fontname="hebo")
+
+    assert normalize_coverage_satisfy_heading(doc)
+    assert "Summary of Coverage Test Results (Must Satisfy I or II)" in page.get_text()
 
 
 def test_cover_census_wrap_does_not_wipe_we_are_pleased_body_line() -> None:

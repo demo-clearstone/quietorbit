@@ -12,6 +12,7 @@ from services.package_builder import (
     RECAP_IMPORTANT_X,
     RECAP_IMPORTANT_Y,
     RECAP_TITLE_SIZE,
+    write_recap_page,
 )
 from services.pdf_modifier import (
     _recap_bullets_have_marks,
@@ -115,6 +116,40 @@ def test_recap_rebuild_restores_bullets_and_hanging_indent_when_missing() -> Non
     )
     assert abs(round(first_line["bbox"][0]) - RECAP_BODY_X) <= 2
     assert "Based on the definition" in first_text
+
+
+def test_recap_header_ignores_stray_bullet_glyphs() -> None:
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    write_recap_page(
+        page,
+        [
+            "YEAR END RECAP",
+            "January 1, 2024 - December 31, 2024",
+            "╖",
+            "P.H. MECHANICAL CORPORATION 401(k) PLAN AND TRUST",
+            "801080",
+            "Important Information",
+        ],
+        ["Your plan is designed to allow participants who were age 50 or older to make catch-up contributions."],
+    )
+    stray = [
+        span
+        for block in page.get_text("dict")["blocks"]
+        if block.get("type") == 0
+        for line in block.get("lines", [])
+        for span in line.get("spans", [])
+        if str(span.get("text") or "").strip() in {"•", "·", "╖", "●"} and float(span["bbox"][0]) > 200
+    ]
+    assert stray == []
+    assert any(
+        60 <= float(span["bbox"][0]) <= 75
+        for block in page.get_text("dict")["blocks"]
+        if block.get("type") == 0
+        for line in block.get("lines", [])
+        for span in line.get("spans", [])
+        if str(span.get("text") or "").strip() in {"•", "·", "╖", "●"}
+    )
 
 
 def test_recap_with_existing_bullets_is_not_rebuilt_or_changed() -> None:

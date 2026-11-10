@@ -1990,7 +1990,12 @@ def apply_recap_bullets(
             and not _recap_has_sparse_bullets(page)
         ):
             continue
-        header_lines = [line.strip() for line in header.splitlines() if line.strip()]
+        header_lines = [
+            line.strip()
+            for line in header.splitlines()
+            if line.strip()
+            and not re.fullmatch(r"[\u2022•\u00b7\u25cf\u25e6\u2219\uf0b7╖■□▪▫*\-·●]+", line.strip())
+        ]
         if not header_lines:
             header_lines = ["Important Information"]
         # Full-page wipe. Long source insert_text runs can leave clipped leftovers
