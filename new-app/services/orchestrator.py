@@ -272,6 +272,7 @@ def process_uploads(
                 )
             )
         warnings.extend(package_polish.ensure_summary_heading_rule(doc))
+        warnings.extend(package_polish.normalize_coverage_satisfy_heading(doc))
         warnings.extend(package_polish.renumber_footers(doc))
         warnings.extend(package_polish.normalize_report_layout(doc))
         # 6. Bookmarks, SSN scan, and assembly stops.
@@ -288,7 +289,8 @@ def process_uploads(
                 phase="after_business_rule_edits",
             )
         )
-        review.items.extend(package_polish.package_checks(doc, profile))
+        package_check_items = package_polish.package_checks(doc, profile)
+        review.items.extend(package_check_items)
         bookmark_count = bookmark_service.add_bookmarks(
             doc,
             profile,
@@ -331,6 +333,8 @@ def process_uploads(
                 cover_address=cover_address,
                 cover_pye=cover_pye,
                 selected_checks=validation_checks,
+                known_ssn_pages=ssn_pages,
+                result_summary_items=package_check_items,
             )
             if reasons:
                 audit_path = audit_log.audit_log_path(profile, job_id)

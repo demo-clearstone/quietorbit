@@ -48,23 +48,36 @@ def apply_decisions(
     remove_ids = {item.rule_id for item in decisions if item.action == "remove"}
     keep_ids = {item.rule_id for item in decisions if item.action == "keep"}
     headings = [str(spec["heading"]) for spec in specs if spec.get("heading")]
+    remove_specs = [
+        spec
+        for spec in specs
+        if str(spec.get("id") or "") in remove_ids and str(spec.get("heading") or "")
+    ]
     removed: list[str] = []
     touched: dict[int, list[fitz.Rect]] = {}
     for page in doc:
+        if not remove_specs:
+            break
+        # One text/line extract per page. Searching every remove heading via
+        # _heading_hits used to re-parse the page dict hundreds of times.
+        page_text = page.get_text("text") or ""
+        if not page_text.strip():
+            continue
+        page_squashed = _squash(page_text)
+        page_lines = _page_lines(page)
         boxes: list[fitz.Rect] = []
-        for spec in specs:
+        for spec in remove_specs:
             rule_id = str(spec["id"])
             heading = str(spec.get("heading") or "")
-            if rule_id not in remove_ids or not heading:
+            if _squash(heading) not in page_squashed:
                 continue
-            page_text = page.get_text("text") or ""
             extra = str(spec.get("extra") or "")
             if not _extra_matches(page_text, extra):
                 continue
-            for hit in _heading_hits(page, heading):
-                if _covered_by_longer_heading(page, hit, heading, headings):
+            for hit in _heading_hits(page, heading, lines=page_lines):
+                if _covered_by_longer_heading(page, hit, heading, headings, lines=page_lines):
                     continue
-                end_y = _block_end(page, hit.y0, headings)
+                end_y = _block_end(page, hit.y0, headings, lines=page_lines)
                 if not _block_matches(page, spec, hit.y0, end_y):
                     continue
                 if _kept_by_other_spec(page, page_text, specs, heading, hit.y0, end_y, keep_ids):
@@ -145,7 +158,14 @@ def _extra_matches(page_text: str, extra: str) -> bool:
     return False
 
 
-def _covered_by_longer_heading(page: fitz.Page, hit, heading: str, headings: list[str]) -> bool:
+def _covered_by_longer_heading(
+    page: fitz.Page,
+    hit,
+    heading: str,
+    headings: list[str],
+    *,
+    lines: list[tuple[str, tuple[float, float, float, float]]] | None = None,
+) -> bool:
     """'Failed Compliance Testing' is the start of the after-12-month heading.
 
     Purpose:
@@ -156,6 +176,7 @@ def _covered_by_longer_heading(page: fitz.Page, hit, heading: str, headings: lis
         hit: Hit. Type: unspecified.
         heading: Heading. Type: str.
         headings: Headings. Type: list[str].
+        lines: Optional cached page lines from ``_page_lines``.
 
     Returns:
         True or False.
@@ -172,13 +193,19 @@ def _covered_by_longer_heading(page: fitz.Page, hit, heading: str, headings: lis
     for other in headings:
         if not other.startswith(heading) or len(other) <= len(heading):
             continue
-        for rect in _heading_hits(page, other):
+        for rect in _heading_hits(page, other, lines=lines):
             if abs(rect.y0 - hit.y0) <= 2 and abs(rect.x0 - hit.x0) <= 2:
                 return True
     return False
 
 
-def _block_end(page: fitz.Page, y0: float, headings: list[str]) -> float:
+def _block_end(
+    page: fitz.Page,
+    y0: float,
+    headings: list[str],
+    *,
+    lines: list[tuple[str, tuple[float, float, float, float]]] | None = None,
+) -> float:
     """Stop at the next heading, including another copy of this same heading.
 
     Purpose:
@@ -188,6 +215,7 @@ def _block_end(page: fitz.Page, y0: float, headings: list[str]) -> float:
         page: One PDF page.
         y0: Y0. Type: float.
         headings: Headings. Type: list[str].
+        lines: Optional cached page lines from ``_page_lines``.
 
     Returns:
         a float.
@@ -202,18 +230,24 @@ def _block_end(page: fitz.Page, y0: float, headings: list[str]) -> float:
         None. This function only reads data and returns a value.
     """
     end_y = page.rect.y1 - 36
+    cached = lines if lines is not None else _page_lines(page)
     seen: set[str] = set()
     for heading in headings:
         if not heading or heading in seen:
             continue
         seen.add(heading)
-        for rect in _heading_hits(page, heading):
+        for rect in _heading_hits(page, heading, lines=cached):
             if rect.y0 > y0 + 8:
                 end_y = min(end_y, rect.y0 - 4)
     return end_y
 
 
-def _heading_hits(page: fitz.Page, heading: str) -> list[fitz.Rect]:
+def _heading_hits(
+    page: fitz.Page,
+    heading: str,
+    *,
+    lines: list[tuple[str, tuple[float, float, float, float]]] | None = None,
+) -> list[fitz.Rect]:
     """A heading starts a line, and may wrap onto the next lines. Words inside a sentence are not a heading.
 
     Purpose:
@@ -222,6 +256,7 @@ def _heading_hits(page: fitz.Page, heading: str) -> list[fitz.Rect]:
     Args:
         page: One PDF page.
         heading: Heading. Type: str.
+        lines: Optional cached page lines from ``_page_lines``.
 
     Returns:
         a list of fitz.Rect.
@@ -238,12 +273,12 @@ def _heading_hits(page: fitz.Page, heading: str) -> list[fitz.Rect]:
     target = _squash(heading)
     if not target:
         return []
-    lines = _page_lines(page)
+    cached = lines if lines is not None else _page_lines(page)
     hits: list[fitz.Rect] = []
-    for start in range(len(lines)):
+    for start in range(len(cached)):
         joined = ""
-        rect = fitz.Rect(lines[start][1])
-        for text, bbox in lines[start : start + 4]:
+        rect = fitz.Rect(cached[start][1])
+        for text, bbox in cached[start : start + 4]:
             joined += _squash(text)
             rect |= fitz.Rect(bbox)
             if len(joined) >= len(target):
@@ -1955,11 +1990,15 @@ def apply_recap_bullets(
         header_lines = [line.strip() for line in header.splitlines() if line.strip()]
         if not header_lines:
             header_lines = ["Important Information"]
-        # Full-page wipe. Long source insert_text runs can leave clipped leftovers if
-        # only redaction runs, so paint a white base before redrawing the MOA layout.
+        # Full-page wipe. Long source insert_text runs can leave clipped leftovers
+        # (and stray bullet glyphs) if only redaction runs.
         page.add_redact_annot(page.rect, fill=(1, 1, 1))
         page.apply_redactions(images=0, graphics=1)
         page.draw_rect(page.rect, color=(1, 1, 1), fill=(1, 1, 1), width=0)
+        try:
+            page.clean_contents()
+        except Exception:
+            pass
         from services.package_builder import write_recap_page
 
         number = _recap_page_number(original)
@@ -1997,7 +2036,9 @@ def _recap_has_header_rule(page: fitz.Page) -> bool:
             if abs(start.y - end.y) > 1.5:
                 continue
             left, right = sorted((start.x, end.x))
-            if 100 <= ((start.y + end.y) / 2) <= 122 and left <= 56 and right >= page.rect.width - 56:
+            mid_y = (start.y + end.y) / 2
+            # Client expected rule is near y=92 spanning ~42..504.
+            if 88 <= mid_y <= 122 and left <= 56 and right >= 480:
                 return True
     return False
 
@@ -2015,11 +2056,26 @@ def _recap_solid_bullet_count(page: fitz.Page) -> int:
     return count
 
 
+def _recap_glyph_bullet_count(page: fitz.Page) -> int:
+    """Count text bullet glyphs in the expected Recap bullet column (~x=67)."""
+    count = 0
+    for block in page.get_text("dict").get("blocks", []):
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []):
+            for span in line.get("spans", []):
+                text = str(span.get("text") or "").strip()
+                if text not in {"•", "·", "●", "╖", "\uf0b7", "\u2022"}:
+                    continue
+                if 60 <= float(span["bbox"][0]) <= 75:
+                    count += 1
+    return count
+
+
 def _recap_layout_matches(page: fitz.Page) -> bool:
     """True when the Year End Recap header and bullet columns already match the MOA layout."""
     title_ok = False
     important_ok = False
-    glyph_bullets = 0
     for block in page.get_text("dict").get("blocks", []):
         if block.get("type") != 0:
             continue
@@ -2034,14 +2090,7 @@ def _recap_layout_matches(page: fitz.Page) -> bool:
                 title_ok = abs(size - 10.5) <= 0.8
             elif text.lower() == "important information":
                 important_ok = abs(x - 42) <= 3 and abs(size - 9.6) <= 0.8
-            if re.match(r"^[·•\u00b7\u2022]", text):
-                glyph_bullets += 1
     if not title_ok or not important_ok or not _recap_has_header_rule(page):
-        return False
-    # Faint Helvetica middle-dots must be replaced with solid drawn discs.
-    if glyph_bullets:
-        return False
-    if _recap_solid_bullet_count(page) < 1:
         return False
     return _recap_bullets_have_marks(page)
 
@@ -2049,7 +2098,7 @@ def _recap_layout_matches(page: fitz.Page) -> bool:
 def _recap_bullets_have_marks(page: fitz.Page) -> bool:
     """Check bullets use the divider column with body text on a hanging indent."""
     paragraph_starts: list[tuple[float, float, float]] = []
-    filled_discs = _recap_solid_bullet_count(page)
+    marks = _recap_solid_bullet_count(page) + _recap_glyph_bullet_count(page)
     for block in page.get_text("dict").get("blocks", []):
         if block.get("type") != 0:
             continue
@@ -2070,7 +2119,7 @@ def _recap_bullets_have_marks(page: fitz.Page) -> bool:
             return False
         if body_size and abs(body_size - 8.1) > 1.6:
             return False
-    if filled_discs < len(paragraph_starts):
+    if marks < len(paragraph_starts):
         return False
     return True
 

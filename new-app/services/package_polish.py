@@ -775,20 +775,38 @@ def renumber_footers(doc: fitz.Document) -> list[str]:
     return [f"Renumbered {changed} page footer(s) to match the final page order."] if changed else []
 
 
+def _page_has_full_width_rule(page: fitz.Page, y: float, *, tol: float = 4.0) -> bool:
+    """True when a near-full-width horizontal rule already sits near y."""
+    min_width = page.rect.width * 0.65
+    for drawing in page.get_drawings():
+        for item in drawing.get("items") or []:
+            if not item or item[0] != "l" or len(item) < 3:
+                continue
+            start, end = fitz.Point(item[1]), fitz.Point(item[2])
+            if abs(start.y - end.y) > 1.5:
+                continue
+            if abs(((start.y + end.y) / 2) - y) <= tol and abs(end.x - start.x) >= min_width:
+                return True
+    return False
+
+
 def ensure_summary_heading_rule(doc: fitz.Document) -> list[str]:
-    """Add the horizontal divider below a Result Summary title block if it is absent."""
+    """Add the horizontal divider below a Result Summary / AV title block if it is absent."""
     changed = 0
     title_pattern = re.compile(
-        r"^(?:compliance testing summary of results|compliance summary|result summary|test summary)$",
+        r"^(?:compliance testing summary of results|compliance summary|result summary|test summary|"
+        r"annual valuation report)$",
         re.I,
     )
-    section_pattern = re.compile(
-        r"^(?:416\s+top heavy|410\s*\(?b\)?\s+coverage|401\s*\(|402\s*\(?g\)?|"
-        r"415(?:\s*\(\s*c\s*\))?|414\s*\(?s\)?|average\s+(?:deferral|contribution|benefit)|"
-        r"benefits?,?\s+rights|plan\s+number\s*:)",
+    title_hint = re.compile(
+        r"compliance testing summary of results|compliance summary|result summary|test summary|"
+        r"annual valuation report",
         re.I,
     )
     for page in doc:
+        page_text = page.get_text("text") or ""
+        if not title_hint.search(page_text):
+            continue
         text_lines = [
             (line, "".join(span.get("text", "") for span in line.get("spans", [])).strip())
             for block in page.get_text("dict").get("blocks", [])
@@ -799,33 +817,83 @@ def ensure_summary_heading_rule(doc: fitz.Document) -> list[str]:
         title_index = next((i for i, (_line, value) in enumerate(text_lines) if title_pattern.fullmatch(value)), None)
         if title_index is None:
             continue
-        header_lines = []
-        for line, value in text_lines[title_index:]:
-            if header_lines and section_pattern.match(value):
-                break
-            if value:
-                header_lines.append(line)
-            if len(header_lines) >= 8:
-                break
-        if not header_lines:
+        title_top = float(text_lines[title_index][0]["bbox"][1])
+        # Client expected packages place this divider at y≈109 under the top title block.
+        if title_top > 120:
             continue
-        bottom = max(line["bbox"][3] for line in header_lines)
-        y = bottom + 7
-        has_rule = any(
-            abs(float(drawing["rect"].y0) - y) <= 3
-            and float(drawing["rect"].width) >= page.rect.width * 0.65
-            and float(drawing["rect"].height) <= 2
-            for drawing in page.get_drawings()
-        )
-        if not has_rule and y < page.rect.y1 - 40:
+        y = 109.0
+        if _page_has_full_width_rule(page, y):
+            continue
+        if y < page.rect.y1 - 40:
             page.draw_line(
-                fitz.Point(48, y),
-                fitz.Point(page.rect.width - 48, y),
+                fitz.Point(36, y),
+                fitz.Point(min(page.rect.width - 30, 582), y),
                 color=(0, 0, 0),
                 width=1,
             )
             changed += 1
     return [f"Added a divider below {changed} Result Summary heading block(s)."] if changed else []
+
+
+def normalize_coverage_satisfy_heading(doc: fitz.Document) -> list[str]:
+    """Join a wrapped 'Must Satisfy I or II' coverage heading back onto one line."""
+    from services.pdf_modifier import _base_font, _rgb
+    from services.source_rewrite import _tight_span_rect
+
+    changed = 0
+    head_re = re.compile(r"^(?P<head>Summary of Coverage Test Results\s*\(Must Satisfy)\s*$", re.I)
+    tail_re = re.compile(r"^(?P<tail>I\s+or\s+II\)|or\s+II\))\s*$", re.I)
+    for page in doc:
+        page_text = page.get_text("text") or ""
+        if "Must Satisfy" not in page_text:
+            continue
+        lines: list[dict] = []
+        for block in page.get_text("dict").get("blocks", []):
+            if block.get("type") != 0:
+                continue
+            for line in block.get("lines", []):
+                spans = [span for span in line.get("spans", []) if span.get("text", "").strip()]
+                text = "".join(span.get("text", "") for span in spans).strip()
+                if text:
+                    lines.append({"line": line, "spans": spans, "text": text})
+        lines.sort(key=lambda item: (item["line"]["bbox"][1], item["line"]["bbox"][0]))
+        targets: list[tuple[dict, dict, str]] = []
+        for index, item in enumerate(lines[:-1]):
+            head = head_re.match(item["text"])
+            if not head:
+                continue
+            nxt = lines[index + 1]
+            tail = tail_re.match(nxt["text"])
+            if not tail:
+                continue
+            # Same visual band / continuation column — not a later unrelated line.
+            if abs(float(nxt["line"]["bbox"][1]) - float(item["line"]["bbox"][1])) > 14:
+                continue
+            tail_text = tail.group("tail")
+            if tail_text.lower().startswith("or "):
+                joined = "Summary of Coverage Test Results (Must Satisfy I or II)"
+            else:
+                joined = f"{head.group('head')} {tail_text}"
+            targets.append((item, nxt, joined))
+        if not targets:
+            continue
+        for item, nxt, _joined in targets:
+            page.add_redact_annot(_tight_span_rect(item["spans"]), fill=(1, 1, 1))
+            page.add_redact_annot(_tight_span_rect(nxt["spans"]), fill=(1, 1, 1))
+        page.apply_redactions(images=0, graphics=0)
+        for item, _nxt, joined in targets:
+            span = item["spans"][0]
+            origin = span.get("origin") or (span["bbox"][0], span["bbox"][3])
+            page.insert_text(
+                (float(origin[0]), float(origin[1])),
+                joined,
+                fontsize=float(span.get("size") or 10),
+                fontname=_base_font(str(span.get("font") or ""), int(span.get("flags") or 0) | 16),
+                color=_rgb(span.get("color") or 0),
+                overlay=True,
+            )
+            changed += 1
+    return [f"Joined {changed} Coverage Test 'Must Satisfy' heading(s)."] if changed else []
 
 
 def package_checks(doc: fitz.Document, profile: PlanProfile) -> list[ValidationItem]:
@@ -1393,9 +1461,12 @@ def _result_summary_checks(
     Side effects:
         None. This function only reads data and returns a value.
     """
-    summary = "\n".join(
-        page.get_text("text") or "" for page in doc if _SUMMARY.search(page.get_text("text") or "")
-    )
+    summary_parts: list[str] = []
+    for page in doc:
+        text = page.get_text("text") or ""
+        if _SUMMARY.search(text):
+            summary_parts.append(text)
+    summary = "\n".join(summary_parts)
     if not summary.strip():
         return [
             ValidationItem(
@@ -1550,9 +1621,11 @@ def _pass_fail_checks(
         None. This function only reads data and returns a value.
     """
     items: list[ValidationItem] = []
+    # One page-text pass for all patterns (used to re-scan the whole PDF per test).
+    report_texts = _non_summary_page_texts(doc)
     for label, pattern, code in _PASS_FAIL:
         summary_result = _result_near(summary, pattern)
-        report_result = _report_result(doc, pattern)
+        report_result = _report_result(doc, pattern, page_texts=report_texts)
         if summary_result is None and report_result is None:
             continue
         problems: list[str] = []
@@ -1832,11 +1905,30 @@ def _report_text(doc: fitz.Document) -> str:
         None. This function only reads data and returns a value.
     """
     return "\n".join(
-        page.get_text("text") or "" for page in doc if not _SUMMARY.search(page.get_text("text") or "")
+        text
+        for page in doc
+        for text in (page.get_text("text") or "",)
+        if not _SUMMARY.search(text)
     )
 
 
-def _report_result(doc: fitz.Document, pattern: str) -> str | None:
+def _non_summary_page_texts(doc: fitz.Document) -> list[str]:
+    """Page texts excluding Result Summary / compliance overview pages."""
+    texts: list[str] = []
+    for page in doc:
+        text = page.get_text("text") or ""
+        if _SUMMARY.search(text) or is_compliance_overview(text):
+            continue
+        texts.append(text)
+    return texts
+
+
+def _report_result(
+    doc: fitz.Document,
+    pattern: str,
+    *,
+    page_texts: list[str] | None = None,
+) -> str | None:
     """Report result.
 
     Purpose:
@@ -1845,6 +1937,7 @@ def _report_result(doc: fitz.Document, pattern: str) -> str | None:
     Args:
         doc: Open PDF. Must not be closed.
         pattern: Pattern. Type: str.
+        page_texts: Optional cached non-summary page texts.
 
     Returns:
         a str | None.
@@ -1858,10 +1951,8 @@ def _report_result(doc: fitz.Document, pattern: str) -> str | None:
     Side effects:
         None. This function only reads data and returns a value.
     """
-    for page in doc:
-        text = page.get_text("text") or ""
-        if _SUMMARY.search(text) or is_compliance_overview(text):
-            continue
+    texts = page_texts if page_texts is not None else _non_summary_page_texts(doc)
+    for text in texts:
         result = _result_near(text, pattern)
         if result:
             return result

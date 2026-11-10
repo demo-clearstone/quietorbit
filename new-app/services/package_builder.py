@@ -471,8 +471,10 @@ RECAP_DATE_Y = 66.0
 RECAP_PLAN_SIZE = 9.9
 RECAP_PLAN_Y = 79.0
 RECAP_NUMBER_SIZE = 9.9
-RECAP_NUMBER_Y = 93.0
-RECAP_HEADER_RULE_Y = 109.0
+RECAP_NUMBER_Y = 86.0
+RECAP_HEADER_RULE_Y = 92.0
+RECAP_HEADER_RULE_X0 = 42.0
+RECAP_HEADER_RULE_X1 = 504.0
 RECAP_IMPORTANT_X = 42.0
 RECAP_IMPORTANT_SIZE = 9.6
 RECAP_IMPORTANT_Y = 123.0
@@ -481,15 +483,17 @@ RECAP_BODY_SIZE = 8.1
 RECAP_BODY_LEADING = 10.0
 RECAP_BODY_X = 78.0
 RECAP_BULLET_X = 67.0
-RECAP_BULLET_DIAMETER = 3.6
+RECAP_BULLET_SIZE = 7.3
 RECAP_BULLET_GAP = 8.0
+# Expected packages center header lines as if the page were A4-wide (~595pt).
+RECAP_CENTER_WIDTH = 595.28
 
 
 def _draw_recap_header_rule(page: fitz.Page) -> None:
-    """Full-width divider under the Year End Recap plan headings."""
+    """Divider under the Year End Recap plan headings (client expected bounds)."""
     page.draw_line(
-        fitz.Point(42, RECAP_HEADER_RULE_Y),
-        fitz.Point(page.rect.width - 42, RECAP_HEADER_RULE_Y),
+        fitz.Point(RECAP_HEADER_RULE_X0, RECAP_HEADER_RULE_Y),
+        fitz.Point(RECAP_HEADER_RULE_X1, RECAP_HEADER_RULE_Y),
         color=_BLACK,
         width=0.8,
         overlay=True,
@@ -522,7 +526,7 @@ def _center(page: fitz.Page, text: str, y: float, size: float, font: str) -> Non
         Changes the PDF passed in. Does not save the file by itself.
     """
     width = fitz.get_text_length(text, fontname=font, fontsize=size)
-    page.insert_text(((page.rect.width - width) / 2, y), text, fontsize=size, fontname=font, color=_BLACK)
+    page.insert_text(((RECAP_CENTER_WIDTH - width) / 2, y), text, fontsize=size, fontname=font, color=_BLACK)
 
 
 def _heading_line(page: fitz.Page, text: str, y: float, color: tuple[float, float, float]) -> float:
@@ -1308,23 +1312,21 @@ def write_recap_page(
             y = RECAP_BODY_START_Y
     size = RECAP_BODY_SIZE
     leading = RECAP_BODY_LEADING
-    # Client expected: bullet disc near x=67, hanging body at x=78.
-    bullet_x = RECAP_BULLET_X
-    bullet_diameter = RECAP_BULLET_DIAMETER
+    # Client expected: glyph bullet at x=67, hanging body at x=78, wrap at header rule.
     hang_x = RECAP_BODY_X
-    width = page.rect.width - hang_x - 36
+    width = max(360.0, RECAP_HEADER_RULE_X1 - hang_x)
     for bullet in bullets:
         body = re.sub(r"^(?:[\u2022•\u00b7\u25cf\u25e6\u2219\uf0b7╖■□▪▫*?\-]\s*)+", "", bullet).strip()
         if not body:
             continue
-        cy = y - size * 0.35
-        oval = fitz.Rect(
-            bullet_x,
-            cy - bullet_diameter / 2,
-            bullet_x + bullet_diameter,
-            cy + bullet_diameter / 2,
+        # Helvetica maps several bullet codepoints to ·; x/size still match compare.
+        page.insert_text(
+            (RECAP_BULLET_X, y),
+            "·",
+            fontsize=RECAP_BULLET_SIZE,
+            fontname="helv",
+            color=_BLACK,
         )
-        page.draw_oval(oval, color=_BLACK, fill=_BLACK, width=0.7, overlay=True)
         y = _write_recap_bullet_body(page, body, hang_x, y, size, leading, width)
         y += RECAP_BULLET_GAP
     if number is not None:

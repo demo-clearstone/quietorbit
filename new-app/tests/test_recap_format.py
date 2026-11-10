@@ -6,6 +6,7 @@ from models.review import RuleDecision
 from services.package_builder import (
     RECAP_BODY_SIZE,
     RECAP_BODY_X,
+    RECAP_BULLET_X,
     RECAP_HEADER_RULE_Y,
     RECAP_IMPORTANT_SIZE,
     RECAP_IMPORTANT_X,
@@ -45,7 +46,7 @@ def _recap(bullets: bool, *, moa_header: bool = False, include_match: bool = Fal
         page.insert_text((214, 66), "January 1, 2024 - December 31, 2024", fontsize=9.9)
         page.insert_text((118, 79), "P.H. MECHANICAL CORPORATION 401(k) PLAN AND TRUST", fontsize=9.9)
         page.insert_text((280, 93), "801080", fontsize=9.9)
-        page.draw_line(fitz.Point(42, RECAP_HEADER_RULE_Y), fitz.Point(page.rect.width - 42, RECAP_HEADER_RULE_Y), color=(0, 0, 0), width=0.8)
+        page.draw_line(fitz.Point(42, RECAP_HEADER_RULE_Y), fitz.Point(504, RECAP_HEADER_RULE_Y), color=(0, 0, 0), width=0.8)
         page.insert_text((RECAP_IMPORTANT_X, RECAP_IMPORTANT_Y), "Important Information", fontsize=RECAP_IMPORTANT_SIZE, fontname="hebo")
     else:
         page.insert_text((239, 34), "YEAR END RECAP", fontsize=10.5, fontname="hebo")
@@ -58,14 +59,7 @@ def _recap(bullets: bool, *, moa_header: bool = False, include_match: bool = Fal
         paragraphs.append(_MATCH)
     for y, paragraph in zip((141, 197, 280), paragraphs):
         if bullets:
-            diameter = 3.6
-            cy = y - RECAP_BODY_SIZE * 0.35
-            page.draw_oval(
-                fitz.Rect(67, cy - diameter / 2, 67 + diameter, cy + diameter / 2),
-                color=(0, 0, 0),
-                fill=(0, 0, 0),
-                width=0.7,
-            )
+            page.insert_text((RECAP_BULLET_X, y), "·", fontsize=7.3, fontname="helv")
             page.insert_text((RECAP_BODY_X, y), paragraph, fontsize=RECAP_BODY_SIZE)
         else:
             # Offset body with no marker so layout is treated as needing a rebuild.
@@ -101,13 +95,14 @@ def test_recap_rebuild_restores_bullets_and_hanging_indent_when_missing() -> Non
     assert "Your plan is designed to allow participants" in text
     assert _recap_bullets_have_marks(page)
     assert _recap_has_header_rule(page)
-    discs = [
-        drawing
-        for drawing in page.get_drawings()
-        if drawing.get("fill") in {(0, 0, 0), (0.0, 0.0, 0.0)}
-        and 2.5 <= float((drawing.get("rect") or fitz.Rect()).width) <= 6
+    glyphs = [
+        span
+        for block in page.get_text("dict")["blocks"] if block.get("type") == 0
+        for line in block.get("lines", [])
+        for span in line.get("spans", [])
+        if str(span.get("text") or "").strip() in {"•", "·", "╖", "●"} and 60 <= span["bbox"][0] <= 75
     ]
-    assert len(discs) >= 2
+    assert len(glyphs) >= 2
     paragraphs = [
         (line, "".join(span.get("text", "") for span in line.get("spans", [])).strip())
         for block in page.get_text("dict")["blocks"] if block.get("type") == 0
@@ -161,7 +156,7 @@ def test_recap_rebuilds_to_kaagaz_header_layout_with_border() -> None:
     assert _recap_bullets_have_marks(page)
     assert _recap_has_header_rule(page)
     rules = _header_rules(page)
-    assert any(abs(y - RECAP_HEADER_RULE_Y) <= 2 and left <= 54 and right >= page.rect.width - 54 for y, left, right in rules)
+    assert any(abs(y - RECAP_HEADER_RULE_Y) <= 2 and left <= 54 and right >= 480 for y, left, right in rules)
 
 
 def test_recap_rebuild_drops_match_bullet_when_rule_says_remove() -> None:

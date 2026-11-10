@@ -68,6 +68,8 @@ _PURPOSE = {
     "services/source_rewrite.py:apply_cover_date": "Rewriting the cover letter date to today",
     "services/source_rewrite.py:normalize_cover_census_wrap": "Aligning cover letter census sentence wrap",
     "services/source_rewrite.py:normalize_from_to_columns": "Splitting From/To date headers into columns",
+    "services/package_polish.py:ensure_summary_heading_rule": "Adding Result Summary / AV header dividers",
+    "services/package_polish.py:normalize_coverage_satisfy_heading": "Joining wrapped Coverage Test headings",
     "services/source_rewrite.py:apply_402g_dates": "Rewriting the 402(g) dates",
     "services/package_builder.py:ensure_compliance_overview": "Adding the compliance overview pages",
     "services/package_polish.py:renumber_footers": "Renumbering the page footers",

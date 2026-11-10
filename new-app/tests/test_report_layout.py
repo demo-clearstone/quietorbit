@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import fitz
 
-from services.package_polish import ensure_summary_heading_rule, normalize_report_layout
+from services.package_polish import (
+    ensure_summary_heading_rule,
+    normalize_coverage_satisfy_heading,
+    normalize_report_layout,
+)
 from services.source_rewrite import (
     _date_span_boundary_has_visual_gap,
     normalize_cover_address_spacing,
@@ -146,15 +150,26 @@ def test_adds_summary_divider_below_header_and_does_not_duplicate_it() -> None:
     rules = [drawing for drawing in page.get_drawings() if drawing["rect"].width > 400 and drawing["rect"].height <= 2]
     assert len(rules) == 1
     rule_y = rules[0]["rect"].y0
-    assert 128 < rule_y < 160
+    assert abs(rule_y - 109) <= 1
+    assert abs(rules[0]["rect"].x0 - 36) <= 1
     assert ensure_summary_heading_rule(doc) == []
     assert len([drawing for drawing in page.get_drawings() if drawing["rect"].width > 400 and drawing["rect"].height <= 2]) == 1
+
+
+def test_adds_annual_valuation_header_divider_at_expected_y() -> None:
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((180, 72), "Annual Valuation Report", fontsize=14, fontname="hebo")
+    assert ensure_summary_heading_rule(doc)
+    rules = [drawing for drawing in page.get_drawings() if drawing["rect"].width > 400 and drawing["rect"].height <= 2]
+    assert len(rules) == 1
+    assert abs(rules[0]["rect"].y0 - 109) <= 1
 
 
 def test_does_not_add_summary_divider_to_other_pages() -> None:
     doc = fitz.open()
     page = doc.new_page()
-    page.insert_text((54, 80), "Annual Valuation Report", fontsize=11, fontname="hebo")
+    page.insert_text((54, 80), "Census Report", fontsize=11, fontname="hebo")
     assert ensure_summary_heading_rule(doc) == []
     assert page.get_drawings() == []
 
@@ -192,7 +207,8 @@ def test_date_range_to_spacing_does_not_wipe_nearby_lines() -> None:
     assert "Contribution Amount" in text
     assert "Left label near dates" in text
     assert "07/01/2025 To 06/30/2026" in text
-    assert "From 01/01/2025 To 12/31/2025" in text
+    assert "From 01/01/2025" in text
+    assert "To 12/31/2025" in text
 
 
 def test_normalizes_month_name_date_range_and_leaves_unrelated_dates_alone() -> None:
@@ -239,30 +255,39 @@ def test_date_range_spacing_keeps_separate_source_spans_aligned() -> None:
     assert round(to_lines[0]["spans"][0]["bbox"][0]) == 406
 
 
-def test_from_to_keeps_spaced_single_line_client_header() -> None:
+def test_splits_merged_from_to_date_header_into_columns() -> None:
     doc = fitz.open()
     page = doc.new_page()
     page.insert_text((326, 100), "From 01/01/2025 To 12/31/2025", fontsize=9, fontname="hebo")
 
-    assert normalize_from_to_columns(doc) == []
-    assert "From 01/01/2025 To 12/31/2025" in page.get_text()
-
-
-def test_from_to_fixes_jammed_single_line_without_splitting_columns() -> None:
-    doc = fitz.open()
-    page = doc.new_page()
-    page.insert_text((326, 100), "From 01/01/2025To 12/31/2025", fontsize=9, fontname="hebo")
-
     assert normalize_from_to_columns(doc)
-    assert "From 01/01/2025 To 12/31/2025" in page.get_text()
+
     cols = [
-        span["text"].strip()
+        (round(span["bbox"][0]), span["text"].strip())
         for block in page.get_text("dict")["blocks"] if block.get("type") == 0
         for line in block.get("lines", [])
         for span in line.get("spans", [])
         if span.get("text", "").strip()
     ]
-    assert cols == ["From 01/01/2025 To 12/31/2025"]
+    assert (326, "From 01/01/2025") in cols
+    assert (406, "To 12/31/2025") in cols
+
+
+def test_from_to_splits_jammed_capital_to_into_columns() -> None:
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((326, 100), "From 01/01/2025To 12/31/2025", fontsize=9, fontname="hebo")
+
+    assert normalize_from_to_columns(doc)
+    cols = [
+        (round(span["bbox"][0]), span["text"].strip())
+        for block in page.get_text("dict")["blocks"] if block.get("type") == 0
+        for line in block.get("lines", [])
+        for span in line.get("spans", [])
+        if span.get("text", "").strip()
+    ]
+    assert (326, "From 01/01/2025") in cols
+    assert (406, "To 12/31/2025") in cols
 
 
 def test_from_to_leaves_lowercase_coverage_header_alone() -> None:
@@ -288,6 +313,50 @@ def test_cover_census_wrap_breaks_after_results_of() -> None:
     lines = [line.strip() for line in page.get_text().splitlines() if line.strip()]
     assert any(line.endswith("results of") for line in lines)
     assert any(line.startswith("the IRS required testing") for line in lines)
+    date_spans = []
+    for block in page.get_text("dict")["blocks"]:
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []):
+            for span in line.get("spans", []):
+                if str(span.get("text") or "").strip() == "12/31/2025":
+                    date_spans.append(span)
+    assert date_spans
+    assert date_spans[0]["font"].lower().find("bold") >= 0 or date_spans[0]["flags"] & 16
+
+
+def test_cover_period_ending_date_bold_when_wrap_already_correct() -> None:
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text(
+        (48, 200),
+        "period ending 12/31/2025. This Valuation Report contains a recap of the finalized census data and results of",
+        fontsize=10,
+    )
+    page.insert_text((48, 214), "the IRS required testing for the plan year.", fontsize=10)
+
+    notes = normalize_cover_census_wrap(doc)
+    assert any("bold" in note.lower() for note in notes)
+    cols = []
+    for block in page.get_text("dict")["blocks"]:
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []):
+            text = "".join(span.get("text", "") for span in line.get("spans", []))
+            if "period ending" in text.lower():
+                cols = [(round(span["bbox"][0]), span["text"].strip(), span["font"]) for span in line["spans"] if span["text"].strip()]
+    assert any(text == "12/31/2025" and "Bold" in font for _x, text, font in cols)
+
+
+def test_joins_wrapped_must_satisfy_coverage_heading() -> None:
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((206, 300), "Summary of Coverage Test Results (Must Satisfy", fontsize=10, fontname="hebo")
+    page.insert_text((398, 300), "or II)", fontsize=10, fontname="hebo")
+
+    assert normalize_coverage_satisfy_heading(doc)
+    assert "Summary of Coverage Test Results (Must Satisfy I or II)" in page.get_text()
+    assert "Must Satisfy\n" not in page.get_text()
 
 
 def test_cover_census_wrap_does_not_wipe_we_are_pleased_body_line() -> None:

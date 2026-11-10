@@ -138,6 +138,48 @@ _FROM_TO_JAMMED = re.compile(
 )
 
 
+_COVER_PERIOD_DATE = re.compile(
+    r"^(?P<prefix>.*?period ending\s+)(?P<date>\d{1,2}/\d{1,2}/\d{4})(?P<suffix>\..*)$",
+    re.I,
+)
+
+
+def _insert_cover_period_line(
+    page: fitz.Page,
+    origin: tuple[float, float],
+    text: str,
+    size: float,
+    color: tuple[float, float, float],
+) -> None:
+    """Write a cover census line with the period-ending date in bold (client expected)."""
+    match = _COVER_PERIOD_DATE.match(text)
+    x, y = origin
+    if not match:
+        page.insert_text((x, y), text, fontsize=size, fontname="helv", color=color, overlay=True)
+        return
+    prefix, date, suffix = match.group("prefix"), match.group("date"), match.group("suffix")
+    page.insert_text((x, y), prefix, fontsize=size, fontname="helv", color=color, overlay=True)
+    x += fitz.get_text_length(prefix, fontname="helv", fontsize=size)
+    page.insert_text((x, y), date, fontsize=size, fontname="hebo", color=color, overlay=True)
+    x += fitz.get_text_length(date, fontname="hebo", fontsize=size)
+    if suffix:
+        page.insert_text((x, y), suffix, fontsize=size, fontname="helv", color=color, overlay=True)
+
+
+def _cover_period_date_already_bold(spans: list[dict]) -> bool:
+    """True when a multi-span cover line already bolds only the slash date."""
+    if len(spans) < 2:
+        return False
+    for span in spans:
+        text = str(span.get("text") or "").strip()
+        if not re.fullmatch(r"\d{1,2}/\d{1,2}/\d{4}", text):
+            continue
+        font = str(span.get("font") or "").lower()
+        flags = int(span.get("flags") or 0)
+        return bool(flags & 16) or "bold" in font
+    return False
+
+
 def normalize_cover_census_wrap(doc: fitz.Document) -> list[str]:
     """Break the cover census sentence after 'results of', matching MOA packages."""
     if not doc.page_count:
@@ -153,6 +195,7 @@ def normalize_cover_census_wrap(doc: fitz.Document) -> list[str]:
             if text:
                 lines.append({"line": line, "spans": spans, "text": text})
     lines.sort(key=lambda item: (item["line"]["bbox"][1], item["line"]["bbox"][0]))
+    notes: list[str] = []
     for index, item in enumerate(lines[:-1]):
         match = _COVER_WRAP_TAIL.match(item["text"])
         nxt = lines[index + 1]
@@ -162,7 +205,6 @@ def normalize_cover_census_wrap(doc: fitz.Document) -> list[str]:
         first_span = item["spans"][0]
         next_span = nxt["spans"][0]
         size = float(first_span.get("size") or 10)
-        font = _base_font(str(first_span.get("font") or ""), int(first_span.get("flags") or 0))
         color = _rgb(first_span.get("color") or 0)
         first_origin = first_span.get("origin") or (first_span["bbox"][0], first_span["bbox"][3])
         next_origin = next_span.get("origin") or (next_span["bbox"][0], next_span["bbox"][3])
@@ -171,14 +213,7 @@ def normalize_cover_census_wrap(doc: fitz.Document) -> list[str]:
         page.add_redact_annot(_tight_span_rect(item["spans"]), fill=(1, 1, 1))
         page.add_redact_annot(_tight_span_rect(nxt["spans"]), fill=(1, 1, 1))
         page.apply_redactions(images=0, graphics=0)
-        page.insert_text(
-            (first_origin[0], first_origin[1]),
-            head,
-            fontsize=size,
-            fontname=font,
-            color=color,
-            overlay=True,
-        )
+        _insert_cover_period_line(page, (float(first_origin[0]), float(first_origin[1])), head, size, color)
         page.insert_text(
             (next_origin[0], next_origin[1]),
             "the IRS required testing for the plan year.",
@@ -187,19 +222,49 @@ def normalize_cover_census_wrap(doc: fitz.Document) -> list[str]:
             color=_rgb(next_span.get("color") or 0),
             overlay=True,
         )
-        return ["Cover letter census sentence wrap aligned after 'results of'."]
-    return []
+        notes.append("Cover letter census sentence wrap aligned after 'results of'.")
+        break
+
+    # Even when wrap is already correct, client expected packages bold the slash date.
+    page = doc[0]
+    targets: list[tuple[list[dict], str, float, float, float, tuple[float, float, float]]] = []
+    for block in page.get_text("dict").get("blocks", []):
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []):
+            spans = [span for span in line.get("spans", []) if span.get("text", "").strip()]
+            if not spans:
+                continue
+            text = "".join(span.get("text", "") for span in spans).strip()
+            if not _COVER_PERIOD_DATE.match(text):
+                continue
+            if _cover_period_date_already_bold(spans):
+                continue
+            origin = spans[0].get("origin") or (spans[0]["bbox"][0], spans[0]["bbox"][3])
+            size = float(spans[0].get("size") or 10)
+            color = _rgb(spans[0].get("color") or 0)
+            targets.append((spans, text, float(origin[0]), float(origin[1]), size, color))
+    if targets:
+        for spans, _text, _x, _y, _size, _color in targets:
+            page.add_redact_annot(_tight_span_rect(spans), fill=(1, 1, 1))
+        page.apply_redactions(images=0, graphics=0)
+        for _spans, text, x, y, size, color in targets:
+            _insert_cover_period_line(page, (x, y), text, size, color)
+        notes.append("Cover letter period-ending date set to bold.")
+    return notes
 
 
 def normalize_from_to_columns(doc: fitz.Document) -> list[str]:
-    """Fix jammed 'From DATETo DATE' headers; keep spaced single-line client headers intact.
+    """Split capital-To 'From DATE To DATE' headers into MOA columns at x=326 / x=406.
 
-    Client expected packages keep ``From … To …`` as one phrase (often near x=326).
-    Lowercase ``to`` coverage headers must not be rewritten into columns.
+    Lowercase ``to`` coverage headers (e.g. ``From 1/01/25 to 12/31/25``) stay one phrase.
     """
     changed = 0
     for page in doc:
-        targets: list[tuple[list[dict], str, float]] = []
+        page_text = page.get_text("text") or ""
+        if "From " not in page_text or "To " not in page_text:
+            continue
+        targets: list[tuple[list[dict], str, str, float]] = []
         for block in page.get_text("dict").get("blocks", []):
             if block.get("type") != 0:
                 continue
@@ -208,38 +273,44 @@ def normalize_from_to_columns(doc: fitz.Document) -> list[str]:
                 if not spans:
                     continue
                 text = "".join(span.get("text", "") for span in spans).strip()
-                # Already spaced capital-To phrase — leave the client single-line layout.
-                if _FROM_TO_LINE.match(text):
-                    continue
-                match = _FROM_TO_JAMMED.match(text)
+                match = _FROM_TO_LINE.match(text) or _FROM_TO_JAMMED.match(text)
                 if not match:
                     continue
+                from_text = match.groupdict().get("from") or match.group("prefix")
+                to_text = match.group("to")
                 from_x = float(spans[0]["bbox"][0])
-                if abs(from_x - 326) > 12 and abs(from_x - 331) > 12:
+                to_span = next(
+                    (
+                        span
+                        for span in spans
+                        if str(span.get("text", "")).strip().startswith("To ")
+                    ),
+                    None,
+                )
+                if (
+                    to_span is not None
+                    and abs(from_x - 326) <= 2
+                    and abs(float(to_span["bbox"][0]) - 406) <= 2
+                ):
+                    continue
+                if abs(from_x - 326) > 12:
                     continue
                 origin = spans[0].get("origin") or (spans[0]["bbox"][0], spans[0]["bbox"][3])
-                fixed = f"{match.group('prefix')} {match.group('to')}"
-                targets.append((spans, fixed, float(origin[1])))
+                targets.append((spans, from_text, to_text, float(origin[1])))
         if not targets:
             continue
-        for spans, _fixed, _baseline in targets:
+        for spans, _from_text, _to_text, _baseline in targets:
             page.add_redact_annot(_tight_span_rect(spans), fill=(1, 1, 1))
         page.apply_redactions(images=0, graphics=0)
-        for spans, fixed, baseline in targets:
+        for spans, from_text, to_text, baseline in targets:
             span = spans[0]
             size = float(span.get("size") or 9)
             font = _base_font(str(span.get("font") or ""), int(span.get("flags") or 0) | 16)
             color = _rgb(span.get("color") or 0)
-            page.insert_text(
-                (float(spans[0]["bbox"][0]), baseline),
-                fixed,
-                fontsize=size,
-                fontname=font,
-                color=color,
-                overlay=True,
-            )
+            page.insert_text((326, baseline), from_text, fontsize=size, fontname=font, color=color, overlay=True)
+            page.insert_text((406, baseline), to_text, fontsize=size, fontname=font, color=color, overlay=True)
             changed += 1
-    return [f"Fixed spacing in {changed} From/To date header(s)."] if changed else []
+    return [f"Split {changed} From/To date header(s) into columns."] if changed else []
 
 
 def normalize_cover_address_spacing(doc: fitz.Document) -> list[str]:
@@ -347,6 +418,9 @@ def normalize_date_range_spacing(doc: fitz.Document) -> list[str]:
     """Ensure date range connectors have spaces while retaining source text spans and alignment."""
     changed = 0
     for page in doc:
+        page_text = page.get_text("text") or ""
+        if not _DATE_RANGE_CONNECTOR.search(page_text):
+            continue
         lines: list[tuple[list[dict], str]] = []
         for block in page.get_text("dict").get("blocks", []):
             if block.get("type") != 0:
