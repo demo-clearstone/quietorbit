@@ -463,22 +463,33 @@ def _wrapped_text(
     return y
 
 
-# Year End Recap layout — match MOA spacing under the header rule and body type.
-RECAP_HEADER_RULE_Y = 118.0
-RECAP_PLAN_Y = 82.0
-RECAP_NUMBER_Y = 100.0
-RECAP_IMPORTANT_Y = 145.0
-RECAP_BODY_START_Y = 168.0
-RECAP_BODY_SIZE = 9.5
-RECAP_BODY_LEADING = 12.0
-RECAP_BULLET_GAP = 10.0
+# Year End Recap layout — match client expected compare_pdfs metrics.
+RECAP_TITLE_SIZE = 10.5
+RECAP_TITLE_Y = 48.0
+RECAP_DATE_SIZE = 9.9
+RECAP_DATE_Y = 66.0
+RECAP_PLAN_SIZE = 9.9
+RECAP_PLAN_Y = 79.0
+RECAP_NUMBER_SIZE = 9.9
+RECAP_NUMBER_Y = 93.0
+RECAP_HEADER_RULE_Y = 109.0
+RECAP_IMPORTANT_X = 42.0
+RECAP_IMPORTANT_SIZE = 9.6
+RECAP_IMPORTANT_Y = 123.0
+RECAP_BODY_START_Y = 141.0
+RECAP_BODY_SIZE = 8.1
+RECAP_BODY_LEADING = 10.0
+RECAP_BODY_X = 78.0
+RECAP_BULLET_X = 67.0
+RECAP_BULLET_DIAMETER = 3.6
+RECAP_BULLET_GAP = 8.0
 
 
 def _draw_recap_header_rule(page: fitz.Page) -> None:
     """Full-width divider under the Year End Recap plan headings."""
     page.draw_line(
-        fitz.Point(54, RECAP_HEADER_RULE_Y),
-        fitz.Point(page.rect.width - 54, RECAP_HEADER_RULE_Y),
+        fitz.Point(42, RECAP_HEADER_RULE_Y),
+        fitz.Point(page.rect.width - 42, RECAP_HEADER_RULE_Y),
         color=_BLACK,
         width=0.8,
         overlay=True,
@@ -1244,7 +1255,7 @@ def write_recap_page(
     Side effects:
         Changes the PDF passed in. Does not save the file by itself.
     """
-    y = 48.0
+    y = RECAP_TITLE_Y
     header_rule_drawn = False
     for raw in header_lines:
         line = raw.strip()
@@ -1252,20 +1263,27 @@ def write_recap_page(
             y += 6
             continue
         if line.upper() == "YEAR END RECAP":
-            _center(page, "YEAR END RECAP", y, 13.0, "hebo")
-            y = 66.0
+            _center(page, "YEAR END RECAP", RECAP_TITLE_Y, RECAP_TITLE_SIZE, "hebo")
+            y = RECAP_DATE_Y
             continue
         if line.lower() == "important information":
             if not header_rule_drawn:
                 _draw_recap_header_rule(page)
                 header_rule_drawn = True
-            # Leave clear space under the header rule (expected MOA / scan gap).
             y = RECAP_IMPORTANT_Y
-            page.insert_text((54, y), "Important Information", fontsize=11.0, fontname="hebo", color=_BLACK)
-            width = fitz.get_text_length("Important Information", fontname="hebo", fontsize=11.0)
+            page.insert_text(
+                (RECAP_IMPORTANT_X, y),
+                "Important Information",
+                fontsize=RECAP_IMPORTANT_SIZE,
+                fontname="hebo",
+                color=_BLACK,
+            )
+            width = fitz.get_text_length(
+                "Important Information", fontname="hebo", fontsize=RECAP_IMPORTANT_SIZE
+            )
             page.draw_line(
-                fitz.Point(54, y + 3.5),
-                fitz.Point(54 + width, y + 3.5),
+                fitz.Point(RECAP_IMPORTANT_X, y + 2.5),
+                fitz.Point(RECAP_IMPORTANT_X + width, y + 2.5),
                 color=_BLACK,
                 width=0.7,
                 overlay=True,
@@ -1273,28 +1291,27 @@ def write_recap_page(
             y = RECAP_BODY_START_Y
             continue
         if re.fullmatch(r"\d{5,7}", line):
-            _center(page, line, RECAP_NUMBER_Y, 10.0, "helv")
+            _center(page, line, RECAP_NUMBER_Y, RECAP_NUMBER_SIZE, "helv")
             continue
         is_plan_name = bool(re.search(r"\b(?:401\s*\(?k\)?|403\s*\(?b\)?|457)\b.*\bplan\b", line, re.I))
         if is_plan_name:
-            _center(page, line, RECAP_PLAN_Y, 11.0, "hebo")
+            # Client expected packages keep the plan name regular weight.
+            _center(page, line, RECAP_PLAN_Y, RECAP_PLAN_SIZE, "helv")
             y = RECAP_NUMBER_Y
             continue
-        font = "hebo" if line.replace(",", "").replace(".", "").isupper() else "helv"
-        size = 10.0
-        _center(page, line, y, size, font)
-        y += 12.0
+        font = "helv"
+        _center(page, line, y if y > RECAP_TITLE_Y else RECAP_DATE_Y, RECAP_DATE_SIZE, font)
+        y = RECAP_PLAN_Y if abs(y - RECAP_DATE_Y) < 1 else y + 12.0
     if not header_rule_drawn:
         _draw_recap_header_rule(page)
         if y < RECAP_BODY_START_Y:
             y = RECAP_BODY_START_Y
     size = RECAP_BODY_SIZE
     leading = RECAP_BODY_LEADING
-    # Bullets share the divider / Important Information left edge (Kaagaz page 4).
-    # Draw a filled+stroked disc — Helvetica "·" renders tiny/gray in viewers.
-    bullet_x = 54.0
-    bullet_diameter = 3.6
-    hang_x = bullet_x + bullet_diameter + 4.5
+    # Client expected: bullet disc near x=67, hanging body at x=78.
+    bullet_x = RECAP_BULLET_X
+    bullet_diameter = RECAP_BULLET_DIAMETER
+    hang_x = RECAP_BODY_X
     width = page.rect.width - hang_x - 36
     for bullet in bullets:
         body = re.sub(r"^(?:[\u2022•\u00b7\u25cf\u25e6\u2219\uf0b7╖■□▪▫*?\-]\s*)+", "", bullet).strip()

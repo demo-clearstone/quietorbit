@@ -3,7 +3,15 @@ from __future__ import annotations
 import fitz
 
 from models.review import RuleDecision
-from services.package_builder import RECAP_BODY_SIZE, RECAP_HEADER_RULE_Y, RECAP_IMPORTANT_Y
+from services.package_builder import (
+    RECAP_BODY_SIZE,
+    RECAP_BODY_X,
+    RECAP_HEADER_RULE_Y,
+    RECAP_IMPORTANT_SIZE,
+    RECAP_IMPORTANT_X,
+    RECAP_IMPORTANT_Y,
+    RECAP_TITLE_SIZE,
+)
 from services.pdf_modifier import (
     _recap_bullets_have_marks,
     _recap_has_header_rule,
@@ -33,12 +41,12 @@ def _recap(bullets: bool, *, moa_header: bool = False, include_match: bool = Fal
     doc = fitz.open()
     page = doc.new_page()
     if moa_header:
-        page.insert_text((239, 48), "YEAR END RECAP", fontsize=13, fontname="hebo")
-        page.insert_text((214, 66), "January 1, 2024 - December 31, 2024", fontsize=10)
-        page.insert_text((150, 79), "P.H. MECHANICAL CORPORATION 401(k) PLAN AND TRUST", fontsize=11, fontname="hebo")
-        page.insert_text((280, 93), "801080", fontsize=10)
-        page.draw_line(fitz.Point(54, 109), fitz.Point(page.rect.width - 54, 109), color=(0, 0, 0), width=0.8)
-        page.insert_text((54, 123), "Important Information", fontsize=11, fontname="hebo")
+        page.insert_text((250, 48), "YEAR END RECAP", fontsize=RECAP_TITLE_SIZE, fontname="hebo")
+        page.insert_text((214, 66), "January 1, 2024 - December 31, 2024", fontsize=9.9)
+        page.insert_text((118, 79), "P.H. MECHANICAL CORPORATION 401(k) PLAN AND TRUST", fontsize=9.9)
+        page.insert_text((280, 93), "801080", fontsize=9.9)
+        page.draw_line(fitz.Point(42, RECAP_HEADER_RULE_Y), fitz.Point(page.rect.width - 42, RECAP_HEADER_RULE_Y), color=(0, 0, 0), width=0.8)
+        page.insert_text((RECAP_IMPORTANT_X, RECAP_IMPORTANT_Y), "Important Information", fontsize=RECAP_IMPORTANT_SIZE, fontname="hebo")
     else:
         page.insert_text((239, 34), "YEAR END RECAP", fontsize=10.5, fontname="hebo")
         page.insert_text((213, 55), "January 1, 2024 - December 31, 2024", fontsize=9.9)
@@ -51,14 +59,14 @@ def _recap(bullets: bool, *, moa_header: bool = False, include_match: bool = Fal
     for y, paragraph in zip((141, 197, 280), paragraphs):
         if bullets:
             diameter = 3.6
-            cy = y - 8 * 0.35
+            cy = y - RECAP_BODY_SIZE * 0.35
             page.draw_oval(
-                fitz.Rect(54, cy - diameter / 2, 54 + diameter, cy + diameter / 2),
+                fitz.Rect(67, cy - diameter / 2, 67 + diameter, cy + diameter / 2),
                 color=(0, 0, 0),
                 fill=(0, 0, 0),
                 width=0.7,
             )
-            page.insert_text((54 + diameter + 4.5, y), paragraph, fontsize=8)
+            page.insert_text((RECAP_BODY_X, y), paragraph, fontsize=RECAP_BODY_SIZE)
         else:
             # Offset body with no marker so layout is treated as needing a rebuild.
             page.insert_textbox(fitz.Rect(90, y - 10, 545, y + 42), paragraph, fontsize=8)
@@ -110,7 +118,7 @@ def test_recap_rebuild_restores_bullets_and_hanging_indent_when_missing() -> Non
         for line, text in paragraphs
         if "Based on the definition" in text
     )
-    assert 54 <= round(first_line["bbox"][0]) <= 68
+    assert abs(round(first_line["bbox"][0]) - RECAP_BODY_X) <= 2
     assert "Based on the definition" in first_text
 
 
@@ -147,13 +155,13 @@ def test_recap_rebuilds_to_kaagaz_header_layout_with_border() -> None:
         for span in line.get("spans", [])
         if span.get("text", "").strip().lower() == "important information"
     )
-    assert abs(float(title["size"]) - 13.0) <= 0.3
-    assert round(important[0]["bbox"][0]) == 54
-    assert abs(float(important[1]["size"]) - 11.0) <= 0.3
+    assert abs(float(title["size"]) - RECAP_TITLE_SIZE) <= 0.3
+    assert abs(round(important[0]["bbox"][0]) - RECAP_IMPORTANT_X) <= 1
+    assert abs(float(important[1]["size"]) - RECAP_IMPORTANT_SIZE) <= 0.3
     assert _recap_bullets_have_marks(page)
     assert _recap_has_header_rule(page)
     rules = _header_rules(page)
-    assert any(105 <= y <= 122 and left <= 54 and right >= page.rect.width - 54 for y, left, right in rules)
+    assert any(abs(y - RECAP_HEADER_RULE_Y) <= 2 and left <= 54 and right >= page.rect.width - 54 for y, left, right in rules)
 
 
 def test_recap_rebuild_drops_match_bullet_when_rule_says_remove() -> None:
@@ -290,12 +298,11 @@ def test_recap_rebuild_uses_moa_body_font_and_space_under_header_rule() -> None:
     rule_y = next(y for y, left, right in rules if right - left > 200)
 
     assert abs(rule_y - RECAP_HEADER_RULE_Y) <= 1
-    # Clear gap from header rule down to Important Information.
-    assert important["bbox"][1] - rule_y >= 12
+    assert abs(round(important["bbox"][0]) - RECAP_IMPORTANT_X) <= 1
     assert abs(float(important["spans"][0]["origin"][1]) - RECAP_IMPORTANT_Y) <= 1
-    # Body type is larger than the old 8pt rebuild, with room under Important Information.
     assert abs(float(body[1]["size"]) - RECAP_BODY_SIZE) <= 0.3
-    assert body[0]["bbox"][1] - important["bbox"][3] >= 8
+    assert abs(round(body[0]["bbox"][0]) - RECAP_BODY_X) <= 2
+    assert body[0]["bbox"][1] - important["bbox"][3] >= 4
 
 
 def test_recap_safe_harbor_bullet_uses_bold_and_italic_runs() -> None:

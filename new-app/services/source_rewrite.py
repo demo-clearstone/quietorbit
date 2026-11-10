@@ -129,9 +129,12 @@ _COVER_WRAP_TAIL = re.compile(
     re.I,
 )
 _COVER_WRAP_NEXT = re.compile(r"^IRS required testing for the plan year\.?\s*$", re.I)
+# Capital "To" only — lowercase "to" coverage headers stay a single phrase.
 _FROM_TO_LINE = re.compile(
     r"^(?P<from>From\s+\d{1,2}/\d{1,2}/\d{2,4})\s+(?P<to>To\s+\d{1,2}/\d{1,2}/\d{2,4})\s*$",
-    re.I,
+)
+_FROM_TO_JAMMED = re.compile(
+    r"^(?P<prefix>From\s+\d{1,2}/\d{1,2}/\d{2,4})(?P<to>To\s+\d{1,2}/\d{1,2}/\d{2,4})\s*$",
 )
 
 
@@ -189,10 +192,14 @@ def normalize_cover_census_wrap(doc: fitz.Document) -> list[str]:
 
 
 def normalize_from_to_columns(doc: fitz.Document) -> list[str]:
-    """Split merged 'From DATE To DATE' headers into the MOA two-column layout."""
+    """Fix jammed 'From DATETo DATE' headers; keep spaced single-line client headers intact.
+
+    Client expected packages keep ``From … To …`` as one phrase (often near x=326).
+    Lowercase ``to`` coverage headers must not be rewritten into columns.
+    """
     changed = 0
     for page in doc:
-        targets: list[tuple[list[dict], str, str, float]] = []
+        targets: list[tuple[list[dict], str, float]] = []
         for block in page.get_text("dict").get("blocks", []):
             if block.get("type") != 0:
                 continue
@@ -201,38 +208,38 @@ def normalize_from_to_columns(doc: fitz.Document) -> list[str]:
                 if not spans:
                     continue
                 text = "".join(span.get("text", "") for span in spans).strip()
-                match = _FROM_TO_LINE.match(text)
+                # Already spaced capital-To phrase — leave the client single-line layout.
+                if _FROM_TO_LINE.match(text):
+                    continue
+                match = _FROM_TO_JAMMED.match(text)
                 if not match:
                     continue
                 from_x = float(spans[0]["bbox"][0])
-                to_span = next(
-                    (span for span in spans if str(span.get("text", "")).strip().lower().startswith("to ")),
-                    None,
-                )
-                if (
-                    to_span is not None
-                    and abs(from_x - 326) <= 2
-                    and abs(float(to_span["bbox"][0]) - 406) <= 2
-                ):
-                    continue
-                if abs(from_x - 326) > 12:
+                if abs(from_x - 326) > 12 and abs(from_x - 331) > 12:
                     continue
                 origin = spans[0].get("origin") or (spans[0]["bbox"][0], spans[0]["bbox"][3])
-                targets.append((spans, match.group("from"), match.group("to"), float(origin[1])))
+                fixed = f"{match.group('prefix')} {match.group('to')}"
+                targets.append((spans, fixed, float(origin[1])))
         if not targets:
             continue
-        for spans, _from_text, _to_text, _baseline in targets:
+        for spans, _fixed, _baseline in targets:
             page.add_redact_annot(_tight_span_rect(spans), fill=(1, 1, 1))
         page.apply_redactions(images=0, graphics=0)
-        for spans, from_text, to_text, baseline in targets:
+        for spans, fixed, baseline in targets:
             span = spans[0]
             size = float(span.get("size") or 9)
-            font = "hebo"
+            font = _base_font(str(span.get("font") or ""), int(span.get("flags") or 0) | 16)
             color = _rgb(span.get("color") or 0)
-            page.insert_text((326, baseline), from_text, fontsize=size, fontname=font, color=color, overlay=True)
-            page.insert_text((406, baseline), to_text, fontsize=size, fontname=font, color=color, overlay=True)
+            page.insert_text(
+                (float(spans[0]["bbox"][0]), baseline),
+                fixed,
+                fontsize=size,
+                fontname=font,
+                color=color,
+                overlay=True,
+            )
             changed += 1
-    return [f"Split {changed} From/To date header(s) into columns."] if changed else []
+    return [f"Fixed spacing in {changed} From/To date header(s)."] if changed else []
 
 
 def normalize_cover_address_spacing(doc: fitz.Document) -> list[str]:

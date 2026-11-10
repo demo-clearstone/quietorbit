@@ -192,8 +192,7 @@ def test_date_range_to_spacing_does_not_wipe_nearby_lines() -> None:
     assert "Contribution Amount" in text
     assert "Left label near dates" in text
     assert "07/01/2025 To 06/30/2026" in text
-    assert "From 01/01/2025" in text
-    assert "To 12/31/2025" in text
+    assert "From 01/01/2025 To 12/31/2025" in text
 
 
 def test_normalizes_month_name_date_range_and_leaves_unrelated_dates_alone() -> None:
@@ -240,22 +239,39 @@ def test_date_range_spacing_keeps_separate_source_spans_aligned() -> None:
     assert round(to_lines[0]["spans"][0]["bbox"][0]) == 406
 
 
-def test_splits_merged_from_to_date_header_into_columns() -> None:
+def test_from_to_keeps_spaced_single_line_client_header() -> None:
     doc = fitz.open()
     page = doc.new_page()
     page.insert_text((326, 100), "From 01/01/2025 To 12/31/2025", fontsize=9, fontname="hebo")
 
-    assert normalize_from_to_columns(doc)
+    assert normalize_from_to_columns(doc) == []
+    assert "From 01/01/2025 To 12/31/2025" in page.get_text()
 
+
+def test_from_to_fixes_jammed_single_line_without_splitting_columns() -> None:
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((326, 100), "From 01/01/2025To 12/31/2025", fontsize=9, fontname="hebo")
+
+    assert normalize_from_to_columns(doc)
+    assert "From 01/01/2025 To 12/31/2025" in page.get_text()
     cols = [
-        (round(span["bbox"][0]), span["text"].strip())
+        span["text"].strip()
         for block in page.get_text("dict")["blocks"] if block.get("type") == 0
         for line in block.get("lines", [])
         for span in line.get("spans", [])
         if span.get("text", "").strip()
     ]
-    assert (326, "From 01/01/2025") in cols
-    assert (406, "To 12/31/2025") in cols
+    assert cols == ["From 01/01/2025 To 12/31/2025"]
+
+
+def test_from_to_leaves_lowercase_coverage_header_alone() -> None:
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((331, 100), "From 1/01/25 to 12/31/25", fontsize=9, fontname="hebo")
+
+    assert normalize_from_to_columns(doc) == []
+    assert "From 1/01/25 to 12/31/25" in page.get_text()
 
 
 def test_cover_census_wrap_breaks_after_results_of() -> None:

@@ -1997,8 +1997,7 @@ def _recap_has_header_rule(page: fitz.Page) -> bool:
             if abs(start.y - end.y) > 1.5:
                 continue
             left, right = sorted((start.x, end.x))
-            # Accept either legacy (109) or current MOA (118) header-rule placement.
-            if 105 <= ((start.y + end.y) / 2) <= 122 and left <= 56 and right >= page.rect.width - 56:
+            if 100 <= ((start.y + end.y) / 2) <= 122 and left <= 56 and right >= page.rect.width - 56:
                 return True
     return False
 
@@ -2011,7 +2010,7 @@ def _recap_solid_bullet_count(page: fitz.Page) -> int:
         if fill not in ((0, 0, 0), (0.0, 0.0, 0.0)):
             continue
         rect = fitz.Rect(drawing.get("rect") or (0, 0, 0, 0))
-        if 2.5 <= rect.width <= 6 and 2.5 <= rect.height <= 6 and 50 <= rect.x0 <= 60:
+        if 2.5 <= rect.width <= 6 and 2.5 <= rect.height <= 6 and 50 <= rect.x0 <= 80:
             count += 1
     return count
 
@@ -2032,9 +2031,9 @@ def _recap_layout_matches(page: fitz.Page) -> bool:
             size = float(spans[0].get("size") or 0)
             x = float(line["bbox"][0])
             if text.upper() == "YEAR END RECAP":
-                title_ok = abs(size - 13.0) <= 0.8
+                title_ok = abs(size - 10.5) <= 0.8
             elif text.lower() == "important information":
-                important_ok = abs(x - 54) <= 3 and abs(size - 11.0) <= 0.8
+                important_ok = abs(x - 42) <= 3 and abs(size - 9.6) <= 0.8
             if re.match(r"^[·•\u00b7\u2022]", text):
                 glyph_bullets += 1
     if not title_ok or not important_ok or not _recap_has_header_rule(page):
@@ -2066,9 +2065,10 @@ def _recap_bullets_have_marks(page: fitz.Page) -> bool:
     if not paragraph_starts:
         return False
     for body_x, _body_y, body_size in paragraph_starts:
-        if body_x < 48 or body_x > 72:
+        # Client expected hanging column is ~78; allow legacy ~62 rebuilds too.
+        if body_x < 48 or body_x > 90:
             return False
-        if body_size and abs(body_size - 8.0) > 1.5:
+        if body_size and abs(body_size - 8.1) > 1.6:
             return False
     if filled_discs < len(paragraph_starts):
         return False

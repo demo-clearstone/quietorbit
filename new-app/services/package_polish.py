@@ -585,8 +585,8 @@ def normalize_report_layout(doc: fitz.Document) -> list[str]:
         if re.search(r"year end recap", page_text, re.I):
             for line, text in lines:
                 x = float(line["bbox"][0])
-                if text.lower() == "important information" and abs(x - 54) >= 0.5 and abs(x - 54) <= 20:
-                    shifts.append((line, 54.0 - x))
+                if text.lower() == "important information" and abs(x - 42) >= 0.5 and abs(x - 42) <= 20:
+                    shifts.append((line, 42.0 - x))
             start = next(
                 (line["bbox"][1] for line, text in lines if "UNIVERSAL AVAILABILITY RULE" in text.upper()),
                 None,
@@ -608,9 +608,8 @@ def normalize_report_layout(doc: fitz.Document) -> list[str]:
                     if start - 1 <= line["bbox"][1] and line["bbox"][3] <= end + 1
                     and 60 <= line["bbox"][0] < 98
                 )
-            # Recap body paragraphs use the hanging-indent column (~62), not the
-            # Important Information / bullet disc edge at x=54.
-            hang_x = 54.0 + 3.6 + 4.5
+            # Client expected hanging body column is x≈78.
+            hang_x = 78.0
             for line, text in lines:
                 if not text or text.lower() == "important information":
                     continue
