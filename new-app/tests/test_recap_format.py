@@ -130,14 +130,16 @@ def test_merge_universal_availability_absorbs_exclusion_bullets() -> None:
             "If you sponsor a qualified retirement plan not administered by Mutual of America, please provide your service provider",
         ]
     )
-    assert len(merged) == 2
+    assert len(merged) == 1
     assert merged[0].startswith("UNIVERSAL AVAILABILITY RULE")
     assert "Employees who normally work less than 20 hours per week*" in merged[0]
     assert "Students performing services at a school, college or university*" in merged[0]
-    assert merged[1].startswith("If you sponsor")
+    assert "If you sponsor a qualified retirement plan" in merged[0]
 
 
 def test_recap_writes_universal_availability_nested_layout() -> None:
+    from services.package_builder import RECAP_BULLET_SIZE, RECAP_UA_FOLLOWON_BULLET_X, RECAP_UA_NEST_SIZE
+
     doc = fitz.open()
     page = doc.new_page(width=612, height=792)
     body = (
@@ -147,7 +149,8 @@ def test_recap_writes_universal_availability_nested_layout() -> None:
         "provide an employee with an effective opportunity. Certain employees may be excluded, including: "
         "Employees who normally work less than 20 hours per week* Students performing services at a school, college or university* "
         "Non-resident aliens with no U.S. source income Employees who are eligible to make elective deferrals under another "
-        "401(k), 403(b) or 457(b) plan sponsored by the same employer Employees not able to defer $200 during the plan year"
+        "401(k), 403(b) or 457(b) plan sponsored by the same employer Employees not able to defer $200 during the plan year "
+        "If you sponsor a qualified retirement plan not administered by Mutual of America, please provide your service provider"
     )
     write_recap_page(
         page,
@@ -161,6 +164,8 @@ def test_recap_writes_universal_availability_nested_layout() -> None:
     assert "Employees who normally work less than 20 hours per week*" in text
     title_x = None
     nest_xs = []
+    nest_sizes = []
+    follow_bullet_x = None
     for block in page.get_text("dict")["blocks"]:
         if block.get("type") != 0:
             continue
@@ -172,8 +177,17 @@ def test_recap_writes_universal_availability_nested_layout() -> None:
                 assert "Bold" in spans[0]["font"]
             if joined.startswith("Employees who normally work less than 20 hours"):
                 nest_xs.append(round(spans[0]["bbox"][0]))
+                nest_sizes.append(round(float(spans[0]["size"]), 1))
+            if joined.startswith("If you sponsor a qualified retirement plan"):
+                # Prior line's bullet for follow-on is at x≈72.
+                pass
+            if joined in {"·", "•", "╖"} and abs(float(spans[0]["bbox"][0]) - RECAP_UA_FOLLOWON_BULLET_X) < 1:
+                follow_bullet_x = round(spans[0]["bbox"][0])
+                assert abs(float(spans[0]["size"]) - RECAP_BULLET_SIZE) < 0.2
     assert title_x == 83
     assert nest_xs and nest_xs[0] == 101
+    assert nest_sizes and nest_sizes[0] == RECAP_UA_NEST_SIZE
+    assert follow_bullet_x == 72
 
 
 def test_recap_header_ignores_stray_bullet_glyphs() -> None:

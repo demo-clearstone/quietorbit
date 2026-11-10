@@ -483,7 +483,7 @@ RECAP_BODY_SIZE = 8.1
 RECAP_BODY_LEADING = 10.0
 RECAP_BODY_X = 78.0
 RECAP_BULLET_X = 67.0
-RECAP_BULLET_SIZE = 7.3
+RECAP_BULLET_SIZE = 8.1
 RECAP_BULLET_GAP = 8.0
 # Expected packages center header lines as if the page were A4-wide (~595pt).
 RECAP_CENTER_WIDTH = 595.28
@@ -1231,6 +1231,8 @@ RECAP_UA_TITLE_X = 83.0
 RECAP_UA_BODY_X = 83.0
 RECAP_UA_NEST_BULLET_X = 83.0
 RECAP_UA_NEST_TEXT_X = 101.0
+RECAP_UA_NEST_SIZE = 8.9
+RECAP_UA_FOLLOWON_BULLET_X = 72.0
 
 
 def _is_ua_recap_body(body: str) -> bool:
@@ -1242,17 +1244,31 @@ def _is_ua_recap_body(body: str) -> bool:
     return upper.startswith("UNIVERSAL AVAILABILITY") or text.lower().startswith('the "universal availability"') or text.lower().startswith("the 'universal availability'") or text.lower().startswith("the universal availability")
 
 
-def _split_ua_recap_body(body: str) -> tuple[str, list[str]]:
-    """Return (intro_paragraph, nested_exclusion_lines) for a UA bullet."""
+def _is_ua_followon_body(body: str) -> bool:
+    """True for the UA closing 'If you sponsor…' paragraph (client x≈72/83)."""
+    text = re.sub(
+        r"^(?:[\u2022•\u00b7\u25cf\u25e6\u2219\uf0b7╖■□▪▫*\-·●]+)\s*",
+        "",
+        (body or "").strip(),
+    )
+    return text.lower().startswith("if you sponsor a qualified retirement plan")
+
+
+def _split_ua_recap_body(body: str) -> tuple[str, list[str], str]:
+    """Return (intro_paragraph, nested_exclusion_lines, follow_on) for a UA bullet."""
     text = re.sub(r"\s+", " ", (body or "").strip())
     text = re.sub(r"\belection\s+data\s+At\b", "election annually At", text, flags=re.I)
     text = re.sub(r"^UNIVERSAL AVAILABILITY RULE\s*", "", text, flags=re.I).strip()
+    follow = ""
+    follow_m = re.search(r"\bIf you sponsor a qualified retirement plan\b.*$", text, re.I)
+    if follow_m:
+        follow = follow_m.group(0).strip()
+        text = text[: follow_m.start()].strip()
     marker = re.search(r"\bincluding\s*:\s*", text, re.I)
     if not marker:
-        return text, []
+        return text, [], follow
     intro = text[: marker.end()].strip()
     rest = text[marker.end() :].strip()
-    exclusions: list[str] = []
     # Split the flattened exclusion list back into the MOA nested bullets.
     pattern = re.compile(
         r"(?=Employees who normally work less than 20 hours per week|"
@@ -1265,8 +1281,8 @@ def _split_ua_recap_body(body: str) -> tuple[str, list[str]]:
     parts = [part.strip(" ;") for part in pattern.split(rest) if part and part.strip(" ;")]
     if len(parts) <= 1 and rest:
         # Fallback: keep one nested line so layout still has a child bullet.
-        return intro, [rest]
-    return intro, parts
+        return intro, [rest], follow
+    return intro, parts, follow
 
 
 def _write_ua_recap_section(
@@ -1277,7 +1293,7 @@ def _write_ua_recap_section(
     leading: float,
 ) -> float:
     """Draw the Universal Availability block with title + nested exclusions (client layout)."""
-    intro, exclusions = _split_ua_recap_body(body)
+    intro, exclusions, follow = _split_ua_recap_body(body)
     page.insert_text(
         (RECAP_BULLET_X, y),
         "·",
@@ -1297,6 +1313,8 @@ def _write_ua_recap_section(
     if intro:
         y = _write_recap_bullet_body(page, intro, RECAP_UA_BODY_X, y, size, leading, width)
     nest_width = max(280.0, page.rect.width - RECAP_UA_NEST_TEXT_X - 36)
+    nest_size = RECAP_UA_NEST_SIZE
+    nest_leading = max(leading, nest_size + 1.5)
     for item in exclusions:
         page.insert_text(
             (RECAP_UA_NEST_BULLET_X, y),
@@ -1305,8 +1323,20 @@ def _write_ua_recap_section(
             fontname="helv",
             color=_BLACK,
         )
-        y = _write_recap_bullet_body(page, item, RECAP_UA_NEST_TEXT_X, y, size, leading, nest_width)
+        y = _write_recap_bullet_body(
+            page, item, RECAP_UA_NEST_TEXT_X, y, nest_size, nest_leading, nest_width
+        )
         y += 2
+    if follow:
+        y += 2
+        page.insert_text(
+            (RECAP_UA_FOLLOWON_BULLET_X, y),
+            "·",
+            fontsize=RECAP_BULLET_SIZE,
+            fontname="helv",
+            color=_BLACK,
+        )
+        y = _write_recap_bullet_body(page, follow, RECAP_UA_BODY_X, y, size, leading, width)
     return y
 
 
@@ -1403,11 +1433,27 @@ def write_recap_page(
     # Client expected: glyph bullet at x=67, hanging body at x=78, wrap at header rule.
     hang_x = RECAP_BODY_X
     width = max(360.0, RECAP_HEADER_RULE_X1 - hang_x)
-    for bullet in bullets:
-        body = re.sub(r"^(?:[\u2022•\u00b7\u25cf\u25e6\u2219\uf0b7╖■□▪▫*?\-]\s*)+", "", bullet).strip()
-        if not body:
-            continue
+    bullet_prefix = re.compile(r"^(?:[\u2022•\u00b7\u25cf\u25e6\u2219\uf0b7╖■□▪▫*?\-]\s*)+")
+    exclusion_start = re.compile(
+        r"^(?:Employees who normally work less than 20 hours|"
+        r"Students performing services at a school|"
+        r"Non-resident aliens with no U\.S\. source income|"
+        r"Employees who are eligible to make elective deferrals|"
+        r"Employees not able to defer \$200)",
+        re.I,
+    )
+    index = 0
+    cleaned = [bullet_prefix.sub("", (bullet or "").strip()).strip() for bullet in bullets]
+    cleaned = [body for body in cleaned if body]
+    while index < len(cleaned):
+        body = cleaned[index]
+        index += 1
         if _is_ua_recap_body(body):
+            while index < len(cleaned) and (
+                exclusion_start.match(cleaned[index]) or _is_ua_followon_body(cleaned[index])
+            ):
+                body = f"{body} {cleaned[index]}".strip()
+                index += 1
             y = _write_ua_recap_section(page, body, y, size, leading)
             y += RECAP_BULLET_GAP
             continue

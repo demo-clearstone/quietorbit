@@ -37,7 +37,7 @@ def test_aligns_action_required_headings() -> None:
     normalize_report_layout(doc)
     normalize_report_layout(doc)
 
-    assert round(_line_x(page, "ACTION REQUIRED")) == 40
+    assert round(_line_x(page, "ACTION REQUIRED")) == 38
     assert round(_line_x(page, "NO IMMEDIATE ACTION IS REQUIRED AT THIS TIME")) == 39
 
 
@@ -52,7 +52,7 @@ def test_aligns_client_action_headings_from_x24_to_expected_columns() -> None:
 
     normalize_report_layout(doc)
 
-    assert round(_line_x(page, "ACTION REQUIRED")) == 40
+    assert round(_line_x(page, "ACTION REQUIRED")) == 38
     assert round(_line_x(page, "NO IMMEDIATE ACTION IS REQUIRED AT THIS TIME")) == 39
     rules = []
     for drawing in page.get_drawings():
@@ -102,8 +102,8 @@ def test_aligns_immediate_action_headings_to_action_column() -> None:
 
     normalize_report_layout(doc)
 
-    assert round(_line_x(page, "IMMEDIATE ACTION REQUIRED - ADP/ACP TEST FAILURE")) == 40
-    assert round(_line_x(page, "ATTENTION REQUIRED - VARIANCE")) == 40
+    assert round(_line_x(page, "IMMEDIATE ACTION REQUIRED - ADP/ACP TEST FAILURE")) == 38
+    assert round(_line_x(page, "ATTENTION REQUIRED - VARIANCE")) == 38
 
 
 def test_shifts_universal_availability_block_and_nested_bullets() -> None:
@@ -151,6 +151,19 @@ def test_splits_merged_amount_percent_heading_and_aligns_census_name() -> None:
     assert round(_line_x(page, "Name")) == 42
     assert round(_line_x(page, "Amount")) == 288
     assert round(_line_x(page, "%")) == 360
+
+
+def test_aligns_name_column_on_plan_titled_ssn_listing_page() -> None:
+    """Deerfield census pages title with the plan name and never say 'census'."""
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((40, 50), "DEERFIELD BEHAVIORAL HEALTH OF WARREN LLC 403(B) PLAN", fontsize=12)
+    page.insert_text((36, 130), "Name", fontsize=9)
+    page.insert_text((200, 130), "SSN", fontsize=9)
+
+    normalize_report_layout(doc)
+
+    assert round(_line_x(page, "Name")) == 42
 
 
 def test_compacts_cover_address_lines_and_shifts_re_body_up() -> None:

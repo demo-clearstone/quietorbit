@@ -552,7 +552,7 @@ def normalize_report_layout(doc: fitz.Document) -> list[str]:
         page_text = page.get_text("text") or ""
         # Most pages need no layout fix; skip the expensive dict extract.
         if not re.search(
-            r"annual valuation report|year end recap|Amount\s{2,}%|\bcensus\b",
+            r"annual valuation report|year end recap|Amount\s{2,}%|\bcensus\b|\bSSN\b",
             page_text,
             re.I,
         ):
@@ -565,9 +565,8 @@ def normalize_report_layout(doc: fitz.Document) -> list[str]:
         ]
         shifts: list[tuple[dict, float]] = []
         if re.search(r"annual valuation report", page_text, re.I):
-            # Client packages often print Action Required copy near x=24/30/36.
-            # Bring headings onto the shared column (~40) so rewritten lines match.
-            target_action_x = 40.0
+            # Client expected Deerfield/AV packages land ACTION REQUIRED near x≈38.
+            target_action_x = 38.0
             target_green_x = 39.0
             for line, text in lines:
                 upper = text.upper()
@@ -629,14 +628,14 @@ def normalize_report_layout(doc: fitz.Document) -> list[str]:
                 x = float(line["bbox"][0])
                 if 40 <= x < hang_x - 0.5 and float(line["bbox"][1]) > 120:
                     shifts.append((line, hang_x - x))
-        # Census pages may put the plan name in the first lines; search the whole page.
-        if re.search(r"\bcensus\b", page_text, re.I):
+        # Census / participant listing pages may title with the plan name (no "census" word).
+        if re.search(r"\bcensus\b", page_text, re.I) or re.search(r"\bSSN\b", page_text):
             shifts.extend(
                 (line, 6.0)
                 for line, text in lines
                 if text.casefold() == "name"
                 and line["bbox"][1] > 100
-                and abs(line["bbox"][0] - 36) < 1.0
+                and abs(line["bbox"][0] - 36) < 1.5
             )
         action_shifted = False
         if shifts:

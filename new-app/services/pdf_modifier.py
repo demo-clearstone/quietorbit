@@ -2041,9 +2041,24 @@ def _is_ua_exclusion_bullet(text: str) -> bool:
     )
 
 
+def _is_ua_followon_bullet(text: str) -> bool:
+    """True for the UA closing sponsor/service-provider paragraph."""
+    clean = _strip_recap_bullet_prefix(text)
+    return clean.lower().startswith("if you sponsor a qualified retirement plan")
+
+
 def _merge_universal_availability_bullets(bullets: list[str]) -> list[str]:
-    """Join UA title/body/exclusion bullets into one block for nested rewrite."""
+    """Join UA title/body/exclusion/follow-on bullets into one block for nested rewrite."""
     from services.package_builder import _is_ua_recap_body
+
+    def _absorb_tail(parts: list[str], index: int) -> int:
+        while index < len(bullets) and _is_ua_exclusion_bullet(bullets[index]):
+            parts.append(_strip_recap_bullet_prefix(bullets[index]))
+            index += 1
+        if index < len(bullets) and _is_ua_followon_bullet(bullets[index]):
+            parts.append(_strip_recap_bullet_prefix(bullets[index]))
+            index += 1
+        return index
 
     merged: list[str] = []
     index = 0
@@ -2059,17 +2074,13 @@ def _merge_universal_availability_bullets(bullets: list[str]) -> list[str]:
                 if _is_ua_recap_body(nxt) and not re.fullmatch(r"UNIVERSAL AVAILABILITY RULE", nxt, re.I):
                     parts.append(nxt)
                     index += 1
-            while index < len(bullets) and _is_ua_exclusion_bullet(bullets[index]):
-                parts.append(_strip_recap_bullet_prefix(bullets[index]))
-                index += 1
+            index = _absorb_tail(parts, index)
             merged.append(" ".join(part for part in parts if part).strip())
             continue
         if _is_ua_recap_body(clean) and not clean.upper().startswith("UNIVERSAL AVAILABILITY RULE"):
             parts = [f"UNIVERSAL AVAILABILITY RULE {clean}"]
             index += 1
-            while index < len(bullets) and _is_ua_exclusion_bullet(bullets[index]):
-                parts.append(_strip_recap_bullet_prefix(bullets[index]))
-                index += 1
+            index = _absorb_tail(parts, index)
             merged.append(" ".join(parts).strip())
             continue
         merged.append(current)
