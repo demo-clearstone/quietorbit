@@ -463,11 +463,22 @@ def _wrapped_text(
     return y
 
 
+# Year End Recap layout — match MOA spacing under the header rule and body type.
+RECAP_HEADER_RULE_Y = 118.0
+RECAP_PLAN_Y = 82.0
+RECAP_NUMBER_Y = 100.0
+RECAP_IMPORTANT_Y = 145.0
+RECAP_BODY_START_Y = 168.0
+RECAP_BODY_SIZE = 9.5
+RECAP_BODY_LEADING = 12.0
+RECAP_BULLET_GAP = 10.0
+
+
 def _draw_recap_header_rule(page: fitz.Page) -> None:
     """Full-width divider under the Year End Recap plan headings."""
     page.draw_line(
-        fitz.Point(54, 109.0),
-        fitz.Point(page.rect.width - 54, 109.0),
+        fitz.Point(54, RECAP_HEADER_RULE_Y),
+        fitz.Point(page.rect.width - 54, RECAP_HEADER_RULE_Y),
         color=_BLACK,
         width=0.8,
         overlay=True,
@@ -1132,6 +1143,75 @@ def build_year_end_recap_sample() -> fitz.Document:
     return doc
 
 
+def _recap_body_segments(body: str) -> list[tuple[str, str]]:
+    """Split recap copy into regular / bold max-rate / italic Note runs."""
+    text = body.strip()
+    if not text:
+        return []
+    note = re.search(r"(\bNote:\s*.+)$", text, re.I | re.S)
+    maximum = re.search(
+        r"(The maximum average deferral rate\b.*?)(?=\s*\bNote:|\s*$)",
+        text,
+        re.I | re.S,
+    )
+    segments: list[tuple[str, str]] = []
+    cursor = 0
+    if maximum:
+        if maximum.start() > cursor:
+            segments.append(("helv", text[cursor:maximum.start()].rstrip()))
+        segments.append(("hebo", maximum.group(1).strip()))
+        cursor = maximum.end()
+    if note and note.start() >= cursor:
+        if note.start() > cursor:
+            gap = text[cursor:note.start()].strip()
+            if gap:
+                segments.append(("helv", gap))
+        segments.append(("heit", note.group(1).strip()))
+        cursor = note.end()
+    if cursor < len(text):
+        rest = text[cursor:].strip()
+        if rest:
+            segments.append(("helv", rest))
+    return [(font, part) for font, part in segments if part] or [("helv", text)]
+
+
+def _write_recap_bullet_body(
+    page: fitz.Page,
+    body: str,
+    x: float,
+    y: float,
+    size: float,
+    leading: float,
+    width: float,
+) -> float:
+    """Draw one hanging-indent recap bullet with bold max-rate and italic Note runs."""
+    segments = _recap_body_segments(body)
+    words: list[tuple[str, str]] = []
+    for seg_index, (font, segment) in enumerate(segments):
+        parts = segment.split()
+        for word_index, word in enumerate(parts):
+            trailing = " "
+            if word_index == len(parts) - 1 and seg_index == len(segments) - 1:
+                trailing = ""
+            words.append((font, f"{word}{trailing}"))
+    if not words:
+        return y
+    cursor_x = x
+    line_used = 0.0
+    for font, token in words:
+        token_width = fitz.get_text_length(token, fontname=font, fontsize=size)
+        if line_used and line_used + token_width > width:
+            y += leading
+            cursor_x = x
+            line_used = 0.0
+        page.insert_text((cursor_x, y), token, fontsize=size, fontname=font, color=_BLACK)
+        cursor_x += token_width
+        line_used += token_width
+    if line_used:
+        y += leading
+    return y
+
+
 def write_recap_page(
     page: fitz.Page,
     header_lines: list[str],
@@ -1179,26 +1259,26 @@ def write_recap_page(
             if not header_rule_drawn:
                 _draw_recap_header_rule(page)
                 header_rule_drawn = True
-            # Sit just under the header rule (MOA / Kaagaz expected).
-            y = 123.0
+            # Leave clear space under the header rule (expected MOA / scan gap).
+            y = RECAP_IMPORTANT_Y
             page.insert_text((54, y), "Important Information", fontsize=11.0, fontname="hebo", color=_BLACK)
             width = fitz.get_text_length("Important Information", fontname="hebo", fontsize=11.0)
             page.draw_line(
-                fitz.Point(54, y + 2),
-                fitz.Point(54 + width, y + 2),
+                fitz.Point(54, y + 3.5),
+                fitz.Point(54 + width, y + 3.5),
                 color=_BLACK,
                 width=0.7,
                 overlay=True,
             )
-            y = 141.0
+            y = RECAP_BODY_START_Y
             continue
         if re.fullmatch(r"\d{5,7}", line):
-            _center(page, line, 93.0, 10.0, "helv")
+            _center(page, line, RECAP_NUMBER_Y, 10.0, "helv")
             continue
         is_plan_name = bool(re.search(r"\b(?:401\s*\(?k\)?|403\s*\(?b\)?|457)\b.*\bplan\b", line, re.I))
         if is_plan_name:
-            _center(page, line, 79.0, 11.0, "hebo")
-            y = 93.0
+            _center(page, line, RECAP_PLAN_Y, 11.0, "hebo")
+            y = RECAP_NUMBER_Y
             continue
         font = "hebo" if line.replace(",", "").replace(".", "").isupper() else "helv"
         size = 10.0
@@ -1206,8 +1286,10 @@ def write_recap_page(
         y += 12.0
     if not header_rule_drawn:
         _draw_recap_header_rule(page)
-    size = 8.0
-    leading = 10.0
+        if y < RECAP_BODY_START_Y:
+            y = RECAP_BODY_START_Y
+    size = RECAP_BODY_SIZE
+    leading = RECAP_BODY_LEADING
     # Bullets share the divider / Important Information left edge (Kaagaz page 4).
     # Draw a filled+stroked disc — Helvetica "·" renders tiny/gray in viewers.
     bullet_x = 54.0
@@ -1218,22 +1300,16 @@ def write_recap_page(
         body = re.sub(r"^(?:[\u2022•\u00b7\u25cf\u25e6\u2219\uf0b7╖■□▪▫*?\-]\s*)+", "", bullet).strip()
         if not body:
             continue
-        lines = _wrap(body, "helv", size, width)
-        for index, wrapped in enumerate(lines):
-            if index == 0:
-                cy = y - size * 0.35
-                oval = fitz.Rect(
-                    bullet_x,
-                    cy - bullet_diameter / 2,
-                    bullet_x + bullet_diameter,
-                    cy + bullet_diameter / 2,
-                )
-                page.draw_oval(oval, color=_BLACK, fill=_BLACK, width=0.7, overlay=True)
-                page.insert_text((hang_x, y), wrapped, fontsize=size, fontname="helv", color=_BLACK)
-            else:
-                page.insert_text((hang_x, y), wrapped, fontsize=size, fontname="helv", color=_BLACK)
-            y += leading
-        y += 8
+        cy = y - size * 0.35
+        oval = fitz.Rect(
+            bullet_x,
+            cy - bullet_diameter / 2,
+            bullet_x + bullet_diameter,
+            cy + bullet_diameter / 2,
+        )
+        page.draw_oval(oval, color=_BLACK, fill=_BLACK, width=0.7, overlay=True)
+        y = _write_recap_bullet_body(page, body, hang_x, y, size, leading, width)
+        y += RECAP_BULLET_GAP
     if number is not None:
         _page_number(page, number)
 

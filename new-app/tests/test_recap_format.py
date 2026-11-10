@@ -3,6 +3,7 @@ from __future__ import annotations
 import fitz
 
 from models.review import RuleDecision
+from services.package_builder import RECAP_BODY_SIZE, RECAP_HEADER_RULE_Y, RECAP_IMPORTANT_Y
 from services.pdf_modifier import (
     _recap_bullets_have_marks,
     _recap_has_header_rule,
@@ -152,7 +153,7 @@ def test_recap_rebuilds_to_kaagaz_header_layout_with_border() -> None:
     assert _recap_bullets_have_marks(page)
     assert _recap_has_header_rule(page)
     rules = _header_rules(page)
-    assert any(abs(y - 109.0) <= 1 and left <= 54 and right >= page.rect.width - 54 for y, left, right in rules)
+    assert any(105 <= y <= 122 and left <= 54 and right >= page.rect.width - 54 for y, left, right in rules)
 
 
 def test_recap_rebuild_drops_match_bullet_when_rule_says_remove() -> None:
@@ -264,6 +265,81 @@ def test_recap_rebuild_preserves_only_bullets_selected_by_keep_remove_rules() ->
     assert "no employee will be considered highly compensated" not in text
     assert "Your plan is designed to allow participants" in text
     assert _recap_bullets_have_marks(doc[0])
+
+
+def test_recap_rebuild_uses_moa_body_font_and_space_under_header_rule() -> None:
+    doc = _recap(bullets=False)
+    apply_recap_bullets(doc, [])
+    page = doc[0]
+
+    important = next(
+        line
+        for block in page.get_text("dict")["blocks"] if block.get("type") == 0
+        for line in block.get("lines", [])
+        if "".join(span.get("text", "") for span in line.get("spans", [])).strip().lower()
+        == "important information"
+    )
+    body = next(
+        (line, span)
+        for block in page.get_text("dict")["blocks"] if block.get("type") == 0
+        for line in block.get("lines", [])
+        for span in line.get("spans", [])
+        if "Based on the definition" in span.get("text", "")
+    )
+    rules = _header_rules(page)
+    rule_y = next(y for y, left, right in rules if right - left > 200)
+
+    assert abs(rule_y - RECAP_HEADER_RULE_Y) <= 1
+    # Clear gap from header rule down to Important Information.
+    assert important["bbox"][1] - rule_y >= 12
+    assert abs(float(important["spans"][0]["origin"][1]) - RECAP_IMPORTANT_Y) <= 1
+    # Body type is larger than the old 8pt rebuild, with room under Important Information.
+    assert abs(float(body[1]["size"]) - RECAP_BODY_SIZE) <= 0.3
+    assert body[0]["bbox"][1] - important["bbox"][3] >= 8
+
+
+def test_recap_safe_harbor_bullet_uses_bold_and_italic_runs() -> None:
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((239, 48), "YEAR END RECAP", fontsize=13, fontname="hebo")
+    page.insert_text((54, 123), "Important Information", fontsize=11, fontname="hebo")
+    page.insert_textbox(
+        fitz.Rect(62, 140, 540, 260),
+        "Based on the definition of Highly Compensated Employee (HCE), the employee(s) listed "
+        "on the Future HCE Determination Report are considered highly compensated for the Plan "
+        "Year beginning in 2026. The maximum average deferral rate for the Highly Compensated "
+        "Employee(s) for the 2026 plan year is not limited as long as the plan follows the rules "
+        "and regulations of the Safe Harbor Plan. Note: The actual amount an employee can defer "
+        "in 2026 is the lesser of $24,500 or the annual addition limit.",
+        fontsize=8,
+    )
+    apply_recap_bullets(
+        doc,
+        [
+            RuleDecision(rule_id="Y4", section="safe harbor", action="keep", reason="SH"),
+            RuleDecision(rule_id="Y2", section="prior", action="remove", reason="SH"),
+        ],
+        "401k",
+    )
+    fonts = {
+        str(span.get("font") or "")
+        for block in doc[0].get_text("dict")["blocks"] if block.get("type") == 0
+        for line in block.get("lines", [])
+        for span in line.get("spans", [])
+        if span.get("text", "").strip()
+    }
+    assert any("Bold" in font for font in fonts)
+    assert any("Oblique" in font or "Italic" in font for font in fonts)
+    assert abs(
+        next(
+            float(span["size"])
+            for block in doc[0].get_text("dict")["blocks"] if block.get("type") == 0
+            for line in block.get("lines", [])
+            for span in line.get("spans", [])
+            if "Based on the definition" in span.get("text", "")
+        )
+        - RECAP_BODY_SIZE
+    ) <= 0.3
 
 
 def test_recap_parser_preserves_currency_lines_at_line_start() -> None:

@@ -742,10 +742,10 @@ def _is_recap_text(text: str) -> bool:
 
 
 def _strip_im_fragments(doc: fitz.Document) -> None:
-    """Remove the clipped 'IM' left when IMMEDIATE is only partly covered.
+    """Remove clipped IMMEDIATE leftovers such as IM, MEDIATE, or a lone I/i.
 
     Purpose:
-        Remove the clipped 'IM' left when IMMEDIATE is only partly covered.
+        Remove clipped IMMEDIATE leftovers such as IM, MEDIATE, or a lone I/i.
 
     Args:
         doc: Open PDF. Must not be closed.
@@ -766,10 +766,10 @@ def _strip_im_fragments(doc: fitz.Document) -> None:
         boxes = [
             fitz.Rect(word[:4])
             for word in (page.get_text("words") or [])
-            if str(word[4]).upper() in {"IM", "MEDIATE"}
+            if str(word[4]).upper() in {"IM", "MEDIATE", "I"}
         ]
         if boxes:
-            _apply_redact_boxes(page, boxes)
+            _apply_redact_boxes(page, [_pad_rect(box, page) for box in boxes])
 
 
 def _is_noise_text(text: str) -> bool:
@@ -1234,11 +1234,92 @@ def _pull_kept_action_forward(doc: fitz.Document) -> None:
         doc.delete_page(number)
 
 
+def _action_heading_lines(page: fitz.Page) -> list[dict]:
+    """Collect Action Required heading lines with exact ink bounds.
+
+    Word y0 values often differ by a fraction of a point after restack, so grouping
+    by ``round(y0)`` splits one phrase and draws a short or long underline. Prefer
+    PDF text lines, then fall back to a tolerant y-cluster of words.
+    """
+    heading_re = re.compile(
+        r"^(ACTION REQUIRED|IMMEDIATE ACTION REQUIRED|ATTENTION REQUIRED|"
+        r"NO IMMEDIATE ACTION IS REQUIRED(?: AT THIS TIME)?)\s*$",
+        re.I,
+    )
+    found: list[dict] = []
+    for block in page.get_text("dict").get("blocks") or []:
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines") or []:
+            spans = [span for span in line.get("spans") or [] if str(span.get("text") or "").strip()]
+            if not spans:
+                continue
+            text = "".join(str(span.get("text") or "") for span in spans).strip()
+            text = re.sub(r"\s+", " ", text)
+            if not heading_re.match(text):
+                continue
+            x0 = min(float(span["bbox"][0]) for span in spans)
+            y0 = min(float(span["bbox"][1]) for span in spans)
+            x1 = max(float(span["bbox"][2]) for span in spans)
+            y1 = max(float(span["bbox"][3]) for span in spans)
+            found.append({"text": text, "x0": x0, "y0": y0, "x1": x1, "y1": y1})
+    if found:
+        return found
+
+    # Fallback: cluster words whose tops are within 2pt.
+    words = sorted(page.get_text("words") or [], key=lambda item: (float(item[1]), float(item[0])))
+    clusters: list[list[tuple]] = []
+    for word in words:
+        if clusters and abs(float(word[1]) - float(clusters[-1][0][1])) <= 2.0:
+            clusters[-1].append(word)
+        else:
+            clusters.append([word])
+    for group in clusters:
+        group.sort(key=lambda item: float(item[0]))
+        text = re.sub(r"\s+", " ", " ".join(str(item[4]) for item in group)).strip()
+        if not heading_re.match(text):
+            continue
+        found.append(
+            {
+                "text": text,
+                "x0": float(group[0][0]),
+                "y0": min(float(item[1]) for item in group),
+                "x1": float(group[-1][2]),
+                "y1": max(float(item[3]) for item in group),
+            }
+        )
+    return found
+
+
+def _short_rules_near_heading(page: fitz.Page, top: float, bottom: float, x0: float, x1: float) -> list[fitz.Rect]:
+    """Short horizontal rules near a heading, including ones that are too long or too short."""
+    boxes: list[fitz.Rect] = []
+    for drawing in page.get_drawings():
+        if drawing.get("color") in {(1, 1, 1), (1.0, 1.0, 1.0)}:
+            continue
+        for item in drawing.get("items") or []:
+            if not item or item[0] != "l" or len(item) < 3:
+                continue
+            start, end = fitz.Point(item[1]), fitz.Point(item[2])
+            if abs(start.y - end.y) > 1.5:
+                continue
+            y = start.y
+            if y < top - 1.0 or y > bottom + 4.0:
+                continue
+            if abs(end.x - start.x) >= page.rect.width * 0.7:
+                continue
+            left, right = sorted((start.x, end.x))
+            if right < x0 - 8 or left > x1 + 40:
+                continue
+            boxes.append(fitz.Rect(left - 1, y - 1.5, right + 1, y + 1.5))
+    return boxes
+
+
 def _redraw_action_rules(page: fitz.Page) -> None:
-    """Put the header rule and heading underlines back after the text is packed.
+    """Put Action Required underlines back after packing, matching each phrase width.
 
     Purpose:
-        Put the header rule and heading underlines back after the text is packed.
+        Put Action Required underlines back after packing, matching each phrase width.
 
     Args:
         page: One PDF page.
@@ -1253,38 +1334,34 @@ def _redraw_action_rules(page: fitz.Page) -> None:
         _redraw_action_rules(page) returns None.
 
     Side effects:
-        None. This function only reads data and returns a value.
+        Changes drawings on the page.
     """
-    lines: dict[int, list[tuple]] = {}
-    for word in page.get_text("words") or []:
-        lines.setdefault(round(word[1]), []).append(word)
-    for group in lines.values():
-        group.sort(key=lambda item: item[0])
-        text = " ".join(item[4] for item in group)
-        top = min(item[1] for item in group)
-        bottom = max(item[3] for item in group)
-        # Sit just under the glyph box so the rule cannot cut through the letters.
+    headings = _action_heading_lines(page)
+    if not headings:
+        return
+    # Delete leftover short rules first so a too-long or too-short source underline
+    # cannot survive under the replacement.
+    wipe: list[fitz.Rect] = []
+    planned: list[tuple[float, float, float, tuple[float, float, float]]] = []
+    for heading in headings:
+        text = heading["text"]
+        x0 = float(heading["x0"])
+        x1 = float(heading["x1"])
+        top = float(heading["y0"])
+        bottom = float(heading["y1"])
         y = bottom + 2.0
-        if re.fullmatch(r"\d{5,7}", text):
-            continue
-        if not re.match(
-            r"^(ACTION REQUIRED|IMMEDIATE ACTION REQUIRED|ATTENTION REQUIRED|NO IMMEDIATE ACTION IS REQUIRED)",
-            text,
-        ):
-            continue
-        color = (0, 0.45, 0.15) if text.startswith("NO IMMEDIATE") else (0, 0, 0)
-        if text.startswith("IMMEDIATE ACTION"):
+        upper = text.upper()
+        color = (0, 0.45, 0.15) if upper.startswith("NO IMMEDIATE") else (0, 0, 0)
+        if upper.startswith("IMMEDIATE ACTION"):
             color = (0.8, 0, 0)
-        # Cover any leftover rule that still cuts through this heading.
-        _cover_rules_through_band(page, top, y, group[0][0], group[-1][2])
-        if _has_horizontal_rule(page, y, group[0][0], group[-1][2]):
-            continue
-        page.draw_line(
-            fitz.Point(group[0][0], y),
-            fitz.Point(group[-1][2], y),
-            color=color,
-            width=0.8,
-        )
+        wipe.extend(_short_rules_near_heading(page, top, y, x0, x1))
+        planned.append((x0, x1, y, color))
+    if wipe:
+        for rect in wipe:
+            page.add_redact_annot(rect, fill=(1, 1, 1))
+        page.apply_redactions(images=0, graphics=2)
+    for x0, x1, y, color in planned:
+        page.draw_line(fitz.Point(x0, y), fitz.Point(x1, y), color=color, width=0.8)
 
 
 def _has_horizontal_rule(page: fitz.Page, y: float, x0: float, x1: float) -> bool:
@@ -1783,6 +1860,8 @@ def apply_recap_bullets(
     if not specs:
         return []
     remove_ids = {item.rule_id for item in decisions if item.action == "remove"}
+    keep_ids = {item.rule_id for item in decisions if item.action == "keep"}
+    wanted_exclusive = _preferred_exclusive_recap(keep_ids)
     nhce = _adp_nhce_percent(doc)
     removed: list[str] = []
     for page in doc:
@@ -1792,32 +1871,95 @@ def apply_recap_bullets(
         header, bullets = _split_recap(original)
         kept: list[str] = []
         dropped: list[str] = []
+        content_changed = False
+        have_exclusive = False
         for bullet in bullets:
+            cleaned = _normalize_recap_bullet_spaces(bullet)
+            if cleaned != bullet:
+                content_changed = True
+            bullet = cleaned
             spec = _matching_recap(bullet, specs)
+            rule_id = str(spec["id"]) if spec else None
+            exclusive_like = rule_id in _EXCLUSIVE_RECAP or _looks_like_exclusive_hce(bullet)
             if spec is None and re.search(r"(?:^|\s)%(?:\s|$)", bullet):
                 dropped.append(bullet)
                 continue
-            if spec and str(spec["id"]) in remove_ids:
-                if spec["id"] not in removed:
-                    removed.append(str(spec["id"]))
+            if rule_id and rule_id in remove_ids:
+                if rule_id not in removed:
+                    removed.append(rule_id)
+                # Source packages often keep PRIOR/CURRENT wording even for Safe Harbor.
+                # Swap the removed exclusive bullet into the kept exclusive wording.
+                if (
+                    exclusive_like
+                    and wanted_exclusive
+                    and wanted_exclusive not in remove_ids
+                    and not have_exclusive
+                ):
+                    swapped = _canonical_exclusive_recap(wanted_exclusive, bullet)
+                    if wanted_exclusive == "Y2":
+                        swapped = _fill_prior_rates(swapped, nhce)
+                    kept.append(swapped)
+                    have_exclusive = True
+                    content_changed = True
                 dropped.append(bullet)
                 continue
-            if spec and str(spec["id"]) == "Y2":
-                bullet = _fill_prior_rates(bullet, nhce)
+            if (
+                exclusive_like
+                and wanted_exclusive
+                and wanted_exclusive not in remove_ids
+                and rule_id != wanted_exclusive
+            ):
+                # Clipped source text may not hit YAML matches; still replace with the
+                # kept exclusive wording so blank "%"/prior-year leftovers disappear.
+                if not have_exclusive:
+                    swapped = _canonical_exclusive_recap(wanted_exclusive, bullet)
+                    if wanted_exclusive == "Y2":
+                        swapped = _fill_prior_rates(swapped, nhce)
+                    kept.append(swapped)
+                    have_exclusive = True
+                    content_changed = True
+                if rule_id and rule_id not in removed:
+                    removed.append(rule_id)
+                dropped.append(bullet)
+                continue
+            if exclusive_like:
+                if have_exclusive:
+                    dropped.append(bullet)
+                    continue
+                have_exclusive = True
+            if rule_id == "Y2":
+                filled = _fill_prior_rates(bullet, nhce)
+                if filled != bullet:
+                    content_changed = True
+                bullet = filled
             kept.append(bullet)
+        if wanted_exclusive and wanted_exclusive not in remove_ids and not have_exclusive:
+            # Exclusive keep-rule matched, but the page never had Future-HCE wording.
+            sample = next((item for item in bullets if item), "")
+            injected = _canonical_exclusive_recap(wanted_exclusive, sample)
+            if wanted_exclusive == "Y2":
+                injected = _fill_prior_rates(injected, nhce)
+            kept.insert(0, injected)
+            content_changed = True
         # In-place redaction of dropped bullets leaves large white gaps (Kaagaz page 3
-        # vs packed page 4). Always rebuild whenever anything was removed, when the
-        # header/bullet columns do not already match the MOA layout, or when kept
-        # bullets are still spaced with large holes.
-        if not dropped and _recap_layout_matches(page) and not _recap_has_sparse_bullets(page):
+        # vs packed page 4). Always rebuild whenever anything was removed, when rates
+        # or exclusive wording changed, when the header/bullet columns do not already
+        # match the MOA layout, or when kept bullets are still spaced with large holes.
+        if (
+            not dropped
+            and not content_changed
+            and _recap_layout_matches(page)
+            and not _recap_has_sparse_bullets(page)
+        ):
             continue
         header_lines = [line.strip() for line in header.splitlines() if line.strip()]
         if not header_lines:
             header_lines = ["Important Information"]
-        # Full-page wipe without a lasting white overlay (that overlay can hide the
-        # header rule redrawn by write_recap_page in some viewers).
+        # Full-page wipe. Long source insert_text runs can leave clipped leftovers if
+        # only redaction runs, so paint a white base before redrawing the MOA layout.
         page.add_redact_annot(page.rect, fill=(1, 1, 1))
         page.apply_redactions(images=0, graphics=1)
+        page.draw_rect(page.rect, color=(1, 1, 1), fill=(1, 1, 1), width=0)
         from services.package_builder import write_recap_page
 
         number = _recap_page_number(original)
@@ -1855,7 +1997,8 @@ def _recap_has_header_rule(page: fitz.Page) -> bool:
             if abs(start.y - end.y) > 1.5:
                 continue
             left, right = sorted((start.x, end.x))
-            if abs(start.y - 109.0) <= 3 and left <= 56 and right >= page.rect.width - 56:
+            # Accept either legacy (109) or current MOA (118) header-rule placement.
+            if 105 <= ((start.y + end.y) / 2) <= 122 and left <= 56 and right >= page.rect.width - 56:
                 return True
     return False
 
@@ -2025,6 +2168,98 @@ def _adp_nhce_percent(doc: fitz.Document) -> float | None:
         if match:
             return float(match.group(1))
     return None
+
+
+_EXCLUSIVE_RECAP = ("Y2", "Y3", "Y4", "Y5")
+_EXCLUSIVE_RECAP_TEMPLATES = {
+    "Y2": (
+        "Based on the definition of Highly Compensated Employee (HCE), the employee(s) listed on the "
+        "Future HCE Determination Report are considered highly compensated for the Plan Year beginning "
+        "in 2026. The maximum average deferral rate for the Highly Compensated Employee(s) for the 2026 "
+        "plan year is % based on the average deferral rate for your Nonhighly Compensated Employees (NHCE) "
+        "for 2025 of %. This rate is determined using the \"prior year data\" method. Please communicate "
+        "the maximum deferral percentage to affected employees. Note: the actual amount an employee can "
+        "defer in 2026 is the lesser of the average deferral rate listed, $24,500 or the annual addition "
+        "limit (adjusted for \"catch-up\" contributions, if applicable)."
+    ),
+    "Y3": (
+        "Based on the definition of Highly Compensated Employee (HCE), the employee(s) listed on the "
+        "Future HCE Determination Report are considered highly compensated for the Plan Year beginning "
+        "in 2026. The maximum average deferral rate for the Highly Compensated Employee(s) for the 2026 "
+        "plan year is based on the average deferral rate for your Nonhighly Compensated Employees for 2026. "
+        "Note: In addition, the actual amount the employee can defer in 2026 cannot exceed $24,500 or the "
+        "annual addition limit (adjusted for \"catch-up\" contributions, if applicable)."
+    ),
+    "Y4": (
+        "Based on the definition of Highly Compensated Employee (HCE), the employee(s) listed on the "
+        "Future HCE Determination Report are considered highly compensated for the Plan Year beginning "
+        "in 2026. The maximum average deferral rate for the Highly Compensated Employee(s) for the 2026 "
+        "plan year is not limited as long as the plan follows the rules and regulations of the Safe Harbor "
+        "Plan. Note: The actual amount an employee can defer in 2026 is the lesser of $24,500 or the annual "
+        "addition limit (adjusted for \"catch-up\" contributions, if applicable)."
+    ),
+    "Y5": (
+        "Based on the definition of Highly Compensated Employee (HCE), the plan had Highly Compensated "
+        "Employees for the plan year ending December 31, 2025, however, no employee will be considered "
+        "highly compensated for the plan year beginning January 1, 2026. Please communicate to affected "
+        "employees."
+    ),
+}
+
+
+def _preferred_exclusive_recap(keep_ids: set[str]) -> str | None:
+    """Pick the winning Future-HCE / method bullet among kept exclusive ids."""
+    for rule_id in ("Y5", "Y4", "Y2", "Y3"):
+        if rule_id in keep_ids:
+            return rule_id
+    return None
+
+
+def _looks_like_exclusive_hce(bullet: str) -> bool:
+    """True for Future-HCE / method recap wording, even when YAML match text was clipped."""
+    text = (bullet or "").lower()
+    return bool(
+        re.search(r"based on the definition of highly compensated", text)
+        or re.search(r"future hce determination", text)
+        or re.search(r"prior year data", text)
+        or re.search(r"not limited as long as", text)
+        or re.search(r"safe harbor plan", text)
+    )
+
+
+def _normalize_recap_bullet_spaces(bullet: str) -> str:
+    """Collapse broken quote/spacing artifacts left by source PDF extraction."""
+    text = re.sub(r"[\u00b7\u2022\u2219\uf0b7]+", " ", bullet or "")
+    text = re.sub(r"[“”]", '"', text)
+    text = re.sub(r"[‘’]", "'", text)
+    text = re.sub(r"\s+([.,;:])", r"\1", text)
+    text = re.sub(r"(\d)\s+%", r"\1%", text)
+    text = re.sub(r"([(\[])\s+", r"\1", text)
+    text = re.sub(r"\s+([)\]])", r"\1", text)
+    text = re.sub(r"\s{2,}", " ", text)
+    return text.strip()
+
+
+def _adapt_recap_years(template: str, sample: str) -> str:
+    """Map template 2025/2026 placeholders onto years found in the source bullet."""
+    years = sorted({int(value) for value in re.findall(r"\b(20\d{2})\b", sample or "")})
+    if len(years) >= 2:
+        prior, future = years[-2], years[-1]
+    elif len(years) == 1:
+        future = years[0]
+        prior = future - 1
+    else:
+        return template
+    updated = template.replace("2026", "@@F@@").replace("2025", "@@P@@")
+    return updated.replace("@@F@@", str(future)).replace("@@P@@", str(prior))
+
+
+def _canonical_exclusive_recap(rule_id: str, sample: str) -> str:
+    """Build the kept exclusive Year End Recap bullet, preserving source years."""
+    template = _EXCLUSIVE_RECAP_TEMPLATES.get(rule_id)
+    if not template:
+        return _normalize_recap_bullet_spaces(sample)
+    return _normalize_recap_bullet_spaces(_adapt_recap_years(template, sample))
 
 
 def _fill_prior_rates(bullet: str, nhce: float | None) -> str:

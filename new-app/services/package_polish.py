@@ -608,15 +608,17 @@ def normalize_report_layout(doc: fitz.Document) -> list[str]:
                     if start - 1 <= line["bbox"][1] and line["bbox"][3] <= end + 1
                     and 60 <= line["bbox"][0] < 98
                 )
-            # Recap body paragraphs that sit left of the MOA hanging-indent column.
+            # Recap body paragraphs use the hanging-indent column (~62), not the
+            # Important Information / bullet disc edge at x=54.
+            hang_x = 54.0 + 3.6 + 4.5
             for line, text in lines:
                 if not text or text.lower() == "important information":
                     continue
                 if text.upper() == "YEAR END RECAP":
                     continue
                 x = float(line["bbox"][0])
-                if 40 <= x < 54 and float(line["bbox"][1]) > 120:
-                    shifts.append((line, 54.0 - x))
+                if 40 <= x < hang_x - 0.5 and float(line["bbox"][1]) > 120:
+                    shifts.append((line, hang_x - x))
         if re.search(r"\bcensus\b", " ".join(text for _line, text in lines[:8]), re.I):
             shifts.extend(
                 (line, 6.0)

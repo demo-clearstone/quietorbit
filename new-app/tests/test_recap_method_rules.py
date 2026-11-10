@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from models.plan_profile import PlanProfile
 from services.pdf_modifier import _matching_recap, _recap_specs
 from services.plan_config import clear_yaml_cache
@@ -99,6 +101,62 @@ def test_y5_match_does_not_steal_no_hce_y1_bullet() -> None:
     )
     assert _matching_recap(no_hce, specs)["id"] == "Y1"
     assert _matching_recap(current_only, specs)["id"] == "Y5"
+
+
+def test_safe_harbor_plan_name_sets_profile_flag() -> None:
+    from services.plan_profile_service import finalize_profile
+
+    profile = finalize_profile(
+        PlanProfile(
+            plan_type="401k",
+            plan_name="SH 401K PS PLAN FOR EMPLOYEES OF RAINBOW RESOURCE CENTER INC",
+        )
+    )
+    assert profile.safe_harbor is True
+
+
+def test_apply_recap_swaps_prior_bullet_to_safe_harbor_wording() -> None:
+    import fitz
+    from models.review import RuleDecision
+    from services.pdf_modifier import apply_recap_bullets
+
+    prior = (
+        "Based on the definition of Highly Compensated Employee (HCE), the employee(s) listed "
+        "on the Future HCE Determination Report are considered highly compensated for the Plan "
+        "Year beginning in 2026. The maximum average deferral rate for the Highly Compensated "
+        "Employee(s) for the 2026 plan year is % based on the average deferral rate for your "
+        "Nonhighly Compensated Employees (NHCE) for 2025 of %. This rate is determined using "
+        "the \"prior year data\" method."
+    )
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((239, 48), "YEAR END RECAP", fontsize=13, fontname="hebo")
+    page.insert_text((214, 66), "January 1, 2025 - December 31, 2025", fontsize=10)
+    page.insert_text((100, 79), "SH 401K PS PLAN FOR EMPLOYEES OF RAINBOW RESOURCE CENTER INC", fontsize=10)
+    page.insert_text((280, 93), "058865", fontsize=10)
+    page.draw_line(fitz.Point(54, 109), fitz.Point(page.rect.width - 54, 109), width=0.8)
+    page.insert_text((54, 123), "Important Information", fontsize=11, fontname="hebo")
+    page.insert_textbox(fitz.Rect(62, 130, 540, 210), prior, fontsize=8, fontname="helv")
+    page.insert_textbox(
+        fitz.Rect(62, 220, 540, 280),
+        "Your plan is designed to allow participants who were age 50 or older to make catch-up contributions.",
+        fontsize=8,
+        fontname="helv",
+    )
+    decisions = [
+        RuleDecision(rule_id="Y2", section="prior", action="remove", reason="SH"),
+        RuleDecision(rule_id="Y3", section="current", action="remove", reason="SH"),
+        RuleDecision(rule_id="Y4", section="safe harbor", action="keep", reason="SH"),
+        RuleDecision(rule_id="Y6", section="catch-up", action="keep", reason="ok"),
+    ]
+
+    apply_recap_bullets(doc, decisions, "401k")
+
+    text = re.sub(r"\s+", " ", doc[0].get_text("text"))
+    assert "not limited as long as the plan follows the rules and regulations of the Safe Harbor Plan" in text
+    assert "prior year data" not in text
+    assert "is % based" not in text
+    assert "catch-up contributions" in text
 
 
 def test_bullet_matches_are_distinct_for_y2_y3_y4() -> None:
