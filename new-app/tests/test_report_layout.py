@@ -123,6 +123,22 @@ def test_shifts_universal_availability_block_and_nested_bullets() -> None:
     assert round(_line_x(page, "Please contact your local regional office representative to discuss.")) == 83
 
 
+def test_does_not_reshift_ua_columns_already_at_client_x() -> None:
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((40, 50), "YEAR END RECAP", fontsize=12)
+    page.insert_text((83, 120), "UNIVERSAL AVAILABILITY RULE", fontsize=9)
+    page.insert_text((83, 140), "Universal availability body", fontsize=9)
+    page.insert_text((101, 160), "Employees who normally work less than 20 hours", fontsize=9)
+    page.insert_text((83, 180), "If you sponsor a qualified retirement plan", fontsize=9)
+    page.insert_text((83, 195), "Please contact your local regional office representative to discuss.", fontsize=9)
+
+    normalize_report_layout(doc)
+
+    assert round(_line_x(page, "UNIVERSAL AVAILABILITY RULE")) == 83
+    assert round(_line_x(page, "Employees who normally work less than 20 hours")) == 101
+
+
 def test_splits_merged_amount_percent_heading_and_aligns_census_name() -> None:
     doc = fitz.open()
     page = doc.new_page()
@@ -189,7 +205,7 @@ def test_adds_summary_divider_below_header_and_does_not_duplicate_it() -> None:
     rules = [drawing for drawing in page.get_drawings() if drawing["rect"].width > 400 and drawing["rect"].height <= 2]
     assert len(rules) == 1
     rule_y = rules[0]["rect"].y0
-    assert abs(rule_y - 110) <= 1
+    assert abs(rule_y - 109) <= 1
     assert abs(rules[0]["rect"].x0 - 36) <= 1
     assert ensure_summary_heading_rule(doc) == []
     assert len([drawing for drawing in page.get_drawings() if drawing["rect"].width > 400 and drawing["rect"].height <= 2]) == 1
@@ -202,7 +218,18 @@ def test_adds_annual_valuation_header_divider_at_expected_y() -> None:
     assert ensure_summary_heading_rule(doc)
     rules = [drawing for drawing in page.get_drawings() if drawing["rect"].width > 400 and drawing["rect"].height <= 2]
     assert len(rules) == 1
-    assert abs(rules[0]["rect"].y0 - 110) <= 1
+    assert abs(rules[0]["rect"].y0 - 109) <= 1
+
+
+def test_snaps_summary_heading_rule_from_y110_to_y109() -> None:
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((180, 72), "Compliance Testing Summary of Results", fontsize=14, fontname="hebo")
+    page.draw_line(fitz.Point(36, 110), fitz.Point(582, 110), color=(0, 0, 0), width=1)
+    assert ensure_summary_heading_rule(doc)
+    rules = [drawing for drawing in page.get_drawings() if drawing["rect"].width > 400 and drawing["rect"].height <= 2]
+    assert len(rules) == 1
+    assert abs(rules[0]["rect"].y0 - 109) <= 0.75
 
 
 def test_does_not_add_summary_divider_to_other_pages() -> None:

@@ -603,13 +603,19 @@ def normalize_report_layout(doc: fitz.Document) -> list[str]:
             )
             bullet_only = re.compile(r"^[\u2022•\u00b7\u25cf\u25e6\u2219\uf0b7╖■□▪▫*\-·●]+$")
             if start is not None and end is not None:
-                shifts.extend(
-                    (line, 5.0)
-                    for line, text in lines
-                    if start - 1 <= line["bbox"][1] and line["bbox"][3] <= end + 1
-                    and 60 <= line["bbox"][0] < 98
-                    and not bullet_only.match(text.strip())
-                )
+                # Source packages often sit near x=78 / x=96; bump to UA columns (~83/101).
+                # Skip lines already on the client UA columns so a rebuild is not shifted again.
+                for line, text in lines:
+                    if not (start - 1 <= line["bbox"][1] and line["bbox"][3] <= end + 1):
+                        continue
+                    if bullet_only.match(text.strip()):
+                        continue
+                    x = float(line["bbox"][0])
+                    if 60 <= x < 82:
+                        shifts.append((line, 5.0))
+                    elif 90 <= x < 100:
+                        # Nested exclusion text (source ~96 → client ~101).
+                        shifts.append((line, 101.0 - x))
             # Client expected hanging body column is x≈78. Never drag bullet glyphs
             # from the x≈67 column onto the body column.
             hang_x = 78.0
@@ -623,13 +629,14 @@ def normalize_report_layout(doc: fitz.Document) -> list[str]:
                 x = float(line["bbox"][0])
                 if 40 <= x < hang_x - 0.5 and float(line["bbox"][1]) > 120:
                     shifts.append((line, hang_x - x))
-        if re.search(r"\bcensus\b", " ".join(text for _line, text in lines[:8]), re.I):
+        # Census pages may put the plan name in the first lines; search the whole page.
+        if re.search(r"\bcensus\b", page_text, re.I):
             shifts.extend(
                 (line, 6.0)
                 for line, text in lines
                 if text.casefold() == "name"
                 and line["bbox"][1] > 100
-                and abs(line["bbox"][0] - 36) < 0.5
+                and abs(line["bbox"][0] - 36) < 1.0
             )
         action_shifted = False
         if shifts:
@@ -846,11 +853,16 @@ def ensure_summary_heading_rule(doc: fitz.Document) -> list[str]:
         if title_index is None:
             continue
         title_top = float(text_lines[title_index][0]["bbox"][1])
-        # Client expected packages place this divider at y≈110 under the top title block.
+        # Client expected packages place this divider at y≈109 under the top title block.
         if title_top > 120:
             continue
-        y = 110.0
-        if _page_has_full_width_rule(page, y):
+        y = 109.0
+        if _page_has_full_width_rule(page, y, tol=0.75):
+            continue
+        # A rule near y=110 still fails compare against expected y=109 — snap it.
+        if _page_has_full_width_rule(page, y, tol=4.0):
+            _snap_summary_heading_rule(page, y)
+            changed += 1
             continue
         if y < page.rect.y1 - 40:
             page.draw_line(
@@ -861,6 +873,38 @@ def ensure_summary_heading_rule(doc: fitz.Document) -> list[str]:
             )
             changed += 1
     return [f"Added a divider below {changed} Result Summary heading block(s)."] if changed else []
+
+
+def _snap_summary_heading_rule(page: fitz.Page, y: float) -> None:
+    """Replace a near-miss full-width title divider with one exactly at y."""
+    min_width = page.rect.width * 0.65
+    for drawing in page.get_drawings():
+        for item in drawing.get("items") or []:
+            if not item or item[0] != "l" or len(item) < 3:
+                continue
+            start, end = fitz.Point(item[1]), fitz.Point(item[2])
+            if abs(start.y - end.y) > 1.5:
+                continue
+            mid_y = (start.y + end.y) / 2
+            if abs(mid_y - y) > 4.0 or abs(end.x - start.x) < min_width:
+                continue
+            left, right = sorted((start.x, end.x))
+            page.add_redact_annot(
+                fitz.Rect(left - 1, mid_y - 1.5, right + 1, mid_y + 1.5),
+                fill=(1, 1, 1),
+            )
+    # graphics=1 is required to actually erase vector rules.
+    page.apply_redactions(images=0, graphics=1)
+    try:
+        page.clean_contents()
+    except Exception:
+        pass
+    page.draw_line(
+        fitz.Point(36, y),
+        fitz.Point(min(page.rect.width - 30, 582), y),
+        color=(0, 0, 0),
+        width=1,
+    )
 
 
 def normalize_coverage_satisfy_heading(doc: fitz.Document) -> list[str]:

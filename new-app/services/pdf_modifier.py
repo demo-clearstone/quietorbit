@@ -1988,6 +1988,7 @@ def apply_recap_bullets(
             and not content_changed
             and _recap_layout_matches(page)
             and not _recap_has_sparse_bullets(page)
+            and not _recap_needs_ua_nest_rebuild(page)
         ):
             continue
         header_lines = [
@@ -1998,6 +1999,7 @@ def apply_recap_bullets(
         ]
         if not header_lines:
             header_lines = ["Important Information"]
+        kept = _merge_universal_availability_bullets(kept)
         # Full-page wipe. Long source insert_text runs can leave clipped leftovers
         # (and stray bullet glyphs) if only redaction runs.
         page.add_redact_annot(page.rect, fill=(1, 1, 1))
@@ -2012,6 +2014,96 @@ def apply_recap_bullets(
         number = _recap_page_number(original)
         write_recap_page(page, header_lines, kept, number=number, plan_type=plan_type)
     return removed
+
+
+def _strip_recap_bullet_prefix(text: str) -> str:
+    """Remove a leading bullet glyph from a recap bullet string."""
+    return re.sub(
+        r"^(?:[\u2022•\u00b7\u25cf\u25e6\u2219\uf0b7╖■□▪▫*\-·●]+)\s*",
+        "",
+        (text or "").strip(),
+    ).strip()
+
+
+def _is_ua_exclusion_bullet(text: str) -> bool:
+    """True when a bullet is one of the nested Universal Availability exclusions."""
+    clean = _strip_recap_bullet_prefix(text)
+    return bool(
+        re.match(
+            r"^(?:Employees who normally work less than 20 hours|"
+            r"Students performing services at a school|"
+            r"Non-resident aliens with no U\.S\. source income|"
+            r"Employees who are eligible to make elective deferrals|"
+            r"Employees not able to defer \$200)",
+            clean,
+            re.I,
+        )
+    )
+
+
+def _merge_universal_availability_bullets(bullets: list[str]) -> list[str]:
+    """Join UA title/body/exclusion bullets into one block for nested rewrite."""
+    from services.package_builder import _is_ua_recap_body
+
+    merged: list[str] = []
+    index = 0
+    while index < len(bullets):
+        current = (bullets[index] or "").strip()
+        clean = _strip_recap_bullet_prefix(current)
+        title_only = bool(re.fullmatch(r"UNIVERSAL AVAILABILITY RULE", clean, re.I))
+        if title_only or (clean.upper().startswith("UNIVERSAL AVAILABILITY RULE") and len(clean) < 40):
+            parts = [clean if clean.upper().startswith("UNIVERSAL AVAILABILITY") else f"UNIVERSAL AVAILABILITY RULE {clean}"]
+            index += 1
+            if index < len(bullets):
+                nxt = _strip_recap_bullet_prefix(bullets[index])
+                if _is_ua_recap_body(nxt) and not re.fullmatch(r"UNIVERSAL AVAILABILITY RULE", nxt, re.I):
+                    parts.append(nxt)
+                    index += 1
+            while index < len(bullets) and _is_ua_exclusion_bullet(bullets[index]):
+                parts.append(_strip_recap_bullet_prefix(bullets[index]))
+                index += 1
+            merged.append(" ".join(part for part in parts if part).strip())
+            continue
+        if _is_ua_recap_body(clean) and not clean.upper().startswith("UNIVERSAL AVAILABILITY RULE"):
+            parts = [f"UNIVERSAL AVAILABILITY RULE {clean}"]
+            index += 1
+            while index < len(bullets) and _is_ua_exclusion_bullet(bullets[index]):
+                parts.append(_strip_recap_bullet_prefix(bullets[index]))
+                index += 1
+            merged.append(" ".join(parts).strip())
+            continue
+        merged.append(current)
+        index += 1
+    return merged
+
+
+def _recap_needs_ua_nest_rebuild(page: fitz.Page) -> bool:
+    """True when Universal Availability exclusions are flattened instead of nested at x≈101."""
+    found_ua = False
+    has_including = False
+    nest_ok = False
+    nest_start = re.compile(
+        r"^(?:Employees who normally|Students performing|Non-resident aliens|"
+        r"Employees who are eligible|Employees not able to defer)",
+        re.I,
+    )
+    for block in page.get_text("dict").get("blocks", []):
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []):
+            spans = [span for span in line.get("spans", []) if span.get("text", "").strip()]
+            if not spans:
+                continue
+            text = "".join(span.get("text", "") for span in spans).strip()
+            if not text:
+                continue
+            if "UNIVERSAL AVAILABILITY" in text.upper():
+                found_ua = True
+            if re.search(r"including\s*:", text, re.I):
+                has_including = True
+            if nest_start.match(text.lstrip()) and abs(float(line["bbox"][0]) - 101.0) <= 4:
+                nest_ok = True
+    return found_ua and has_including and not nest_ok
 
 
 def _recap_has_sparse_bullets(page: fitz.Page) -> bool:

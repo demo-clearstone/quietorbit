@@ -1227,6 +1227,89 @@ def _write_recap_bullet_body(
     return y
 
 
+RECAP_UA_TITLE_X = 83.0
+RECAP_UA_BODY_X = 83.0
+RECAP_UA_NEST_BULLET_X = 83.0
+RECAP_UA_NEST_TEXT_X = 101.0
+
+
+def _is_ua_recap_body(body: str) -> bool:
+    """True when this recap bullet is the 403(b) Universal Availability block."""
+    text = (body or "").strip()
+    if not text:
+        return False
+    upper = text.upper()
+    return upper.startswith("UNIVERSAL AVAILABILITY") or text.lower().startswith('the "universal availability"') or text.lower().startswith("the 'universal availability'") or text.lower().startswith("the universal availability")
+
+
+def _split_ua_recap_body(body: str) -> tuple[str, list[str]]:
+    """Return (intro_paragraph, nested_exclusion_lines) for a UA bullet."""
+    text = re.sub(r"\s+", " ", (body or "").strip())
+    text = re.sub(r"\belection\s+data\s+At\b", "election annually At", text, flags=re.I)
+    text = re.sub(r"^UNIVERSAL AVAILABILITY RULE\s*", "", text, flags=re.I).strip()
+    marker = re.search(r"\bincluding\s*:\s*", text, re.I)
+    if not marker:
+        return text, []
+    intro = text[: marker.end()].strip()
+    rest = text[marker.end() :].strip()
+    exclusions: list[str] = []
+    # Split the flattened exclusion list back into the MOA nested bullets.
+    pattern = re.compile(
+        r"(?=Employees who normally work less than 20 hours per week|"
+        r"Students performing services at a school, college or university|"
+        r"Non-resident aliens with no U\.S\. source income|"
+        r"Employees who are eligible to make elective deferrals under another|"
+        r"Employees not able to defer \$200 during the plan year)",
+        re.I,
+    )
+    parts = [part.strip(" ;") for part in pattern.split(rest) if part and part.strip(" ;")]
+    if len(parts) <= 1 and rest:
+        # Fallback: keep one nested line so layout still has a child bullet.
+        return intro, [rest]
+    return intro, parts
+
+
+def _write_ua_recap_section(
+    page: fitz.Page,
+    body: str,
+    y: float,
+    size: float,
+    leading: float,
+) -> float:
+    """Draw the Universal Availability block with title + nested exclusions (client layout)."""
+    intro, exclusions = _split_ua_recap_body(body)
+    page.insert_text(
+        (RECAP_BULLET_X, y),
+        "·",
+        fontsize=RECAP_BULLET_SIZE,
+        fontname="helv",
+        color=_BLACK,
+    )
+    page.insert_text(
+        (RECAP_UA_TITLE_X, y),
+        "UNIVERSAL AVAILABILITY RULE",
+        fontsize=size,
+        fontname="hebo",
+        color=_BLACK,
+    )
+    y += leading + 2
+    width = max(320.0, page.rect.width - RECAP_UA_BODY_X - 36)
+    if intro:
+        y = _write_recap_bullet_body(page, intro, RECAP_UA_BODY_X, y, size, leading, width)
+    nest_width = max(280.0, page.rect.width - RECAP_UA_NEST_TEXT_X - 36)
+    for item in exclusions:
+        page.insert_text(
+            (RECAP_UA_NEST_BULLET_X, y),
+            "·",
+            fontsize=RECAP_BULLET_SIZE,
+            fontname="helv",
+            color=_BLACK,
+        )
+        y = _write_recap_bullet_body(page, item, RECAP_UA_NEST_TEXT_X, y, size, leading, nest_width)
+        y += 2
+    return y
+
+
 def write_recap_page(
     page: fitz.Page,
     header_lines: list[str],
@@ -1323,6 +1406,10 @@ def write_recap_page(
     for bullet in bullets:
         body = re.sub(r"^(?:[\u2022•\u00b7\u25cf\u25e6\u2219\uf0b7╖■□▪▫*?\-]\s*)+", "", bullet).strip()
         if not body:
+            continue
+        if _is_ua_recap_body(body):
+            y = _write_ua_recap_section(page, body, y, size, leading)
+            y += RECAP_BULLET_GAP
             continue
         # Helvetica maps several bullet codepoints to ·; x/size still match compare.
         page.insert_text(

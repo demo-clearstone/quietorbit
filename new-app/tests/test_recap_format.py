@@ -118,6 +118,64 @@ def test_recap_rebuild_restores_bullets_and_hanging_indent_when_missing() -> Non
     assert "Based on the definition" in first_text
 
 
+def test_merge_universal_availability_absorbs_exclusion_bullets() -> None:
+    from services.pdf_modifier import _merge_universal_availability_bullets
+
+    merged = _merge_universal_availability_bullets(
+        [
+            "UNIVERSAL AVAILABILITY RULE",
+            'The "universal availability" generally requires everyone must be able to defer. Certain employees may be excluded, including:',
+            "Employees who normally work less than 20 hours per week*",
+            "Students performing services at a school, college or university*",
+            "If you sponsor a qualified retirement plan not administered by Mutual of America, please provide your service provider",
+        ]
+    )
+    assert len(merged) == 2
+    assert merged[0].startswith("UNIVERSAL AVAILABILITY RULE")
+    assert "Employees who normally work less than 20 hours per week*" in merged[0]
+    assert "Students performing services at a school, college or university*" in merged[0]
+    assert merged[1].startswith("If you sponsor")
+
+
+def test_recap_writes_universal_availability_nested_layout() -> None:
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    body = (
+        'UNIVERSAL AVAILABILITY RULE The "universal availability" generally requires everyone must be able to defer. '
+        "There is no age or service requirement permitted. To satisfy universal availability, all employees must have "
+        '"effective opportunity" to make this deferral election data At least once during a plan year the plan must '
+        "provide an employee with an effective opportunity. Certain employees may be excluded, including: "
+        "Employees who normally work less than 20 hours per week* Students performing services at a school, college or university* "
+        "Non-resident aliens with no U.S. source income Employees who are eligible to make elective deferrals under another "
+        "401(k), 403(b) or 457(b) plan sponsored by the same employer Employees not able to defer $200 during the plan year"
+    )
+    write_recap_page(
+        page,
+        ["YEAR END RECAP", "Important Information"],
+        [body],
+    )
+    text = page.get_text("text")
+    assert "UNIVERSAL AVAILABILITY RULE" in text
+    assert "election annually At" in text
+    assert "election data At" not in text
+    assert "Employees who normally work less than 20 hours per week*" in text
+    title_x = None
+    nest_xs = []
+    for block in page.get_text("dict")["blocks"]:
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []):
+            spans = [span for span in line.get("spans", []) if span.get("text", "").strip()]
+            joined = "".join(span.get("text", "") for span in spans).strip()
+            if joined == "UNIVERSAL AVAILABILITY RULE":
+                title_x = round(spans[0]["bbox"][0])
+                assert "Bold" in spans[0]["font"]
+            if joined.startswith("Employees who normally work less than 20 hours"):
+                nest_xs.append(round(spans[0]["bbox"][0]))
+    assert title_x == 83
+    assert nest_xs and nest_xs[0] == 101
+
+
 def test_recap_header_ignores_stray_bullet_glyphs() -> None:
     doc = fitz.open()
     page = doc.new_page(width=612, height=792)
