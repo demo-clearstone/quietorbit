@@ -99,7 +99,9 @@ def apply_decisions(
         for page in doc:
             text = page.get_text("text") or ""
             if re.search(r"annual valuation report|immediate action required|attention required|no immediate action", text, re.I):
-                _redraw_action_rules(page)
+                # Do not invent plain ACTION / NO IMMEDIATE underlines — keep source
+                # borders. Only restore failure-heading rules after restack.
+                _redraw_action_rules(page, only_failure=True)
     return removed
 
 
@@ -969,23 +971,15 @@ def _action_column_x(page: fitz.Page) -> float:
 
 
 def _write_action_heading(page: fitz.Page, cursor: float, x: float | None = None) -> float:
-    """Write the ACTION REQUIRED heading. ``cursor`` is the text baseline."""
+    """Write the ACTION REQUIRED heading. ``cursor`` is the text baseline.
+
+    Does not invent an underline — source packages vary, and redrawing a rule
+    here makes ACTION borders diverge from the source PDF.
+    """
     left = 54.0 if x is None else float(x)
     page.insert_text((left, cursor), "ACTION REQUIRED", fontsize=11, fontname="hebo", color=(0, 0, 0))
-    width = fitz.get_text_length("ACTION REQUIRED", fontname="hebo", fontsize=11)
-    # Place the rule under the glyph box (baseline + descent), not through the letters.
-    underline_y = cursor + 4
-    for word in page.get_text("words") or []:
-        if abs(float(word[0]) - left) < 2 and str(word[4]).upper() == "ACTION":
-            underline_y = max(underline_y, float(word[3]) + 2)
-            break
-    page.draw_line(
-        fitz.Point(left, underline_y),
-        fitz.Point(left + width, underline_y),
-        color=(0, 0, 0),
-        width=0.8,
-    )
-    return underline_y + 18
+    # Approximate next-cursor below the heading ink.
+    return cursor + 18
 
 
 def _short_rule_boxes_below(page: fitz.Page, below_y: float) -> list[fitz.Rect]:
@@ -1353,7 +1347,7 @@ def _short_rules_near_heading(page: fitz.Page, top: float, bottom: float, x0: fl
     return boxes
 
 
-def _redraw_action_rules(page: fitz.Page) -> None:
+def _redraw_action_rules(page: fitz.Page, *, only_failure: bool = False) -> None:
     """Put Action Required underlines back after packing, matching each phrase width.
 
     Purpose:
@@ -1361,6 +1355,8 @@ def _redraw_action_rules(page: fitz.Page) -> None:
 
     Args:
         page: One PDF page.
+        only_failure: When True, only IMMEDIATE/ATTENTION headings get underlines
+            (plain ACTION / NO IMMEDIATE are wiped and left without rules).
 
     Returns:
         None.
@@ -1389,10 +1385,13 @@ def _redraw_action_rules(page: fitz.Page) -> None:
         bottom = float(heading["y1"])
         y = bottom + 2.0
         upper = text.upper()
+        is_failure = upper.startswith("IMMEDIATE ACTION") or upper.startswith("ATTENTION REQUIRED")
+        wipe.extend(_short_rules_near_heading(page, top, y, x0, x1))
+        if only_failure and not is_failure:
+            continue
         color = (0, 0.45, 0.15) if upper.startswith("NO IMMEDIATE") else (0, 0, 0)
         if upper.startswith("IMMEDIATE ACTION"):
             color = (0.8, 0, 0)
-        wipe.extend(_short_rules_near_heading(page, top, y, x0, x1))
         planned.append((x0, x1, y, color))
     if wipe:
         for rect in wipe:
@@ -1979,17 +1978,10 @@ def apply_recap_bullets(
                 injected = _fill_prior_rates(injected, nhce)
             kept.insert(0, injected)
             content_changed = True
-        # In-place redaction of dropped bullets leaves large white gaps (Kaagaz page 3
-        # vs packed page 4). Always rebuild whenever anything was removed, when rates
-        # or exclusive wording changed, when the header/bullet columns do not already
-        # match the MOA layout, or when kept bullets are still spaced with large holes.
-        if (
-            not dropped
-            and not content_changed
-            and _recap_layout_matches(page)
-            and not _recap_has_sparse_bullets(page)
-            and not _recap_needs_ua_nest_rebuild(page)
-        ):
+        # Keep the source Year End Recap page when business rules did not change it.
+        # Do not wipe/rebuild just to invent UA nest columns or "MOA" x positions —
+        # that diverges from the source package and breaks compare.
+        if not dropped and not content_changed:
             continue
         header_lines = [
             line.strip()
@@ -2000,8 +1992,7 @@ def apply_recap_bullets(
         if not header_lines:
             header_lines = ["Important Information"]
         kept = _merge_universal_availability_bullets(kept)
-        # Full-page wipe. Long source insert_text runs can leave clipped leftovers
-        # (and stray bullet glyphs) if only redaction runs.
+        # Full-page wipe only when bullets/wording actually changed.
         page.add_redact_annot(page.rect, fill=(1, 1, 1))
         page.apply_redactions(images=0, graphics=1)
         page.draw_rect(page.rect, color=(1, 1, 1), fill=(1, 1, 1), width=0)

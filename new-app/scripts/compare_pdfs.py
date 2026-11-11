@@ -54,17 +54,27 @@ def _norm(text: str) -> str:
 
 
 def _borders(page: fitz.Page) -> list[tuple[int, int, int]]:
-    """Horizontal rules as (y, x0, x1), sorted for stable compare."""
+    """Horizontal rules as (y, x0, x1), sorted for stable compare.
+
+    Includes both stroked lines and thin filled/stroked rectangles (client
+    packages often draw dividers as ``re`` rects rather than ``l`` lines).
+    """
     out: list[tuple[int, int, int]] = []
     for drawing in page.get_drawings():
         for item in drawing.get("items") or []:
-            if not item or item[0] != "l" or len(item) < 3:
+            if not item:
                 continue
-            start, end = fitz.Point(item[1]), fitz.Point(item[2])
-            if abs(start.y - end.y) > 1.5 or abs(start.x - end.x) < 30:
-                continue
-            left, right = sorted((start.x, end.x))
-            out.append((round((start.y + end.y) / 2), round(left), round(right)))
+            if item[0] == "l" and len(item) >= 3:
+                start, end = fitz.Point(item[1]), fitz.Point(item[2])
+                if abs(start.y - end.y) > 1.5 or abs(start.x - end.x) < 30:
+                    continue
+                left, right = sorted((start.x, end.x))
+                out.append((round((start.y + end.y) / 2), round(left), round(right)))
+            elif item[0] == "re" and len(item) >= 2:
+                rect = fitz.Rect(item[1])
+                if rect.width < 30 or rect.height > 2.5:
+                    continue
+                out.append((round((rect.y0 + rect.y1) / 2), round(rect.x0), round(rect.x1)))
     return sorted(set(out))
 
 

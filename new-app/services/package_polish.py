@@ -543,7 +543,12 @@ def _rewrite_adp_acp_phrases(page: fitz.Page) -> bool:
 
 
 def normalize_report_layout(doc: fitz.Document) -> list[str]:
-    """Normalize known text offsets and split merged Amount / % column headings."""
+    """Preserve source ACTION / Year End Recap layout.
+
+    Do not invent ACTION REQUIRED columns/underlines or Recap/UA x-shifts — those
+    vary by source package. Only split merged Amount/% headings and nudge lone
+    census ``Name`` headers when needed.
+    """
     from services.pdf_modifier import _base_font, _rgb
     from services.source_rewrite import _tight_span_rect
 
@@ -551,10 +556,9 @@ def normalize_report_layout(doc: fitz.Document) -> list[str]:
     for page in doc:
         page_text = page.get_text("text") or ""
         # Most pages need no layout fix; skip the expensive dict extract.
-        if not re.search(
-            r"annual valuation report|year end recap|Amount\s{2,}%|\bcensus\b|\bSSN\b",
-            page_text,
-            re.I,
+        if not (
+            re.search(r"Amount\s{2,}%|\bcensus\b|\bSSN\b", page_text, re.I)
+            or re.search(r"(?m)^\s*Name\s*$", page_text)
         ):
             continue
         lines = [
@@ -564,80 +568,14 @@ def normalize_report_layout(doc: fitz.Document) -> list[str]:
             for line in block.get("lines", [])
         ]
         shifts: list[tuple[dict, float]] = []
-        if re.search(r"annual valuation report", page_text, re.I):
-            # Client expected Deerfield/AV packages land ACTION REQUIRED near x≈38.
-            target_action_x = 38.0
-            target_green_x = 39.0
-            for line, text in lines:
-                upper = text.upper()
-                x = float(line["bbox"][0])
-                if upper == "ACTION REQUIRED" or upper.startswith("IMMEDIATE ACTION REQUIRED") or upper.startswith(
-                    "ATTENTION REQUIRED"
-                ):
-                    delta = target_action_x - x
-                    if abs(delta) >= 0.5 and abs(delta) <= 24:
-                        shifts.append((line, delta))
-                elif upper == "NO IMMEDIATE ACTION IS REQUIRED AT THIS TIME":
-                    delta = target_green_x - x
-                    if abs(delta) >= 0.5 and abs(delta) <= 24:
-                        shifts.append((line, delta))
-        if re.search(r"year end recap", page_text, re.I):
-            for line, text in lines:
-                x = float(line["bbox"][0])
-                if text.lower() == "important information" and abs(x - 42) >= 0.5 and abs(x - 42) <= 20:
-                    shifts.append((line, 42.0 - x))
-            start = next(
-                (line["bbox"][1] for line, text in lines if "UNIVERSAL AVAILABILITY RULE" in text.upper()),
-                None,
-            )
-            end = next(
-                (
-                    line["bbox"][3]
-                    for line, text in lines
-                    if start is not None
-                    and line["bbox"][1] >= start
-                    and "representative to discuss" in text.lower()
-                ),
-                None,
-            )
-            bullet_only = re.compile(r"^[\u2022•\u00b7\u25cf\u25e6\u2219\uf0b7╖■□▪▫*\-·●]+$")
-            if start is not None and end is not None:
-                # Source packages often sit near x=78 / x=96; bump to UA columns (~83/101).
-                # Skip lines already on the client UA columns so a rebuild is not shifted again.
-                for line, text in lines:
-                    if not (start - 1 <= line["bbox"][1] and line["bbox"][3] <= end + 1):
-                        continue
-                    if bullet_only.match(text.strip()):
-                        continue
-                    x = float(line["bbox"][0])
-                    if 60 <= x < 82:
-                        shifts.append((line, 5.0))
-                    elif 90 <= x < 100:
-                        # Nested exclusion text (source ~96 → client ~101).
-                        shifts.append((line, 101.0 - x))
-            # Client expected hanging body column is x≈78. Never drag bullet glyphs
-            # from the x≈67 column onto the body column.
-            hang_x = 78.0
-            for line, text in lines:
-                if not text or text.lower() == "important information":
-                    continue
-                if text.upper() == "YEAR END RECAP":
-                    continue
-                if bullet_only.match(text.strip()):
-                    continue
-                x = float(line["bbox"][0])
-                if 40 <= x < hang_x - 0.5 and float(line["bbox"][1]) > 120:
-                    shifts.append((line, hang_x - x))
-        # Census / participant listing pages may title with the plan name (no "census" word).
-        if re.search(r"\bcensus\b", page_text, re.I) or re.search(r"\bSSN\b", page_text):
-            shifts.extend(
-                (line, 6.0)
-                for line, text in lines
-                if text.casefold() == "name"
-                and line["bbox"][1] > 100
-                and abs(line["bbox"][0] - 36) < 1.5
-            )
-        action_shifted = False
+        # Lone "Name" column header on participant listings (often plan-titled, no "census"/"SSN").
+        shifts.extend(
+            (line, 42.0 - float(line["bbox"][0]))
+            for line, text in lines
+            if text.casefold() == "name"
+            and float(line["bbox"][1]) > 80
+            and 33.0 <= float(line["bbox"][0]) <= 39.0
+        )
         if shifts:
             unique = {id(line): (line, delta) for line, delta in shifts}
             for line, _delta in unique.values():
@@ -648,15 +586,6 @@ def normalize_report_layout(doc: fitz.Document) -> list[str]:
                     page.add_redact_annot(fitz.Rect(line["bbox"]), fill=(1, 1, 1))
             page.apply_redactions(images=0, graphics=0)
             for line, delta in unique.values():
-                line_text = "".join(span.get("text", "") for span in line.get("spans", [])).strip()
-                upper = line_text.upper()
-                if (
-                    upper == "ACTION REQUIRED"
-                    or upper.startswith("IMMEDIATE ACTION REQUIRED")
-                    or upper.startswith("ATTENTION REQUIRED")
-                    or upper == "NO IMMEDIATE ACTION IS REQUIRED AT THIS TIME"
-                ):
-                    action_shifted = True
                 for span in line.get("spans", []):
                     text = span.get("text", "")
                     if not text:
@@ -681,19 +610,6 @@ def normalize_report_layout(doc: fitz.Document) -> list[str]:
                             color=_rgb(span.get("color") or 0),
                             overlay=True,
                         )
-            changed = True
-        if action_shifted:
-            # Text moves to x≈40 but old underlines can remain at x≈24. Wipe short
-            # rules under the header, then redraw under the shifted headings.
-            from services.pdf_modifier import (
-                _clear_short_rules_below,
-                _redraw_action_rules,
-                _top_header_rule_y,
-            )
-
-            header_y = _top_header_rule_y(page)
-            _clear_short_rules_below(page, (header_y if header_y is not None else 90.0), redact=True)
-            _redraw_action_rules(page)
             changed = True
 
         for block in page.get_text("dict").get("blocks", []):

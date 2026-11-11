@@ -124,11 +124,6 @@ def apply_cover_date(doc: fitz.Document, marks: list[dict] | None = None) -> lis
     return [f"Cover letter date left as printed (already {today}, or no letter date was found)."]
 
 
-_COVER_WRAP_TAIL = re.compile(
-    r"^(?P<head>.+\bresults of) the$",
-    re.I,
-)
-_COVER_WRAP_NEXT = re.compile(r"^IRS required testing for the plan year\.?\s*$", re.I)
 # Capital "To" only — lowercase "to" coverage headers stay a single phrase.
 _FROM_TO_LINE = re.compile(
     r"^(?P<from>From\s+\d{1,2}/\d{1,2}/\d{2,4})\s+(?P<to>To\s+\d{1,2}/\d{1,2}/\d{2,4})\s*$",
@@ -181,51 +176,15 @@ def _cover_period_date_already_bold(spans: list[dict]) -> bool:
 
 
 def normalize_cover_census_wrap(doc: fitz.Document) -> list[str]:
-    """Break the cover census sentence after 'results of', matching MOA packages."""
+    """Do not rewrite cover wrap/wording.
+
+    Cover letters vary by plan. Moving words across lines based on assumed
+    phrases (``the``, ``IRS``, etc.) can corrupt real content. This pass only
+    bolds the period-ending slash date when that line is already present.
+    """
     if not doc.page_count:
         return []
-    page = doc[0]
-    lines: list[dict] = []
-    for block in page.get_text("dict").get("blocks", []):
-        if block.get("type") != 0:
-            continue
-        for line in block.get("lines", []):
-            spans = [span for span in line.get("spans", []) if span.get("text", "").strip()]
-            text = "".join(span.get("text", "") for span in spans).strip()
-            if text:
-                lines.append({"line": line, "spans": spans, "text": text})
-    lines.sort(key=lambda item: (item["line"]["bbox"][1], item["line"]["bbox"][0]))
     notes: list[str] = []
-    for index, item in enumerate(lines[:-1]):
-        match = _COVER_WRAP_TAIL.match(item["text"])
-        nxt = lines[index + 1]
-        if not match or not _COVER_WRAP_NEXT.match(nxt["text"]):
-            continue
-        head = match.group("head")
-        first_span = item["spans"][0]
-        next_span = nxt["spans"][0]
-        size = float(first_span.get("size") or 10)
-        color = _rgb(first_span.get("color") or 0)
-        first_origin = first_span.get("origin") or (first_span["bbox"][0], first_span["bbox"][3])
-        next_origin = next_span.get("origin") or (next_span["bbox"][0], next_span["bbox"][3])
-        # Tight span boxes only. Line-bbox padding was wiping the body line above
-        # ("We are pleased..." / "qualified retirement...") on real cover letters.
-        page.add_redact_annot(_tight_span_rect(item["spans"]), fill=(1, 1, 1))
-        page.add_redact_annot(_tight_span_rect(nxt["spans"]), fill=(1, 1, 1))
-        page.apply_redactions(images=0, graphics=0)
-        _insert_cover_period_line(page, (float(first_origin[0]), float(first_origin[1])), head, size, color)
-        page.insert_text(
-            (next_origin[0], next_origin[1]),
-            "the IRS required testing for the plan year.",
-            fontsize=float(next_span.get("size") or size),
-            fontname=_base_font(str(next_span.get("font") or ""), int(next_span.get("flags") or 0)),
-            color=_rgb(next_span.get("color") or 0),
-            overlay=True,
-        )
-        notes.append("Cover letter census sentence wrap aligned after 'results of'.")
-        break
-
-    # Even when wrap is already correct, client expected packages bold the slash date.
     page = doc[0]
     targets: list[tuple[list[dict], str, float, float, float, tuple[float, float, float]]] = []
     for block in page.get_text("dict").get("blocks", []):

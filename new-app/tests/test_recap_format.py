@@ -84,38 +84,16 @@ def _header_rules(page: fitz.Page) -> list[tuple[float, float, float]]:
     return rules
 
 
-def test_recap_rebuild_restores_bullets_and_hanging_indent_when_missing() -> None:
+def test_recap_preserves_source_when_no_bullet_rules_change() -> None:
+    """Without keep/remove changes, do not wipe/rebuild inventing MOA layout."""
     doc = _recap(bullets=False)
+    before = doc[0].get_text("text")
     assert not _recap_bullets_have_marks(doc[0])
 
     apply_recap_bullets(doc, [])
 
-    page = doc[0]
-    text = page.get_text("text")
-    assert "Based on the definition of Highly Compensated Employee" in text
-    assert "Your plan is designed to allow participants" in text
-    assert _recap_bullets_have_marks(page)
-    assert _recap_has_header_rule(page)
-    glyphs = [
-        span
-        for block in page.get_text("dict")["blocks"] if block.get("type") == 0
-        for line in block.get("lines", [])
-        for span in line.get("spans", [])
-        if str(span.get("text") or "").strip() in {"•", "·", "╖", "●"} and 60 <= span["bbox"][0] <= 75
-    ]
-    assert len(glyphs) >= 2
-    paragraphs = [
-        (line, "".join(span.get("text", "") for span in line.get("spans", [])).strip())
-        for block in page.get_text("dict")["blocks"] if block.get("type") == 0
-        for line in block.get("lines", [])
-    ]
-    first_line, first_text = next(
-        (line, text)
-        for line, text in paragraphs
-        if "Based on the definition" in text
-    )
-    assert abs(round(first_line["bbox"][0]) - RECAP_BODY_X) <= 2
-    assert "Based on the definition" in first_text
+    assert doc[0].get_text("text") == before
+    assert not _recap_bullets_have_marks(doc[0])
 
 
 def test_merge_universal_availability_absorbs_exclusion_bullets() -> None:
@@ -138,7 +116,12 @@ def test_merge_universal_availability_absorbs_exclusion_bullets() -> None:
 
 
 def test_recap_writes_universal_availability_nested_layout() -> None:
-    from services.package_builder import RECAP_BULLET_SIZE, RECAP_UA_FOLLOWON_BULLET_X, RECAP_UA_NEST_SIZE
+    from services.package_builder import (
+        RECAP_BULLET_SIZE,
+        RECAP_UA_FOLLOWON_BULLET_X,
+        RECAP_UA_NEST_SIZE,
+        RECAP_UA_TITLE_SIZE,
+    )
 
     doc = fitz.open()
     page = doc.new_page(width=612, height=792)
@@ -163,9 +146,11 @@ def test_recap_writes_universal_availability_nested_layout() -> None:
     assert "election data At" not in text
     assert "Employees who normally work less than 20 hours per week*" in text
     title_x = None
+    title_size = None
     nest_xs = []
     nest_sizes = []
     follow_bullet_x = None
+    bullet_sizes = []
     for block in page.get_text("dict")["blocks"]:
         if block.get("type") != 0:
             continue
@@ -174,20 +159,21 @@ def test_recap_writes_universal_availability_nested_layout() -> None:
             joined = "".join(span.get("text", "") for span in spans).strip()
             if joined == "UNIVERSAL AVAILABILITY RULE":
                 title_x = round(spans[0]["bbox"][0])
+                title_size = round(float(spans[0]["size"]), 1)
                 assert "Bold" in spans[0]["font"]
             if joined.startswith("Employees who normally work less than 20 hours"):
                 nest_xs.append(round(spans[0]["bbox"][0]))
                 nest_sizes.append(round(float(spans[0]["size"]), 1))
-            if joined.startswith("If you sponsor a qualified retirement plan"):
-                # Prior line's bullet for follow-on is at x≈72.
-                pass
-            if joined in {"·", "•", "╖"} and abs(float(spans[0]["bbox"][0]) - RECAP_UA_FOLLOWON_BULLET_X) < 1:
-                follow_bullet_x = round(spans[0]["bbox"][0])
-                assert abs(float(spans[0]["size"]) - RECAP_BULLET_SIZE) < 0.2
+            if joined in {"·", "•", "╖"}:
+                bullet_sizes.append(round(float(spans[0]["size"]), 1))
+                if abs(float(spans[0]["bbox"][0]) - RECAP_UA_FOLLOWON_BULLET_X) < 1:
+                    follow_bullet_x = round(spans[0]["bbox"][0])
     assert title_x == 83
+    assert title_size == RECAP_UA_TITLE_SIZE
     assert nest_xs and nest_xs[0] == 101
     assert nest_sizes and nest_sizes[0] == RECAP_UA_NEST_SIZE
     assert follow_bullet_x == 72
+    assert bullet_sizes and all(abs(size - RECAP_BULLET_SIZE) < 0.2 for size in bullet_sizes)
 
 
 def test_recap_header_ignores_stray_bullet_glyphs() -> None:
@@ -235,35 +221,22 @@ def test_recap_with_existing_bullets_is_not_rebuilt_or_changed() -> None:
     assert doc[0].get_text("text") == before
 
 
-def test_recap_rebuilds_to_kaagaz_header_layout_with_border() -> None:
+def test_recap_does_not_rebuild_header_layout_without_content_change() -> None:
     doc = _recap(bullets=True, moa_header=False)
     before = doc[0].get_text("text")
 
     apply_recap_bullets(doc, [])
 
-    page = doc[0]
-    assert page.get_text("text") != before
+    assert doc[0].get_text("text") == before
     title = next(
         span
-        for block in page.get_text("dict")["blocks"] if block.get("type") == 0
+        for block in doc[0].get_text("dict")["blocks"] if block.get("type") == 0
         for line in block.get("lines", [])
         for span in line.get("spans", [])
         if span.get("text", "").strip().upper() == "YEAR END RECAP"
     )
-    important = next(
-        (line, span)
-        for block in page.get_text("dict")["blocks"] if block.get("type") == 0
-        for line in block.get("lines", [])
-        for span in line.get("spans", [])
-        if span.get("text", "").strip().lower() == "important information"
-    )
+    # Source header metrics left alone (fixture uses RECAP_TITLE_SIZE).
     assert abs(float(title["size"]) - RECAP_TITLE_SIZE) <= 0.3
-    assert abs(round(important[0]["bbox"][0]) - RECAP_IMPORTANT_X) <= 1
-    assert abs(float(important[1]["size"]) - RECAP_IMPORTANT_SIZE) <= 0.3
-    assert _recap_bullets_have_marks(page)
-    assert _recap_has_header_rule(page)
-    rules = _header_rules(page)
-    assert any(abs(y - RECAP_HEADER_RULE_Y) <= 2 and left <= 54 and right >= 480 for y, left, right in rules)
 
 
 def test_recap_rebuild_drops_match_bullet_when_rule_says_remove() -> None:
@@ -329,8 +302,8 @@ def test_recap_packs_bullets_after_removals_without_large_gaps() -> None:
     assert _recap_has_header_rule(page)
 
 
-def test_recap_rebuilds_when_bullets_are_already_sparse_without_removals() -> None:
-    """Even with no drop decisions, large holes between bullets must be packed."""
+def test_recap_leaves_sparse_source_spacing_when_no_removals() -> None:
+    """Without rule-driven content changes, keep the source Recap spacing as-is."""
     doc = fitz.open()
     page = doc.new_page()
     page.insert_text((239, 48), "YEAR END RECAP", fontsize=13, fontname="hebo")
@@ -347,7 +320,9 @@ def test_recap_rebuilds_when_bullets_are_already_sparse_without_removals() -> No
         page.draw_oval(fitz.Rect(54, y - 5, 57.6, y - 1.4), color=(0, 0, 0), fill=(0, 0, 0))
         page.insert_text((62, y), text, fontsize=8)
 
+    before = page.get_text("text")
     apply_recap_bullets(doc, [], "401k")
+    assert doc[0].get_text("text") == before
 
     starts = []
     for block in doc[0].get_text("dict")["blocks"]:
@@ -359,7 +334,7 @@ def test_recap_rebuilds_when_bullets_are_already_sparse_without_removals() -> No
                 starts.append(line["bbox"][1])
     starts = sorted(set(round(y) for y in starts))
     assert len(starts) == 3
-    assert max(starts[i + 1] - starts[i] for i in range(len(starts) - 1)) < 40
+    assert max(starts[i + 1] - starts[i] for i in range(len(starts) - 1)) >= 90
 
 
 def test_recap_rebuild_preserves_only_bullets_selected_by_keep_remove_rules() -> None:
@@ -378,8 +353,13 @@ def test_recap_rebuild_preserves_only_bullets_selected_by_keep_remove_rules() ->
 
 
 def test_recap_rebuild_uses_moa_body_font_and_space_under_header_rule() -> None:
-    doc = _recap(bullets=False)
-    apply_recap_bullets(doc, [])
+    """When a remove forces rebuild, rewritten page uses MOA Recap metrics."""
+    doc = _recap(bullets=False, include_match=True)
+    apply_recap_bullets(
+        doc,
+        [RuleDecision(rule_id="Y8", section="Year End Recap, per-payroll match", action="remove", reason="no")],
+        "401k",
+    )
     page = doc[0]
 
     important = next(
@@ -413,7 +393,7 @@ def test_recap_safe_harbor_bullet_uses_bold_and_italic_runs() -> None:
     page.insert_text((239, 48), "YEAR END RECAP", fontsize=13, fontname="hebo")
     page.insert_text((54, 123), "Important Information", fontsize=11, fontname="hebo")
     page.insert_textbox(
-        fitz.Rect(62, 140, 540, 260),
+        fitz.Rect(62, 140, 540, 220),
         "Based on the definition of Highly Compensated Employee (HCE), the employee(s) listed "
         "on the Future HCE Determination Report are considered highly compensated for the Plan "
         "Year beginning in 2026. The maximum average deferral rate for the Highly Compensated "
@@ -422,11 +402,18 @@ def test_recap_safe_harbor_bullet_uses_bold_and_italic_runs() -> None:
         "in 2026 is the lesser of $24,500 or the annual addition limit.",
         fontsize=8,
     )
+    # Extra match bullet forces a rule-driven rebuild while keeping Safe Harbor wording.
+    page.insert_text(
+        (62, 280),
+        "The plan's employer match contribution is calculated on a participant's compensation.",
+        fontsize=8,
+    )
     apply_recap_bullets(
         doc,
         [
             RuleDecision(rule_id="Y4", section="safe harbor", action="keep", reason="SH"),
             RuleDecision(rule_id="Y2", section="prior", action="remove", reason="SH"),
+            RuleDecision(rule_id="Y8", section="match", action="remove", reason="no match"),
         ],
         "401k",
     )

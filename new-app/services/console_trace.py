@@ -66,7 +66,7 @@ _PURPOSE = {
     "services/package_polish.py:drop_brf_pages": "Removing BRF pages from the 401(k) package",
     "services/source_rewrite.py:apply_source_rewrites": "Rewriting dates and other source text",
     "services/source_rewrite.py:apply_cover_date": "Rewriting the cover letter date to today",
-    "services/source_rewrite.py:normalize_cover_census_wrap": "Aligning cover letter census sentence wrap",
+    "services/source_rewrite.py:normalize_cover_census_wrap": "Bolding cover letter period-ending date (no wrap rewrite)",
     "services/source_rewrite.py:normalize_from_to_columns": "Splitting From/To date headers into columns",
     "services/package_polish.py:ensure_summary_heading_rule": "Adding Result Summary / AV header dividers",
     "services/package_polish.py:normalize_coverage_satisfy_heading": "Joining wrapped Coverage Test headings",

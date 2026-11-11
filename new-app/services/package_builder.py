@@ -483,7 +483,7 @@ RECAP_BODY_SIZE = 8.1
 RECAP_BODY_LEADING = 10.0
 RECAP_BODY_X = 78.0
 RECAP_BULLET_X = 67.0
-RECAP_BULLET_SIZE = 8.1
+RECAP_BULLET_SIZE = 7.3
 RECAP_BULLET_GAP = 8.0
 # Expected packages center header lines as if the page were A4-wide (~595pt).
 RECAP_CENTER_WIDTH = 595.28
@@ -1231,6 +1231,7 @@ RECAP_UA_TITLE_X = 83.0
 RECAP_UA_BODY_X = 83.0
 RECAP_UA_NEST_BULLET_X = 83.0
 RECAP_UA_NEST_TEXT_X = 101.0
+RECAP_UA_TITLE_SIZE = 8.8
 RECAP_UA_NEST_SIZE = 8.9
 RECAP_UA_FOLLOWON_BULLET_X = 72.0
 
@@ -1304,7 +1305,7 @@ def _write_ua_recap_section(
     page.insert_text(
         (RECAP_UA_TITLE_X, y),
         "UNIVERSAL AVAILABILITY RULE",
-        fontsize=size,
+        fontsize=RECAP_UA_TITLE_SIZE,
         fontname="hebo",
         color=_BLACK,
     )

@@ -27,33 +27,19 @@ def _line_x(page: fitz.Page, text: str) -> float:
     raise AssertionError(f"line not found: {text}")
 
 
-def test_aligns_action_required_headings() -> None:
+def test_preserves_source_action_required_position_and_underline() -> None:
+    """Do not invent ACTION columns or wipe source underlines."""
     doc = fitz.open()
     page = doc.new_page()
     page.insert_text((36, 100), "Annual Valuation Report", fontsize=12)
-    page.insert_text((36, 130), "ACTION REQUIRED", fontsize=11)
+    page.insert_text((24, 130), "ACTION REQUIRED", fontsize=11)
+    page.draw_line(fitz.Point(24, 134), fitz.Point(158, 134), color=(0, 0, 0), width=0.8)
     page.insert_text((30, 155), "NO IMMEDIATE ACTION IS REQUIRED AT THIS TIME", fontsize=11)
 
     normalize_report_layout(doc)
-    normalize_report_layout(doc)
 
-    assert round(_line_x(page, "ACTION REQUIRED")) == 38
-    assert round(_line_x(page, "NO IMMEDIATE ACTION IS REQUIRED AT THIS TIME")) == 39
-
-
-def test_aligns_client_action_headings_from_x24_to_expected_columns() -> None:
-    doc = fitz.open()
-    page = doc.new_page()
-    page.insert_text((36, 60), "Annual Valuation Report", fontsize=12)
-    page.insert_text((24, 130), "ACTION REQUIRED", fontsize=11)
-    page.insert_text((24, 155), "NO IMMEDIATE ACTION IS REQUIRED AT THIS TIME", fontsize=11)
-    # Leftover underline at the old column; layout shift must redraw it under the new text.
-    page.draw_line(fitz.Point(24, 134), fitz.Point(158, 134), color=(0, 0, 0), width=0.8)
-
-    normalize_report_layout(doc)
-
-    assert round(_line_x(page, "ACTION REQUIRED")) == 38
-    assert round(_line_x(page, "NO IMMEDIATE ACTION IS REQUIRED AT THIS TIME")) == 39
+    assert round(_line_x(page, "ACTION REQUIRED")) == 24
+    assert round(_line_x(page, "NO IMMEDIATE ACTION IS REQUIRED AT THIS TIME")) == 30
     rules = []
     for drawing in page.get_drawings():
         if drawing.get("color") in {(1, 1, 1), (1.0, 1.0, 1.0)}:
@@ -68,19 +54,24 @@ def test_aligns_client_action_headings_from_x24_to_expected_columns() -> None:
             if right - left < 80:
                 continue
             rules.append((round(left), round(right)))
-    assert any(abs(left - 40) <= 1 for left, _right in rules)
+    assert any(abs(left - 24) <= 1 for left, _right in rules)
 
 
-def test_recap_layout_does_not_shift_bullet_glyphs_onto_body_column() -> None:
+def test_preserves_source_year_end_recap_columns() -> None:
+    """Do not shift Recap / UA columns away from the source package."""
     doc = fitz.open()
     page = doc.new_page()
     page.insert_text((250, 48), "YEAR END RECAP", fontsize=10.5, fontname="hebo")
     page.insert_text((42, 123), "Important Information", fontsize=9.6, fontname="hebo")
     page.insert_text((67, 141), "·", fontsize=7.3)
     page.insert_text((78, 141), "Based on the definition of Highly Compensated Employee", fontsize=8.1)
+    page.insert_text((78, 180), "UNIVERSAL AVAILABILITY RULE", fontsize=9)
+    page.insert_text((96, 200), "Employees who normally work less than 20 hours", fontsize=9)
 
     normalize_report_layout(doc)
 
+    assert round(_line_x(page, "UNIVERSAL AVAILABILITY RULE")) == 78
+    assert round(_line_x(page, "Employees who normally work less than 20 hours")) == 96
     bullets = []
     for block in page.get_text("dict")["blocks"]:
         if block.get("type") != 0:
@@ -90,53 +81,6 @@ def test_recap_layout_does_not_shift_bullet_glyphs_onto_body_column() -> None:
                 if str(span.get("text") or "").strip() in {"·", "•", "╖", "●"}:
                     bullets.append(round(span["bbox"][0]))
     assert 67 in bullets
-    assert 78 not in bullets
-
-
-def test_aligns_immediate_action_headings_to_action_column() -> None:
-    doc = fitz.open()
-    page = doc.new_page()
-    page.insert_text((36, 60), "Annual Valuation Report", fontsize=12)
-    page.insert_text((24, 130), "IMMEDIATE ACTION REQUIRED - ADP/ACP TEST FAILURE", fontsize=11)
-    page.insert_text((30, 160), "ATTENTION REQUIRED - VARIANCE", fontsize=11)
-
-    normalize_report_layout(doc)
-
-    assert round(_line_x(page, "IMMEDIATE ACTION REQUIRED - ADP/ACP TEST FAILURE")) == 38
-    assert round(_line_x(page, "ATTENTION REQUIRED - VARIANCE")) == 38
-
-
-def test_shifts_universal_availability_block_and_nested_bullets() -> None:
-    doc = fitz.open()
-    page = doc.new_page()
-    page.insert_text((40, 50), "YEAR END RECAP", fontsize=12)
-    page.insert_text((78, 120), "UNIVERSAL AVAILABILITY RULE", fontsize=9)
-    page.insert_text((78, 140), "Universal availability body", fontsize=9)
-    page.insert_text((96, 160), "Employees who normally work less than 20 hours", fontsize=9)
-    page.insert_text((78, 180), "If you sponsor a qualified retirement plan", fontsize=9)
-    page.insert_text((78, 195), "Please contact your local regional office representative to discuss.", fontsize=9)
-
-    normalize_report_layout(doc)
-
-    assert round(_line_x(page, "UNIVERSAL AVAILABILITY RULE")) == 83
-    assert round(_line_x(page, "Employees who normally work less than 20 hours")) == 101
-    assert round(_line_x(page, "Please contact your local regional office representative to discuss.")) == 83
-
-
-def test_does_not_reshift_ua_columns_already_at_client_x() -> None:
-    doc = fitz.open()
-    page = doc.new_page()
-    page.insert_text((40, 50), "YEAR END RECAP", fontsize=12)
-    page.insert_text((83, 120), "UNIVERSAL AVAILABILITY RULE", fontsize=9)
-    page.insert_text((83, 140), "Universal availability body", fontsize=9)
-    page.insert_text((101, 160), "Employees who normally work less than 20 hours", fontsize=9)
-    page.insert_text((83, 180), "If you sponsor a qualified retirement plan", fontsize=9)
-    page.insert_text((83, 195), "Please contact your local regional office representative to discuss.", fontsize=9)
-
-    normalize_report_layout(doc)
-
-    assert round(_line_x(page, "UNIVERSAL AVAILABILITY RULE")) == 83
-    assert round(_line_x(page, "Employees who normally work less than 20 hours")) == 101
 
 
 def test_splits_merged_amount_percent_heading_and_aligns_census_name() -> None:
@@ -159,7 +103,7 @@ def test_aligns_name_column_on_plan_titled_ssn_listing_page() -> None:
     page = doc.new_page()
     page.insert_text((40, 50), "DEERFIELD BEHAVIORAL HEALTH OF WARREN LLC 403(B) PLAN", fontsize=12)
     page.insert_text((36, 130), "Name", fontsize=9)
-    page.insert_text((200, 130), "SSN", fontsize=9)
+    page.insert_text((200, 130), "DOB", fontsize=9)
 
     normalize_report_layout(doc)
 
@@ -378,7 +322,26 @@ def test_from_to_leaves_lowercase_coverage_header_alone() -> None:
     assert "From 1/01/25 to 12/31/25" in page.get_text()
 
 
-def test_cover_census_wrap_breaks_after_results_of() -> None:
+def test_cover_census_wrap_does_not_rewrite_wording() -> None:
+    """Wrap/content must stay as source printed it — no phrase-based line surgery."""
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text(
+        (48, 200),
+        "period ending 12/31/2025. This Valuation Report contains a recap of the finalized census data and results of",
+        fontsize=10,
+    )
+    page.insert_text((48, 214), "the annual compliance review for the plan year.", fontsize=10)
+
+    notes = normalize_cover_census_wrap(doc)
+    text = page.get_text()
+    assert "results of\n" in text or text.count("results of") == 1
+    assert "the annual compliance review for the plan year." in text
+    assert "results of the" not in text  # must not invent a moved "the"
+    assert any("bold" in note.lower() for note in notes)
+
+
+def test_cover_period_ending_date_bold_when_wrap_already_correct() -> None:
     doc = fitz.open()
     page = doc.new_page()
     page.insert_text(
@@ -388,34 +351,11 @@ def test_cover_census_wrap_breaks_after_results_of() -> None:
     )
     page.insert_text((48, 214), "IRS required testing for the plan year.", fontsize=10)
 
-    assert normalize_cover_census_wrap(doc)
-    lines = [line.strip() for line in page.get_text().splitlines() if line.strip()]
-    assert any(line.endswith("results of") for line in lines)
-    assert any(line.startswith("the IRS required testing") for line in lines)
-    date_spans = []
-    for block in page.get_text("dict")["blocks"]:
-        if block.get("type") != 0:
-            continue
-        for line in block.get("lines", []):
-            for span in line.get("spans", []):
-                if str(span.get("text") or "").strip() == "12/31/2025":
-                    date_spans.append(span)
-    assert date_spans
-    assert date_spans[0]["font"].lower().find("bold") >= 0 or date_spans[0]["flags"] & 16
-
-
-def test_cover_period_ending_date_bold_when_wrap_already_correct() -> None:
-    doc = fitz.open()
-    page = doc.new_page()
-    page.insert_text(
-        (48, 200),
-        "period ending 12/31/2025. This Valuation Report contains a recap of the finalized census data and results of",
-        fontsize=10,
-    )
-    page.insert_text((48, 214), "the IRS required testing for the plan year.", fontsize=10)
-
     notes = normalize_cover_census_wrap(doc)
     assert any("bold" in note.lower() for note in notes)
+    lines = [line.strip() for line in page.get_text().splitlines() if line.strip()]
+    assert any(line.endswith("results of the") for line in lines)
+    assert any(line.startswith("IRS required testing") for line in lines)
     cols = []
     for block in page.get_text("dict")["blocks"]:
         if block.get("type") != 0:
@@ -476,9 +416,11 @@ def test_cover_census_wrap_does_not_wipe_we_are_pleased_body_line() -> None:
     page.insert_text((45, 304), "IRS required testing for the plan year.", fontsize=11)
 
     assert normalize_cover_address_spacing(doc)
-    assert normalize_cover_census_wrap(doc)
+    notes = normalize_cover_census_wrap(doc)
     text = page.get_text()
     assert "We are pleased to provide you with our completed administrative review of your" in text
     assert "qualified retirement plan for the period ending 12/31/2025. This Valuation Report" in text
-    assert "results of" in text
-    assert "the IRS required testing for the plan year." in text
+    assert "results of the" in text
+    assert "IRS required testing for the plan year." in text
+    # Source wording preserved; only bold styling may change.
+    assert any("bold" in note.lower() for note in notes)
