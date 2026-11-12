@@ -164,6 +164,10 @@ def add_bookmarks(
     titles = _bookmark_map()
     overrides = bookmark_overrides(profile.plan_type)
     keep_brf = bool(package_flags(profile.plan_type).get("keep_brf"))
+    # One heading-line extract per page; section lookup used to re-read every page
+    # for every SOP section (~15× page_count get_text calls).
+    heading_cache = {index: _heading_lines(page) for index, page in enumerate(doc)}
+    summary_cache = {index: _is_summary_or_overview(page) for index, page in enumerate(doc)}
     entries: list[tuple[str, int]] = []
     toc: list[list] = []
     for name in _SOP_SECTION_ORDER:
@@ -174,14 +178,18 @@ def add_bookmarks(
             continue
         # The uploaded report is the real section. A heading on the overview
         # page must not take the bookmark away from that file.
-        page = _tagged_section_page(doc, name) or _find_section_page(doc, name)
+        page = _tagged_section_page(doc, name) or _find_section_page(
+            doc,
+            name,
+            heading_cache=heading_cache,
+            summary_cache=summary_cache,
+        )
         if page is None:
             continue
         if not title:
             continue
         entries.append((title, page))
-    pages = [page for _title, page in entries]
-    for index, (title, page) in enumerate(entries):
+    for title, page in entries:
         toc.append([1, title, page])
         if title in _ADP_TITLES:
             for child, child_page in _adp_children(doc, page, doc.page_count + 1):
@@ -223,17 +231,19 @@ def is_testing_only(doc: fitz.Document) -> bool:
         for spec in load_section_specs()
         if str(spec.get("name") or "") not in _ONLY_SECTIONS
     ]
+    alias_needles: list[str] = []
+    for spec in specs:
+        aliases = [str(spec.get("name") or "")] + [str(alias) for alias in (spec.get("aliases") or [])]
+        for alias in aliases:
+            if len(alias) >= 3:
+                alias_needles.append(alias.casefold())
     for page in doc:
         text = page.get_text("text") or ""
         if not text.strip() or _WRAPPER_PAGE.search(text) or is_compliance_overview(text):
             continue
-        for spec in specs:
-            aliases = [str(spec.get("name") or "")] + [str(alias) for alias in (spec.get("aliases") or [])]
-            for alias in aliases:
-                if len(alias) < 3:
-                    continue
-                if re.search(re.escape(alias), text, re.I):
-                    return False
+        folded = text.casefold()
+        if any(alias in folded for alias in alias_needles):
+            return False
     return True
 
 
@@ -350,11 +360,17 @@ def _heading_lines(page: fitz.Page) -> list[str]:
     ]
 
 
-def _heading_matches(page: fitz.Page, pattern: re.Pattern[str], section_name: str) -> bool:
+def _heading_matches(
+    page: fitz.Page,
+    pattern: re.Pattern[str],
+    section_name: str,
+    *,
+    lines: list[str] | None = None,
+) -> bool:
     """True when a heading line, or two wrapped heading lines, match ``pattern``."""
-    lines = _heading_lines(page)
-    candidates = list(lines)
-    candidates.extend(f"{left} {right}" for left, right in zip(lines, lines[1:]))
+    cached = lines if lines is not None else _heading_lines(page)
+    candidates = list(cached)
+    candidates.extend(f"{left} {right}" for left, right in zip(cached, cached[1:]))
     if section_name == "Future HCE":
         current = _SECTION_HEADINGS["HCE/Key"]
         if any(current.fullmatch(line) for line in candidates):
@@ -362,7 +378,13 @@ def _heading_matches(page: fitz.Page, pattern: re.Pattern[str], section_name: st
     return any(pattern.fullmatch(line) for line in candidates)
 
 
-def _find_section_page(doc: fitz.Document, section_name: str) -> int | None:
+def _find_section_page(
+    doc: fitz.Document,
+    section_name: str,
+    *,
+    heading_cache: dict[int, list[str]] | None = None,
+    summary_cache: dict[int, bool] | None = None,
+) -> int | None:
     """Find the page where a report section starts.
 
     Purpose:
@@ -371,6 +393,8 @@ def _find_section_page(doc: fitz.Document, section_name: str) -> int | None:
     Args:
         doc: Open PDF. An empty document has no pages.
         section_name: A name from the SOP section list, such as "Top Heavy" or "Cover Letter".
+        heading_cache: Optional per-page heading lines from ``_heading_lines``.
+        summary_cache: Optional per-page summary/overview flags.
 
     Returns:
         The page number, starting at 1. ``None`` when the heading is not in the document.
@@ -392,9 +416,16 @@ def _find_section_page(doc: fitz.Document, section_name: str) -> int | None:
         return None
     found: list[int] = []
     for index, page in enumerate(doc):
-        if section_name != "Test Summary" and _is_summary_or_overview(page):
-            continue
-        if _heading_matches(page, pattern, section_name):
+        if section_name != "Test Summary":
+            is_summary = (
+                summary_cache[index]
+                if summary_cache is not None and index in summary_cache
+                else _is_summary_or_overview(page)
+            )
+            if is_summary:
+                continue
+        lines = heading_cache.get(index) if heading_cache is not None else None
+        if _heading_matches(page, pattern, section_name, lines=lines):
             found.append(index + 1)
     if not found:
         return None

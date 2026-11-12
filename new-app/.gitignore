@@ -10,3 +10,6 @@ logs/*
 !logs/.gitkeep
 dist/
 docs/drive-download-*.zip
+
+.tmp_scan_compare/
+Scanned_*.pdf

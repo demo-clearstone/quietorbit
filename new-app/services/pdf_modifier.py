@@ -48,23 +48,36 @@ def apply_decisions(
     remove_ids = {item.rule_id for item in decisions if item.action == "remove"}
     keep_ids = {item.rule_id for item in decisions if item.action == "keep"}
     headings = [str(spec["heading"]) for spec in specs if spec.get("heading")]
+    remove_specs = [
+        spec
+        for spec in specs
+        if str(spec.get("id") or "") in remove_ids and str(spec.get("heading") or "")
+    ]
     removed: list[str] = []
     touched: dict[int, list[fitz.Rect]] = {}
     for page in doc:
+        if not remove_specs:
+            break
+        # One text/line extract per page. Searching every remove heading via
+        # _heading_hits used to re-parse the page dict hundreds of times.
+        page_text = page.get_text("text") or ""
+        if not page_text.strip():
+            continue
+        page_squashed = _squash(page_text)
+        page_lines = _page_lines(page)
         boxes: list[fitz.Rect] = []
-        for spec in specs:
+        for spec in remove_specs:
             rule_id = str(spec["id"])
             heading = str(spec.get("heading") or "")
-            if rule_id not in remove_ids or not heading:
+            if _squash(heading) not in page_squashed:
                 continue
-            page_text = page.get_text("text") or ""
             extra = str(spec.get("extra") or "")
             if not _extra_matches(page_text, extra):
                 continue
-            for hit in _heading_hits(page, heading):
-                if _covered_by_longer_heading(page, hit, heading, headings):
+            for hit in _heading_hits(page, heading, lines=page_lines):
+                if _covered_by_longer_heading(page, hit, heading, headings, lines=page_lines):
                     continue
-                end_y = _block_end(page, hit.y0, headings)
+                end_y = _block_end(page, hit.y0, headings, lines=page_lines)
                 if not _block_matches(page, spec, hit.y0, end_y):
                     continue
                 if _kept_by_other_spec(page, page_text, specs, heading, hit.y0, end_y, keep_ids):
@@ -79,14 +92,22 @@ def apply_decisions(
             _apply_redact_boxes(page, boxes, cover=False)
     if touched:
         _restack_pages(doc, touched)
-        _pull_kept_action_forward(doc)
+        _pack_action_across_pages(doc)
         _strip_im_fragments(doc)
         _drop_empty_pages(doc)
-        _finalize_no_immediate_pages(doc)
         for page in doc:
             text = page.get_text("text") or ""
-            if re.search(r"annual valuation report|immediate action required|attention required|no immediate action", text, re.I):
-                _redraw_action_rules(page)
+            if re.search(
+                r"annual valuation report|immediate action required|attention required",
+                text,
+                re.I,
+            ):
+                # Restore underlines only for kept failure headings after restack.
+                # Never invent/wipe plain ACTION / NO IMMEDIATE underlines.
+                _redraw_action_rules(page, only_failure=True)
+    # Always run: all-clear pages can lack ACTION REQUIRED even when nothing was
+    # removed on that page (green already alone, or pulled forward without a heading).
+    _finalize_no_immediate_pages(doc)
     return removed
 
 
@@ -145,7 +166,14 @@ def _extra_matches(page_text: str, extra: str) -> bool:
     return False
 
 
-def _covered_by_longer_heading(page: fitz.Page, hit, heading: str, headings: list[str]) -> bool:
+def _covered_by_longer_heading(
+    page: fitz.Page,
+    hit,
+    heading: str,
+    headings: list[str],
+    *,
+    lines: list[tuple[str, tuple[float, float, float, float]]] | None = None,
+) -> bool:
     """'Failed Compliance Testing' is the start of the after-12-month heading.
 
     Purpose:
@@ -156,6 +184,7 @@ def _covered_by_longer_heading(page: fitz.Page, hit, heading: str, headings: lis
         hit: Hit. Type: unspecified.
         heading: Heading. Type: str.
         headings: Headings. Type: list[str].
+        lines: Optional cached page lines from ``_page_lines``.
 
     Returns:
         True or False.
@@ -172,13 +201,19 @@ def _covered_by_longer_heading(page: fitz.Page, hit, heading: str, headings: lis
     for other in headings:
         if not other.startswith(heading) or len(other) <= len(heading):
             continue
-        for rect in _heading_hits(page, other):
+        for rect in _heading_hits(page, other, lines=lines):
             if abs(rect.y0 - hit.y0) <= 2 and abs(rect.x0 - hit.x0) <= 2:
                 return True
     return False
 
 
-def _block_end(page: fitz.Page, y0: float, headings: list[str]) -> float:
+def _block_end(
+    page: fitz.Page,
+    y0: float,
+    headings: list[str],
+    *,
+    lines: list[tuple[str, tuple[float, float, float, float]]] | None = None,
+) -> float:
     """Stop at the next heading, including another copy of this same heading.
 
     Purpose:
@@ -188,6 +223,7 @@ def _block_end(page: fitz.Page, y0: float, headings: list[str]) -> float:
         page: One PDF page.
         y0: Y0. Type: float.
         headings: Headings. Type: list[str].
+        lines: Optional cached page lines from ``_page_lines``.
 
     Returns:
         a float.
@@ -202,18 +238,24 @@ def _block_end(page: fitz.Page, y0: float, headings: list[str]) -> float:
         None. This function only reads data and returns a value.
     """
     end_y = page.rect.y1 - 36
+    cached = lines if lines is not None else _page_lines(page)
     seen: set[str] = set()
     for heading in headings:
         if not heading or heading in seen:
             continue
         seen.add(heading)
-        for rect in _heading_hits(page, heading):
+        for rect in _heading_hits(page, heading, lines=cached):
             if rect.y0 > y0 + 8:
                 end_y = min(end_y, rect.y0 - 4)
     return end_y
 
 
-def _heading_hits(page: fitz.Page, heading: str) -> list[fitz.Rect]:
+def _heading_hits(
+    page: fitz.Page,
+    heading: str,
+    *,
+    lines: list[tuple[str, tuple[float, float, float, float]]] | None = None,
+) -> list[fitz.Rect]:
     """A heading starts a line, and may wrap onto the next lines. Words inside a sentence are not a heading.
 
     Purpose:
@@ -222,6 +264,7 @@ def _heading_hits(page: fitz.Page, heading: str) -> list[fitz.Rect]:
     Args:
         page: One PDF page.
         heading: Heading. Type: str.
+        lines: Optional cached page lines from ``_page_lines``.
 
     Returns:
         a list of fitz.Rect.
@@ -238,12 +281,12 @@ def _heading_hits(page: fitz.Page, heading: str) -> list[fitz.Rect]:
     target = _squash(heading)
     if not target:
         return []
-    lines = _page_lines(page)
+    cached = lines if lines is not None else _page_lines(page)
     hits: list[fitz.Rect] = []
-    for start in range(len(lines)):
+    for start in range(len(cached)):
         joined = ""
-        rect = fitz.Rect(lines[start][1])
-        for text, bbox in lines[start : start + 4]:
+        rect = fitz.Rect(cached[start][1])
+        for text, bbox in cached[start : start + 4]:
             joined += _squash(text)
             rect |= fitz.Rect(bbox)
             if len(joined) >= len(target):
@@ -444,9 +487,9 @@ def _restack_pages(doc: fitz.Document, touched: dict[int, list[fitz.Rect]]) -> N
         for block in footer:
             for span in block["spans"]:
                 _write_span(page, span, 0)
-        # Restack rewrites text but leaves vector underlines from removed headings.
-        if header_rule_y is not None:
-            _clear_short_rules_below(page, header_rule_y)
+        # Only clear underlines that sat inside removed bands (orphans). Do not wipe
+        # underlines under surviving ACTION / green / kept failure headings.
+        _clear_short_rules_in_bands(page, removed_bands)
 
 
 def _upshift_delta(y0: float, bands: list[tuple[float, float]]) -> float:
@@ -742,10 +785,10 @@ def _is_recap_text(text: str) -> bool:
 
 
 def _strip_im_fragments(doc: fitz.Document) -> None:
-    """Remove the clipped 'IM' left when IMMEDIATE is only partly covered.
+    """Remove clipped IMMEDIATE leftovers such as IM, MEDIATE, or a lone I/i.
 
     Purpose:
-        Remove the clipped 'IM' left when IMMEDIATE is only partly covered.
+        Remove clipped IMMEDIATE leftovers such as IM, MEDIATE, or a lone I/i.
 
     Args:
         doc: Open PDF. Must not be closed.
@@ -766,10 +809,10 @@ def _strip_im_fragments(doc: fitz.Document) -> None:
         boxes = [
             fitz.Rect(word[:4])
             for word in (page.get_text("words") or [])
-            if str(word[4]).upper() in {"IM", "MEDIATE"}
+            if str(word[4]).upper() in {"IM", "MEDIATE", "I"}
         ]
         if boxes:
-            _apply_redact_boxes(page, boxes)
+            _apply_redact_boxes(page, [_pad_rect(box, page) for box in boxes])
 
 
 def _is_noise_text(text: str) -> bool:
@@ -916,23 +959,33 @@ def _action_blocks_to_move(page: fitz.Page) -> list[dict]:
     return blocks
 
 
-def _write_action_heading(page: fitz.Page, cursor: float) -> float:
-    """Write the ACTION REQUIRED heading. ``cursor`` is the text baseline."""
-    page.insert_text((54, cursor), "ACTION REQUIRED", fontsize=11, fontname="hebo", color=(0, 0, 0))
-    width = fitz.get_text_length("ACTION REQUIRED", fontname="hebo", fontsize=11)
-    # Place the rule under the glyph box (baseline + descent), not through the letters.
-    underline_y = cursor + 4
-    for word in page.get_text("words") or []:
-        if abs(float(word[0]) - 54) < 2 and str(word[4]).upper() == "ACTION":
-            underline_y = max(underline_y, float(word[3]) + 2)
-            break
-    page.draw_line(
-        fitz.Point(54, underline_y),
-        fitz.Point(54 + width, underline_y),
-        color=(0, 0, 0),
-        width=0.8,
-    )
-    return underline_y + 18
+def _action_column_x(page: fitz.Page) -> float:
+    """Left edge used by Action Required headings on this page (client packages ~40, built ~54)."""
+    xs: list[float] = []
+    for block in _text_blocks(page):
+        text = " ".join(span["text"] for span in block["spans"]).strip()
+        if re.match(
+            r"^(ACTION REQUIRED|IMMEDIATE ACTION REQUIRED|ATTENTION REQUIRED|NO IMMEDIATE ACTION IS REQUIRED)",
+            text,
+            re.I,
+        ):
+            xs.append(float(block["bbox"].x0))
+    if not xs:
+        return 54.0
+    xs.sort()
+    return xs[len(xs) // 2]
+
+
+def _write_action_heading(page: fitz.Page, cursor: float, x: float | None = None) -> float:
+    """Write the ACTION REQUIRED heading. ``cursor`` is the text baseline.
+
+    Does not invent an underline — source packages vary, and redrawing a rule
+    here makes ACTION borders diverge from the source PDF.
+    """
+    left = 54.0 if x is None else float(x)
+    page.insert_text((left, cursor), "ACTION REQUIRED", fontsize=11, fontname="hebo", color=(0, 0, 0))
+    # Approximate next-cursor below the heading ink.
+    return cursor + 18
 
 
 def _short_rule_boxes_below(page: fitz.Page, below_y: float) -> list[fitz.Rect]:
@@ -965,13 +1018,42 @@ def _clear_short_rules_below(page: fitz.Page, below_y: float, *, redact: bool = 
     has been redacted, ``redact=True`` deletes the strokes from the page.
     """
     boxes = _short_rule_boxes_below(page, below_y)
+    _cover_or_redact_rules(page, boxes, redact=redact)
+
+
+def _clear_short_rules_in_bands(page: fitz.Page, bands: list[tuple[float, float]]) -> None:
+    """White-out short underlines whose y falls inside removed vertical bands."""
+    if not bands:
+        return
+    boxes: list[fitz.Rect] = []
+    for drawing in page.get_drawings():
+        if drawing.get("color") in {(1, 1, 1), (1.0, 1.0, 1.0)}:
+            continue
+        for item in drawing.get("items") or []:
+            if not item or item[0] != "l" or len(item) < 3:
+                continue
+            start, end = fitz.Point(item[1]), fitz.Point(item[2])
+            if abs(start.y - end.y) > 1.5:
+                continue
+            y = start.y
+            width = abs(end.x - start.x)
+            if width >= page.rect.width * 0.7:
+                continue
+            if not any(top - 1.0 <= y <= bottom + 1.0 for top, bottom in bands):
+                continue
+            left, right = sorted((start.x, end.x))
+            boxes.append(fitz.Rect(left - 1, y - 1.5, right + 1, y + 1.5))
+    _cover_or_redact_rules(page, boxes, redact=False)
+
+
+def _cover_or_redact_rules(page: fitz.Page, boxes: list[fitz.Rect], *, redact: bool) -> None:
+    """Remove short rule strokes without destroying overlapping text glyphs."""
     if not boxes:
         return
     if redact:
-        for rect in boxes:
-            page.add_redact_annot(rect, fill=(1, 1, 1))
-        page.apply_redactions(images=0, graphics=2)
-        return
+        # Still prefer white cover: apply_redactions on a rule through text ink
+        # deletes the glyphs (seen wiping ACTION / NO IMMEDIATE).
+        redact = False
     for rect in boxes:
         page.draw_line(
             fitz.Point(rect.x0, (rect.y0 + rect.y1) / 2),
@@ -983,7 +1065,13 @@ def _clear_short_rules_below(page: fitz.Page, below_y: float, *, redact: bool = 
 
 
 def _finalize_no_immediate_pages(doc: fitz.Document) -> None:
-    """Match the package sample: ACTION REQUIRED, then the green no-action line under it."""
+    """Ensure all-clear AV pages match Kaagaz ACTION layout.
+
+    Expected (Annual Valuation all-clear):
+    - ACTION REQUIRED (bold, underlined)
+    - NO IMMEDIATE ACTION IS REQUIRED AT THIS TIME (green, underlined)
+    - left-aligned under the header divider; green line stays in place when present
+    """
     for page in doc:
         text = page.get_text("text") or ""
         if not re.search(r"no immediate action is required at this time", text, re.I):
@@ -993,54 +1081,152 @@ def _finalize_no_immediate_pages(doc: fitz.Document) -> None:
         # Leave pages that still have other action blocks; only pack the all-clear page.
         if re.search(r"IMMEDIATE ACTION REQUIRED|ATTENTION REQUIRED", text, re.I):
             continue
-        has_heading = bool(re.search(r"(?m)^\s*ACTION REQUIRED\s*$", text))
         green = None
-        trailing: list[dict] = []
-        started = False
         for block in _text_blocks(page):
             joined = " ".join(span["text"] for span in block["spans"]).strip()
             if re.match(r"NO IMMEDIATE ACTION IS REQUIRED AT THIS TIME", joined, re.I):
                 green = block
-                started = True
-                continue
-            if started and not _is_page_number_block(page, block) and not _is_noise_text(joined):
-                trailing.append(block)
-        header_rule_y = _top_header_rule_y(page)
+                break
         if green is None:
-            if header_rule_y is not None:
-                _clear_short_rules_below(page, header_rule_y)
             continue
-        if has_heading:
+        # Clear orphan rules that cut through ACTION / green ink (leftover from removals).
+        for block in _text_blocks(page):
+            joined = " ".join(span["text"] for span in block["spans"]).strip()
+            if re.fullmatch(r"ACTION REQUIRED", joined, re.I) or re.match(
+                r"NO IMMEDIATE ACTION IS REQUIRED AT THIS TIME", joined, re.I
+            ):
+                _cover_rules_through_band(
+                    page,
+                    float(block["bbox"].y0),
+                    float(block["bbox"].y1),
+                    float(block["bbox"].x0),
+                    float(block["bbox"].x1),
+                )
+        has_heading = bool(re.search(r"(?m)^\s*ACTION REQUIRED\s*$", text))
+        if not has_heading:
+            column_x = float(green["bbox"].x0)
+            green_top = float(green["bbox"].y0)
+            header_rule_y = _top_header_rule_y(page)
+            # Prefer Kaagaz packing under the header, but never drop ACTION into the
+            # green line (that made underline redaction eat both phrases).
             if header_rule_y is not None:
-                _clear_short_rules_below(page, header_rule_y)
-            continue
-        green_spans = [dict(span) for span in green["spans"]]
-        green_text = "".join(span["text"] for span in green_spans)
-        size = float(green_spans[0]["size"]) if green_spans else 11.0
-        color = _rgb(green_spans[0]["color"]) if green_spans else (0, 0.45, 0.15)
-        # Pack under the header divider (not at the green line's current y, which left
-        # a hole and overlapped any trailing paragraph that restack had already pulled up).
-        heading_baseline = (header_rule_y + 40.0) if header_rule_y is not None else 90.0
-        wipe = [green["bbox"], *[block["bbox"] for block in trailing]]
-        _apply_redact_boxes(page, wipe, cover=False)
-        if header_rule_y is not None:
-            _clear_short_rules_below(page, header_rule_y, redact=True)
-        cursor = _write_action_heading(page, heading_baseline)
-        page.insert_text(
-            fitz.Point(54, cursor),
-            green_text,
-            fontsize=size,
-            fontname="hebo",
-            color=color,
-            overlay=True,
+                heading_baseline = header_rule_y + 28.0
+                if heading_baseline + 4.0 >= green_top:
+                    heading_baseline = green_top - 14.0
+                if heading_baseline < header_rule_y + 14.0:
+                    heading_baseline = header_rule_y + 14.0
+            else:
+                heading_baseline = green_top - 14.0
+            _write_action_heading(page, heading_baseline, x=column_x)
+        # Kaagaz p2: both ACTION and the green line are underlined to phrase width.
+        _redraw_action_rules(page, only_failure=False)
+
+
+def _pack_action_across_pages(doc: fitz.Document) -> None:
+    """Pull Action Required content up: fill earlier pages that still have whitespace.
+
+    First moves kept action onto an empty Annual Valuation anchor page. Then repeatedly
+    packs leftover paragraphs from later pages into prior pages that still have room
+    above the footer.
+    """
+    _pull_kept_action_forward(doc)
+    for _ in range(12):
+        if not _pack_one_action_overflow(doc):
+            break
+
+
+def _is_action_flow_page(page: fitz.Page) -> bool:
+    """Pages that participate in Action Required reflow (not cover; recap only if it holds action)."""
+    text = page.get_text("text") or ""
+    # Cover letter pages are not part of Action Required reflow.
+    if re.search(r"we are pleased to provide|dear plan sponsor", text, re.I) and not re.search(
+        r"annual valuation report", text, re.I
+    ):
+        return False
+    if _is_recap_text(text) and not _KEPT_ACTION.search(text):
+        return False
+    return bool(
+        re.search(
+            r"annual valuation report|immediate action required|attention required|"
+            r"no immediate action|^\s*ACTION REQUIRED\s*$",
+            text,
+            re.I | re.M,
         )
-        cursor += size + 14.0
-        for block in trailing:
-            # Place each trailing block so its top sits just under the running cursor.
-            delta = (cursor - 11.0) - block["bbox"].y0
+    )
+
+
+def _action_content_bottom(page: fitz.Page) -> float:
+    """Lowest content edge on the page, ignoring page numbers."""
+    bottom = 0.0
+    for block in _text_blocks(page):
+        if _is_page_number_block(page, block):
+            continue
+        text = " ".join(span["text"] for span in block["spans"]).strip()
+        if not text or _is_noise_text(text):
+            continue
+        bottom = max(bottom, float(block["bbox"].y1))
+    header_rule_y = _top_header_rule_y(page)
+    if bottom <= 0 and header_rule_y is not None:
+        return header_rule_y + 24.0
+    return bottom
+
+
+def _movable_action_overflow(page: fitz.Page) -> list[dict]:
+    """Paragraphs on a later action page that can fill whitespace on a prior page."""
+    header_rule_y = _top_header_rule_y(page)
+    blocks: list[dict] = []
+    for block in _text_blocks(page):
+        if _is_page_number_block(page, block):
+            continue
+        text = " ".join(span["text"] for span in block["spans"]).strip()
+        if not text or _is_noise_text(text):
+            continue
+        if re.search(r"annual valuation report", text, re.I):
+            continue
+        if header_rule_y is not None and block["bbox"].y1 <= header_rule_y + 2:
+            continue
+        if re.fullmatch(r"ACTION REQUIRED", text, re.I):
+            # Keep the section label with its page; move body paragraphs only.
+            continue
+        if _is_recap_text(text):
+            break
+        if re.fullmatch(r"\d{5,7}", text) and block["bbox"].y0 < (header_rule_y or 200):
+            continue
+        blocks.append(block)
+    return blocks
+
+
+def _pack_one_action_overflow(doc: fitz.Document) -> bool:
+    """Move as many leading overflow blocks as fit from one later page onto the prior page."""
+    flow = [page for page in doc if _is_action_flow_page(page)]
+    for dest, source in zip(flow, flow[1:]):
+        footer_limit = float(dest.rect.y1) - 52.0
+        cursor = _action_content_bottom(dest) + 14.0
+        free = footer_limit - cursor
+        if free < 40:
+            continue
+        overflow = _movable_action_overflow(source)
+        if not overflow:
+            continue
+        moved: list[dict] = []
+        for block in overflow:
+            height = float(block["bbox"].height)
+            if height + 10 > free:
+                break
+            target_top = cursor
+            delta = target_top - float(block["bbox"].y0)
             for span in block["spans"]:
-                _write_span(page, span, delta)
-            cursor += block["bbox"].height + 12.0
+                _write_span(dest, span, delta)
+            moved.append(block)
+            cursor = target_top + height + 14.0
+            free = footer_limit - cursor
+        if not moved:
+            continue
+        boxes = [block["bbox"] for block in moved]
+        _apply_redact_boxes(source, boxes, cover=False)
+        _restack_pages(doc, {source.number: boxes})
+        return True
+    return False
 
 
 def _pull_kept_action_forward(doc: fitz.Document) -> None:
@@ -1078,15 +1264,14 @@ def _pull_kept_action_forward(doc: fitz.Document) -> None:
     if anchor is None or not later or _KEPT_ACTION.search(anchor.get_text("text") or ""):
         return
     header_rule_y = _top_header_rule_y(anchor)
-    if header_rule_y is not None:
-        _clear_short_rules_below(anchor, header_rule_y)
     anchor_blocks = _text_blocks(anchor)
     # insert_text points are baselines; keep a gap under the header divider.
     baseline = (anchor_blocks[-1]["bbox"].y1 + 24) if anchor_blocks else 90
     if header_rule_y is not None:
         baseline = max(baseline, header_rule_y + 40)
+    column_x = _action_column_x(anchor)
     if not re.search(r"(?m)^\s*ACTION REQUIRED\s*$", anchor.get_text("text") or ""):
-        baseline = _write_action_heading(anchor, baseline)
+        baseline = _write_action_heading(anchor, baseline, x=column_x)
     delete_numbers: list[int] = []
     for page in later:
         blocks = _action_blocks_to_move(page)
@@ -1107,14 +1292,100 @@ def _pull_kept_action_forward(doc: fitz.Document) -> None:
         doc.delete_page(number)
 
 
-def _redraw_action_rules(page: fitz.Page) -> None:
-    """Put the header rule and heading underlines back after the text is packed.
+def _action_heading_lines(page: fitz.Page) -> list[dict]:
+    """Collect Action Required heading lines with exact ink bounds.
+
+    Word y0 values often differ by a fraction of a point after restack, so grouping
+    by ``round(y0)`` splits one phrase and draws a short or long underline. Prefer
+    PDF text lines, then fall back to a tolerant y-cluster of words.
+    """
+    # Client packages often continue IMMEDIATE/ATTENTION with " - …" detail text.
+    heading_re = re.compile(
+        r"^(?:ACTION REQUIRED\s*$|"
+        r"IMMEDIATE ACTION REQUIRED\b.*|"
+        r"ATTENTION REQUIRED\b.*|"
+        r"NO IMMEDIATE ACTION IS REQUIRED(?: AT THIS TIME)?\s*$)",
+        re.I,
+    )
+    found: list[dict] = []
+    for block in page.get_text("dict").get("blocks") or []:
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines") or []:
+            spans = [span for span in line.get("spans") or [] if str(span.get("text") or "").strip()]
+            if not spans:
+                continue
+            text = "".join(str(span.get("text") or "") for span in spans).strip()
+            text = re.sub(r"\s+", " ", text)
+            if not heading_re.match(text):
+                continue
+            x0 = min(float(span["bbox"][0]) for span in spans)
+            y0 = min(float(span["bbox"][1]) for span in spans)
+            x1 = max(float(span["bbox"][2]) for span in spans)
+            y1 = max(float(span["bbox"][3]) for span in spans)
+            found.append({"text": text, "x0": x0, "y0": y0, "x1": x1, "y1": y1})
+    if found:
+        return found
+
+    # Fallback: cluster words whose tops are within 2pt.
+    words = sorted(page.get_text("words") or [], key=lambda item: (float(item[1]), float(item[0])))
+    clusters: list[list[tuple]] = []
+    for word in words:
+        if clusters and abs(float(word[1]) - float(clusters[-1][0][1])) <= 2.0:
+            clusters[-1].append(word)
+        else:
+            clusters.append([word])
+    for group in clusters:
+        group.sort(key=lambda item: float(item[0]))
+        text = re.sub(r"\s+", " ", " ".join(str(item[4]) for item in group)).strip()
+        if not heading_re.match(text):
+            continue
+        found.append(
+            {
+                "text": text,
+                "x0": float(group[0][0]),
+                "y0": min(float(item[1]) for item in group),
+                "x1": float(group[-1][2]),
+                "y1": max(float(item[3]) for item in group),
+            }
+        )
+    return found
+
+
+def _short_rules_near_heading(page: fitz.Page, top: float, bottom: float, x0: float, x1: float) -> list[fitz.Rect]:
+    """Short horizontal rules near a heading, including ones that are too long or too short."""
+    boxes: list[fitz.Rect] = []
+    for drawing in page.get_drawings():
+        if drawing.get("color") in {(1, 1, 1), (1.0, 1.0, 1.0)}:
+            continue
+        for item in drawing.get("items") or []:
+            if not item or item[0] != "l" or len(item) < 3:
+                continue
+            start, end = fitz.Point(item[1]), fitz.Point(item[2])
+            if abs(start.y - end.y) > 1.5:
+                continue
+            y = start.y
+            if y < top - 1.0 or y > bottom + 4.0:
+                continue
+            if abs(end.x - start.x) >= page.rect.width * 0.7:
+                continue
+            left, right = sorted((start.x, end.x))
+            if right < x0 - 8 or left > x1 + 40:
+                continue
+            boxes.append(fitz.Rect(left - 1, y - 1.5, right + 1, y + 1.5))
+    return boxes
+
+
+def _redraw_action_rules(page: fitz.Page, *, only_failure: bool = False) -> None:
+    """Put Action Required underlines back after packing, matching each phrase width.
 
     Purpose:
-        Put the header rule and heading underlines back after the text is packed.
+        Put Action Required underlines back after packing, matching each phrase width.
 
     Args:
         page: One PDF page.
+        only_failure: When True, only IMMEDIATE/ATTENTION headings get underlines.
+            Plain ACTION / NO IMMEDIATE source underlines are left untouched.
 
     Returns:
         None.
@@ -1126,38 +1397,37 @@ def _redraw_action_rules(page: fitz.Page) -> None:
         _redraw_action_rules(page) returns None.
 
     Side effects:
-        None. This function only reads data and returns a value.
+        Changes drawings on the page.
     """
-    lines: dict[int, list[tuple]] = {}
-    for word in page.get_text("words") or []:
-        lines.setdefault(round(word[1]), []).append(word)
-    for group in lines.values():
-        group.sort(key=lambda item: item[0])
-        text = " ".join(item[4] for item in group)
-        top = min(item[1] for item in group)
-        bottom = max(item[3] for item in group)
-        # Sit just under the glyph box so the rule cannot cut through the letters.
+    headings = _action_heading_lines(page)
+    if not headings:
+        return
+    # Replace underlines that sit *below* the heading ink. Do not redact rules that
+    # cut through the glyphs — that deletes ACTION / NO IMMEDIATE text.
+    wipe: list[fitz.Rect] = []
+    planned: list[tuple[float, float, float, tuple[float, float, float]]] = []
+    for heading in headings:
+        text = heading["text"]
+        x0 = float(heading["x0"])
+        x1 = float(heading["x1"])
+        top = float(heading["y0"])
+        bottom = float(heading["y1"])
         y = bottom + 2.0
-        if re.fullmatch(r"\d{5,7}", text):
+        upper = text.upper()
+        is_failure = upper.startswith("IMMEDIATE ACTION") or upper.startswith("ATTENTION REQUIRED")
+        if only_failure and not is_failure:
             continue
-        if not re.match(
-            r"^(ACTION REQUIRED|IMMEDIATE ACTION REQUIRED|ATTENTION REQUIRED|NO IMMEDIATE ACTION IS REQUIRED)",
-            text,
-        ):
-            continue
-        color = (0, 0.45, 0.15) if text.startswith("NO IMMEDIATE") else (0, 0, 0)
-        if text.startswith("IMMEDIATE ACTION"):
+        # Only rules at/below the baseline band — never the ink itself.
+        wipe.extend(_short_rules_near_heading(page, bottom - 0.5, y, x0, x1))
+        color = (0, 0.45, 0.15) if upper.startswith("NO IMMEDIATE") else (0, 0, 0)
+        if upper.startswith("IMMEDIATE ACTION"):
             color = (0.8, 0, 0)
-        # Cover any leftover rule that still cuts through this heading.
-        _cover_rules_through_band(page, top, y, group[0][0], group[-1][2])
-        if _has_horizontal_rule(page, y, group[0][0], group[-1][2]):
-            continue
-        page.draw_line(
-            fitz.Point(group[0][0], y),
-            fitz.Point(group[-1][2], y),
-            color=color,
-            width=0.8,
-        )
+        planned.append((x0, x1, y, color))
+    # White-cover leftover rules. Never apply_redactions here — a rule that still
+    # clips glyph ink would delete ACTION / NO IMMEDIATE characters.
+    _cover_or_redact_rules(page, wipe, redact=False)
+    for x0, x1, y, color in planned:
+        page.draw_line(fitz.Point(x0, y), fitz.Point(x1, y), color=color, width=0.8)
 
 
 def _has_horizontal_rule(page: fitz.Page, y: float, x0: float, x1: float) -> bool:
@@ -1656,6 +1926,8 @@ def apply_recap_bullets(
     if not specs:
         return []
     remove_ids = {item.rule_id for item in decisions if item.action == "remove"}
+    keep_ids = {item.rule_id for item in decisions if item.action == "keep"}
+    wanted_exclusive = _preferred_exclusive_recap(keep_ids)
     nhce = _adp_nhce_percent(doc)
     removed: list[str] = []
     for page in doc:
@@ -1665,37 +1937,263 @@ def apply_recap_bullets(
         header, bullets = _split_recap(original)
         kept: list[str] = []
         dropped: list[str] = []
+        # Wording replacement (exclusive swap / rate fill / inject) — not space tidy.
+        wording_changed = False
+        have_exclusive = False
         for bullet in bullets:
+            # Normalize only for rule matching; do not treat spacing as a rewrite.
+            bullet = _normalize_recap_bullet_spaces(bullet)
             spec = _matching_recap(bullet, specs)
+            rule_id = str(spec["id"]) if spec else None
+            exclusive_like = rule_id in _EXCLUSIVE_RECAP or _looks_like_exclusive_hce(bullet)
             if spec is None and re.search(r"(?:^|\s)%(?:\s|$)", bullet):
                 dropped.append(bullet)
                 continue
-            if spec and str(spec["id"]) in remove_ids:
-                if spec["id"] not in removed:
-                    removed.append(str(spec["id"]))
+            if rule_id and rule_id in remove_ids:
+                if rule_id not in removed:
+                    removed.append(rule_id)
+                # Source packages often keep PRIOR/CURRENT wording even for Safe Harbor.
+                # Swap the removed exclusive bullet into the kept exclusive wording.
+                if (
+                    exclusive_like
+                    and wanted_exclusive
+                    and wanted_exclusive not in remove_ids
+                    and not have_exclusive
+                ):
+                    swapped = _canonical_exclusive_recap(wanted_exclusive, bullet)
+                    if wanted_exclusive == "Y2":
+                        swapped = _fill_prior_rates(swapped, nhce)
+                    kept.append(swapped)
+                    have_exclusive = True
+                    wording_changed = True
                 dropped.append(bullet)
                 continue
-            if spec and str(spec["id"]) == "Y2":
-                bullet = _fill_prior_rates(bullet, nhce)
+            if (
+                exclusive_like
+                and wanted_exclusive
+                and wanted_exclusive not in remove_ids
+                and rule_id != wanted_exclusive
+            ):
+                # Clipped source text may not hit YAML matches; still replace with the
+                # kept exclusive wording so blank "%"/prior-year leftovers disappear.
+                if not have_exclusive:
+                    swapped = _canonical_exclusive_recap(wanted_exclusive, bullet)
+                    if wanted_exclusive == "Y2":
+                        swapped = _fill_prior_rates(swapped, nhce)
+                    kept.append(swapped)
+                    have_exclusive = True
+                    wording_changed = True
+                if rule_id and rule_id not in removed:
+                    removed.append(rule_id)
+                dropped.append(bullet)
+                continue
+            if exclusive_like:
+                if have_exclusive:
+                    dropped.append(bullet)
+                    continue
+                have_exclusive = True
+            if rule_id == "Y2":
+                filled = _fill_prior_rates(bullet, nhce)
+                if filled != bullet:
+                    wording_changed = True
+                bullet = filled
             kept.append(bullet)
-        # In-place redaction of dropped bullets leaves large white gaps (Kaagaz page 3
-        # vs packed page 4). Always rebuild whenever anything was removed, when the
-        # header/bullet columns do not already match the MOA layout, or when kept
-        # bullets are still spaced with large holes.
-        if not dropped and _recap_layout_matches(page) and not _recap_has_sparse_bullets(page):
+        if wanted_exclusive and wanted_exclusive not in remove_ids and not have_exclusive:
+            # Exclusive keep-rule matched, but the page never had Future-HCE wording.
+            sample = next((item for item in bullets if item), "")
+            injected = _canonical_exclusive_recap(wanted_exclusive, sample)
+            if wanted_exclusive == "Y2":
+                injected = _fill_prior_rates(injected, nhce)
+            kept.insert(0, injected)
+            wording_changed = True
+        # No content change → leave source Recap alone, unless clipped fragments
+        # remain from a prior partial keep/remove (Kaagaz expects a clean page).
+        if not dropped and not wording_changed and not _recap_has_clip_fragments(page):
             continue
-        header_lines = [line.strip() for line in header.splitlines() if line.strip()]
+        header_lines = [
+            line.strip()
+            for line in header.splitlines()
+            if _is_recap_header_line(line.strip())
+        ]
         if not header_lines:
             header_lines = ["Important Information"]
-        # Full-page wipe without a lasting white overlay (that overlay can hide the
-        # header rule redrawn by write_recap_page in some viewers).
-        page.add_redact_annot(page.rect, fill=(1, 1, 1))
-        page.apply_redactions(images=0, graphics=1)
+        elif not any(re.fullmatch(r"Important Information", line, re.I) for line in header_lines):
+            header_lines.append("Important Information")
+        kept = [
+            _clean_recap_bullet_text(_bullet)
+            for _bullet in kept
+            if _is_viable_recap_bullet(_bullet)
+        ]
+        kept = _merge_universal_availability_bullets(kept)
+        # Always rebuild after keep/remove so bullets pack under Important Information
+        # (Kaagaz p4). In-place white-out left holes and clipped fragments like
+        # "employee can defer in 2026 cannot ex".
+        _wipe_page_contents(page)
         from services.package_builder import write_recap_page
 
         number = _recap_page_number(original)
         write_recap_page(page, header_lines, kept, number=number, plan_type=plan_type)
     return removed
+
+
+def _wipe_page_contents(page: fitz.Page) -> None:
+    """Hard-clear a page before rewriting Recap content (no leftover glyph crumbs)."""
+    page.add_redact_annot(page.rect, fill=(1, 1, 1))
+    page.apply_redactions(images=0, graphics=2)
+    # Some source streams keep text after one redact pass — blank then clean.
+    page.draw_rect(page.rect, color=(1, 1, 1), fill=(1, 1, 1), width=0)
+    try:
+        page.clean_contents()
+    except Exception:
+        pass
+    leftover = (page.get_text("text") or "").strip()
+    if leftover:
+        boxes = [fitz.Rect(block["bbox"]) for block in _text_blocks(page)]
+        if boxes:
+            _apply_redact_boxes(page, boxes, cover=True)
+        try:
+            page.clean_contents()
+        except Exception:
+            pass
+
+
+def _redact_recap_bullets_in_place(page: fitz.Page, dropped: list[str]) -> bool:
+    """White out dropped Recap bullets without rewriting remaining source text."""
+    boxes: list[fitz.Rect] = []
+    for raw in dropped:
+        clean = re.sub(r"\s+", " ", _strip_recap_bullet_prefix(raw)).strip()
+        if len(clean) < 20:
+            continue
+        words = clean.split()
+        # Search overlapping chunks so wrapped source lines still match.
+        for index in range(0, max(1, len(words) - 4), 5):
+            chunk = " ".join(words[index : index + 8]).strip()
+            if len(chunk) < 18:
+                continue
+            try:
+                hits = page.search_for(chunk)
+            except Exception:
+                hits = []
+            boxes.extend(fitz.Rect(hit) for hit in hits)
+        # Fallback: distinctive head of the paragraph.
+        head = " ".join(words[:10]).strip()
+        if len(head) >= 18:
+            try:
+                boxes.extend(fitz.Rect(hit) for hit in page.search_for(head))
+            except Exception:
+                pass
+    if not boxes:
+        return False
+    # Expand hits slightly and clear any bullet glyph sitting just left of them.
+    expanded: list[fitz.Rect] = []
+    for box in boxes:
+        grown = fitz.Rect(box.x0 - 18, box.y0 - 1, box.x1 + 2, box.y1 + 1)
+        expanded.append(grown & page.rect)
+    for box in expanded:
+        page.add_redact_annot(box, fill=(1, 1, 1))
+    page.apply_redactions(images=0, graphics=0)
+    return True
+
+
+def _strip_recap_bullet_prefix(text: str) -> str:
+    """Remove a leading bullet glyph from a recap bullet string."""
+    return re.sub(
+        r"^(?:[\u2022•\u00b7\u25cf\u25e6\u2219\uf0b7╖■□▪▫*\-·●]+)\s*",
+        "",
+        (text or "").strip(),
+    ).strip()
+
+
+def _is_ua_exclusion_bullet(text: str) -> bool:
+    """True when a bullet is one of the nested Universal Availability exclusions."""
+    clean = _strip_recap_bullet_prefix(text)
+    return bool(
+        re.match(
+            r"^(?:Employees who normally work less than 20 hours|"
+            r"Students performing services at a school|"
+            r"Non-resident aliens with no U\.S\. source income|"
+            r"Employees who are eligible to make elective deferrals|"
+            r"Employees not able to defer \$200)",
+            clean,
+            re.I,
+        )
+    )
+
+
+def _is_ua_followon_bullet(text: str) -> bool:
+    """True for the UA closing sponsor/service-provider paragraph."""
+    clean = _strip_recap_bullet_prefix(text)
+    return clean.lower().startswith("if you sponsor a qualified retirement plan")
+
+
+def _merge_universal_availability_bullets(bullets: list[str]) -> list[str]:
+    """Join UA title/body/exclusion/follow-on bullets into one block for nested rewrite."""
+    from services.package_builder import _is_ua_recap_body
+
+    def _absorb_tail(parts: list[str], index: int) -> int:
+        while index < len(bullets) and _is_ua_exclusion_bullet(bullets[index]):
+            parts.append(_strip_recap_bullet_prefix(bullets[index]))
+            index += 1
+        if index < len(bullets) and _is_ua_followon_bullet(bullets[index]):
+            parts.append(_strip_recap_bullet_prefix(bullets[index]))
+            index += 1
+        return index
+
+    merged: list[str] = []
+    index = 0
+    while index < len(bullets):
+        current = (bullets[index] or "").strip()
+        clean = _strip_recap_bullet_prefix(current)
+        title_only = bool(re.fullmatch(r"UNIVERSAL AVAILABILITY RULE", clean, re.I))
+        if title_only or (clean.upper().startswith("UNIVERSAL AVAILABILITY RULE") and len(clean) < 40):
+            parts = [clean if clean.upper().startswith("UNIVERSAL AVAILABILITY") else f"UNIVERSAL AVAILABILITY RULE {clean}"]
+            index += 1
+            if index < len(bullets):
+                nxt = _strip_recap_bullet_prefix(bullets[index])
+                if _is_ua_recap_body(nxt) and not re.fullmatch(r"UNIVERSAL AVAILABILITY RULE", nxt, re.I):
+                    parts.append(nxt)
+                    index += 1
+            index = _absorb_tail(parts, index)
+            merged.append(" ".join(part for part in parts if part).strip())
+            continue
+        if _is_ua_recap_body(clean) and not clean.upper().startswith("UNIVERSAL AVAILABILITY RULE"):
+            parts = [f"UNIVERSAL AVAILABILITY RULE {clean}"]
+            index += 1
+            index = _absorb_tail(parts, index)
+            merged.append(" ".join(parts).strip())
+            continue
+        merged.append(current)
+        index += 1
+    return merged
+
+
+def _recap_needs_ua_nest_rebuild(page: fitz.Page) -> bool:
+    """True when Universal Availability exclusions are flattened instead of nested at x≈101."""
+    found_ua = False
+    has_including = False
+    nest_ok = False
+    nest_start = re.compile(
+        r"^(?:Employees who normally|Students performing|Non-resident aliens|"
+        r"Employees who are eligible|Employees not able to defer)",
+        re.I,
+    )
+    for block in page.get_text("dict").get("blocks", []):
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []):
+            spans = [span for span in line.get("spans", []) if span.get("text", "").strip()]
+            if not spans:
+                continue
+            text = "".join(span.get("text", "") for span in spans).strip()
+            if not text:
+                continue
+            if "UNIVERSAL AVAILABILITY" in text.upper():
+                found_ua = True
+            if re.search(r"including\s*:", text, re.I):
+                has_including = True
+            if nest_start.match(text.lstrip()) and abs(float(line["bbox"][0]) - 101.0) <= 4:
+                nest_ok = True
+    return found_ua and has_including and not nest_ok
 
 
 def _recap_has_sparse_bullets(page: fitz.Page) -> bool:
@@ -1718,6 +2216,60 @@ def _recap_has_sparse_bullets(page: fitz.Page) -> bool:
     return max(starts[i + 1] - starts[i] for i in range(len(starts) - 1)) >= 90.0
 
 
+def _recap_has_clip_fragments(page: fitz.Page) -> bool:
+    """True when partial keep/remove left clipped Recap glyph crumbs."""
+    text = page.get_text("text") or ""
+    if re.search(r"(?m)^\s*n\s*$", text):
+        return True
+    if re.search(r"cannot ex\b", text, re.I):
+        return True
+    if re.search(r"(?m)^\s*A 403\(b\) plan\s*$", text):
+        return True
+    return False
+
+
+def _clean_recap_bullet_text(text: str) -> str:
+    """Strip clipped crumbs glued onto an otherwise valid Recap paragraph."""
+    clean = _strip_recap_bullet_prefix(text)
+    clean = re.sub(r"\s*A 403\(b\) plan\s+service\.?\s*$", "", clean, flags=re.I)
+    clean = re.sub(r"\s+cannot ex\s*$", "", clean, flags=re.I)
+    return clean.strip()
+
+
+def _is_viable_recap_bullet(text: str) -> bool:
+    """Drop clipped leftovers that are not real Important Information paragraphs."""
+    clean = _clean_recap_bullet_text(text)
+    if len(clean) < 40:
+        return False
+    if re.fullmatch(r"n", clean, re.I):
+        return False
+    if re.search(r"cannot ex\s*$", clean, re.I) and len(clean) < 100:
+        return False
+    if re.fullmatch(r"A 403\(b\) plan.*", clean, re.I) and len(clean) < 80:
+        return False
+    return True
+
+
+def _is_recap_header_line(line: str) -> bool:
+    """Keep only real Recap header rows — drop clipped body crumbs from the header band."""
+    text = (line or "").strip()
+    if not text:
+        return False
+    if re.fullmatch(r"[\u2022•\u00b7\u25cf\u25e6\u2219\uf0b7╖■□▪▫*\-·●]+", text):
+        return False
+    if re.fullmatch(r"YEAR END RECAP", text, re.I):
+        return True
+    if re.fullmatch(r"Important Information", text, re.I):
+        return True
+    if re.fullmatch(r"\d{4,}", text):
+        return True
+    if re.search(r"january|february|march|april|may|june|july|august|september|october|november|december", text, re.I) and re.search(r"\d{4}", text):
+        return True
+    if re.search(r"\bPLAN\b", text, re.I) and len(text) >= 8:
+        return True
+    return False
+
+
 def _recap_has_header_rule(page: fitz.Page) -> bool:
     """True when the full-width divider under the plan headings is present."""
     for drawing in page.get_drawings():
@@ -1728,7 +2280,9 @@ def _recap_has_header_rule(page: fitz.Page) -> bool:
             if abs(start.y - end.y) > 1.5:
                 continue
             left, right = sorted((start.x, end.x))
-            if abs(start.y - 109.0) <= 3 and left <= 56 and right >= page.rect.width - 56:
+            mid_y = (start.y + end.y) / 2
+            # Client expected rule is near y=92 spanning ~42..504.
+            if 88 <= mid_y <= 130 and left <= 56 and right >= 480:
                 return True
     return False
 
@@ -1741,8 +2295,25 @@ def _recap_solid_bullet_count(page: fitz.Page) -> int:
         if fill not in ((0, 0, 0), (0.0, 0.0, 0.0)):
             continue
         rect = fitz.Rect(drawing.get("rect") or (0, 0, 0, 0))
-        if 2.5 <= rect.width <= 6 and 2.5 <= rect.height <= 6 and 50 <= rect.x0 <= 60:
+        # Main bullets ~x67, follow-on ~x72, nested UA ~x83.
+        if 2.5 <= rect.width <= 6 and 2.5 <= rect.height <= 6 and 50 <= rect.x0 <= 90:
             count += 1
+    return count
+
+
+def _recap_glyph_bullet_count(page: fitz.Page) -> int:
+    """Count text bullet glyphs in the expected Recap bullet column (~x=67)."""
+    count = 0
+    for block in page.get_text("dict").get("blocks", []):
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []):
+            for span in line.get("spans", []):
+                text = str(span.get("text") or "").strip()
+                if text not in {"•", "·", "●", "╖", "\uf0b7", "\u2022"}:
+                    continue
+                if 60 <= float(span["bbox"][0]) <= 75:
+                    count += 1
     return count
 
 
@@ -1750,7 +2321,6 @@ def _recap_layout_matches(page: fitz.Page) -> bool:
     """True when the Year End Recap header and bullet columns already match the MOA layout."""
     title_ok = False
     important_ok = False
-    glyph_bullets = 0
     for block in page.get_text("dict").get("blocks", []):
         if block.get("type") != 0:
             continue
@@ -1762,17 +2332,10 @@ def _recap_layout_matches(page: fitz.Page) -> bool:
             size = float(spans[0].get("size") or 0)
             x = float(line["bbox"][0])
             if text.upper() == "YEAR END RECAP":
-                title_ok = abs(size - 13.0) <= 0.8
+                title_ok = abs(size - 10.5) <= 0.8
             elif text.lower() == "important information":
-                important_ok = abs(x - 54) <= 3 and abs(size - 11.0) <= 0.8
-            if re.match(r"^[·•\u00b7\u2022]", text):
-                glyph_bullets += 1
+                important_ok = abs(x - 42) <= 3 and abs(size - 9.6) <= 0.8
     if not title_ok or not important_ok or not _recap_has_header_rule(page):
-        return False
-    # Faint Helvetica middle-dots must be replaced with solid drawn discs.
-    if glyph_bullets:
-        return False
-    if _recap_solid_bullet_count(page) < 1:
         return False
     return _recap_bullets_have_marks(page)
 
@@ -1780,7 +2343,7 @@ def _recap_layout_matches(page: fitz.Page) -> bool:
 def _recap_bullets_have_marks(page: fitz.Page) -> bool:
     """Check bullets use the divider column with body text on a hanging indent."""
     paragraph_starts: list[tuple[float, float, float]] = []
-    filled_discs = _recap_solid_bullet_count(page)
+    marks = _recap_solid_bullet_count(page) + _recap_glyph_bullet_count(page)
     for block in page.get_text("dict").get("blocks", []):
         if block.get("type") != 0:
             continue
@@ -1796,11 +2359,12 @@ def _recap_bullets_have_marks(page: fitz.Page) -> bool:
     if not paragraph_starts:
         return False
     for body_x, _body_y, body_size in paragraph_starts:
-        if body_x < 48 or body_x > 72:
+        # Client expected hanging column is ~78; allow legacy ~62 rebuilds too.
+        if body_x < 48 or body_x > 90:
             return False
-        if body_size and abs(body_size - 8.0) > 1.5:
+        if body_size and abs(body_size - 8.1) > 1.6:
             return False
-    if filled_discs < len(paragraph_starts):
+    if marks < len(paragraph_starts):
         return False
     return True
 
@@ -1898,6 +2462,98 @@ def _adp_nhce_percent(doc: fitz.Document) -> float | None:
         if match:
             return float(match.group(1))
     return None
+
+
+_EXCLUSIVE_RECAP = ("Y2", "Y3", "Y4", "Y5")
+_EXCLUSIVE_RECAP_TEMPLATES = {
+    "Y2": (
+        "Based on the definition of Highly Compensated Employee (HCE), the employee(s) listed on the "
+        "Future HCE Determination Report are considered highly compensated for the Plan Year beginning "
+        "in 2026. The maximum average deferral rate for the Highly Compensated Employee(s) for the 2026 "
+        "plan year is % based on the average deferral rate for your Nonhighly Compensated Employees (NHCE) "
+        "for 2025 of %. This rate is determined using the \"prior year data\" method. Please communicate "
+        "the maximum deferral percentage to affected employees. Note: the actual amount an employee can "
+        "defer in 2026 is the lesser of the average deferral rate listed, $24,500 or the annual addition "
+        "limit (adjusted for \"catch-up\" contributions, if applicable)."
+    ),
+    "Y3": (
+        "Based on the definition of Highly Compensated Employee (HCE), the employee(s) listed on the "
+        "Future HCE Determination Report are considered highly compensated for the Plan Year beginning "
+        "in 2026. The maximum average deferral rate for the Highly Compensated Employee(s) for the 2026 "
+        "plan year is based on the average deferral rate for your Nonhighly Compensated Employees for 2026. "
+        "Note: In addition, the actual amount the employee can defer in 2026 cannot exceed $24,500 or the "
+        "annual addition limit (adjusted for \"catch-up\" contributions, if applicable)."
+    ),
+    "Y4": (
+        "Based on the definition of Highly Compensated Employee (HCE), the employee(s) listed on the "
+        "Future HCE Determination Report are considered highly compensated for the Plan Year beginning "
+        "in 2026. The maximum average deferral rate for the Highly Compensated Employee(s) for the 2026 "
+        "plan year is not limited as long as the plan follows the rules and regulations of the Safe Harbor "
+        "Plan. Note: The actual amount an employee can defer in 2026 is the lesser of $24,500 or the annual "
+        "addition limit (adjusted for \"catch-up\" contributions, if applicable)."
+    ),
+    "Y5": (
+        "Based on the definition of Highly Compensated Employee (HCE), the plan had Highly Compensated "
+        "Employees for the plan year ending December 31, 2025, however, no employee will be considered "
+        "highly compensated for the plan year beginning January 1, 2026. Please communicate to affected "
+        "employees."
+    ),
+}
+
+
+def _preferred_exclusive_recap(keep_ids: set[str]) -> str | None:
+    """Pick the winning Future-HCE / method bullet among kept exclusive ids."""
+    for rule_id in ("Y5", "Y4", "Y2", "Y3"):
+        if rule_id in keep_ids:
+            return rule_id
+    return None
+
+
+def _looks_like_exclusive_hce(bullet: str) -> bool:
+    """True for Future-HCE / method recap wording, even when YAML match text was clipped."""
+    text = (bullet or "").lower()
+    return bool(
+        re.search(r"based on the definition of highly compensated", text)
+        or re.search(r"future hce determination", text)
+        or re.search(r"prior year data", text)
+        or re.search(r"not limited as long as", text)
+        or re.search(r"safe harbor plan", text)
+    )
+
+
+def _normalize_recap_bullet_spaces(bullet: str) -> str:
+    """Collapse broken quote/spacing artifacts left by source PDF extraction."""
+    text = re.sub(r"[\u00b7\u2022\u2219\uf0b7]+", " ", bullet or "")
+    text = re.sub(r"[“”]", '"', text)
+    text = re.sub(r"[‘’]", "'", text)
+    text = re.sub(r"\s+([.,;:])", r"\1", text)
+    text = re.sub(r"(\d)\s+%", r"\1%", text)
+    text = re.sub(r"([(\[])\s+", r"\1", text)
+    text = re.sub(r"\s+([)\]])", r"\1", text)
+    text = re.sub(r"\s{2,}", " ", text)
+    return text.strip()
+
+
+def _adapt_recap_years(template: str, sample: str) -> str:
+    """Map template 2025/2026 placeholders onto years found in the source bullet."""
+    years = sorted({int(value) for value in re.findall(r"\b(20\d{2})\b", sample or "")})
+    if len(years) >= 2:
+        prior, future = years[-2], years[-1]
+    elif len(years) == 1:
+        future = years[0]
+        prior = future - 1
+    else:
+        return template
+    updated = template.replace("2026", "@@F@@").replace("2025", "@@P@@")
+    return updated.replace("@@F@@", str(future)).replace("@@P@@", str(prior))
+
+
+def _canonical_exclusive_recap(rule_id: str, sample: str) -> str:
+    """Build the kept exclusive Year End Recap bullet, preserving source years."""
+    template = _EXCLUSIVE_RECAP_TEMPLATES.get(rule_id)
+    if not template:
+        return _normalize_recap_bullet_spaces(sample)
+    return _normalize_recap_bullet_spaces(_adapt_recap_years(template, sample))
 
 
 def _fill_prior_rates(bullet: str, nhce: float | None) -> str:

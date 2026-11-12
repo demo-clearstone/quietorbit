@@ -255,12 +255,14 @@ def process_uploads(
         if rewrite_sources:
             warnings.extend(source_rewrite.apply_source_rewrites(doc, profile, highlights))
         else:
+            # Content stamps OPS already did (today's cover date / 402(g) years) —
+            # not layout or font changes.
             warnings.extend(source_rewrite.apply_cover_date(doc, highlights))
             warnings.extend(source_rewrite.apply_402g_dates(doc, profile, highlights))
-        warnings.extend(source_rewrite.normalize_cover_address_spacing(doc))
-        warnings.extend(source_rewrite.normalize_cover_census_wrap(doc))
-        warnings.extend(source_rewrite.normalize_date_range_spacing(doc))
-        warnings.extend(source_rewrite.normalize_from_to_columns(doc))
+        # Keep the Result Summary / AV header→body divider (client expected at y≈109).
+        # Do NOT run other layout/format normalizers (cover spacing, From/To columns,
+        # UA/ACTION x-shifts, Name column nudges, etc.) — source fonts/alignment stay intact.
+        warnings.extend(package_polish.ensure_summary_heading_rule(doc))
         if not profile.midyear and not is_457_plan(profile.plan_type):
             warnings.extend(
                 package_builder.ensure_compliance_overview(
@@ -271,9 +273,7 @@ def process_uploads(
                     plan_year_end=profile.plan_year_end,
                 )
             )
-        warnings.extend(package_polish.ensure_summary_heading_rule(doc))
         warnings.extend(package_polish.renumber_footers(doc))
-        warnings.extend(package_polish.normalize_report_layout(doc))
         # 6. Bookmarks, SSN scan, and assembly stops.
         profile.detected_sections = pdf_extractor.detect_sections(doc)
         profile_debug_path = str(
@@ -288,7 +288,8 @@ def process_uploads(
                 phase="after_business_rule_edits",
             )
         )
-        review.items.extend(package_polish.package_checks(doc, profile))
+        package_check_items = package_polish.package_checks(doc, profile)
+        review.items.extend(package_check_items)
         bookmark_count = bookmark_service.add_bookmarks(
             doc,
             profile,
@@ -331,6 +332,8 @@ def process_uploads(
                 cover_address=cover_address,
                 cover_pye=cover_pye,
                 selected_checks=validation_checks,
+                known_ssn_pages=ssn_pages,
+                result_summary_items=package_check_items,
             )
             if reasons:
                 audit_path = audit_log.audit_log_path(profile, job_id)

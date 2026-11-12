@@ -17,11 +17,11 @@ from services.file_order import list_file_meta
 from services.file_order import classify_file_rows
 from services.preview_view import add_annotation, add_highlight, add_secure_redaction, add_text, modify_pages
 from services.preview_view import outline as preview_outline
-from services.preview_view import page_lines, page_png, replace_line, replace_lines, search_pdf, shift_line_down, update_bookmark, validate_bookmarks
+from services.preview_view import merge_line_up, page_lines, page_png, replace_line, replace_lines, search_pdf, shift_line_down, update_bookmark, validate_bookmarks
 from services.preview_history import abort as abort_edit
 from services.preview_history import active_path, commit as commit_edit, edited_copy_path, editable_path, history_state, redo as redo_edit, snapshot_before, undo as undo_edit
 from services.audit_log import audit_log_path, write_audit_log
-from services.folder_loader import apply_file_order, list_folder_files, load_pdfs_from_folder
+from services.folder_loader import apply_file_order, list_folder_files, load_pdfs_from_folder, resolve_folder_pdf
 from services.pdf_pages import expand_uploads_by_page, pdf_page_count, pdf_page_texts
 from services.orchestrator import process_uploads
 from services.console_trace import read_trace, run_traced, start_trace
@@ -230,6 +230,35 @@ def list_source_folder(path: str = "") -> dict:
     if not folder:
         raise HTTPException(status_code=400, detail="Enter a Valuation Package folder path")
     return list_folder_files(folder)
+
+
+@router.get("/folder-file")
+def open_folder_pdf(folder: str = "", name: str = "") -> FileResponse:
+    """Open one PDF from a Valuation Package folder in the browser."""
+    path = resolve_folder_pdf(folder, name)
+    return FileResponse(
+        path,
+        media_type="application/pdf",
+        filename=path.name,
+        content_disposition_type="inline",
+    )
+
+
+@router.get("/uploads/{upload_id}")
+def open_uploaded_pdf(upload_id: str) -> Response:
+    """Open a previously uploaded PDF blob in the browser."""
+    stored = _stored_upload(upload_id)
+    if not stored:
+        raise HTTPException(status_code=404, detail="Upload not found — add the file again")
+    name, data = stored
+    if not str(name).lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Only PDF files can be opened")
+    safe_name = Path(str(name)).name.replace('"', "")
+    return Response(
+        content=data,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{safe_name}"'},
+    )
 
 
 def _stored_upload(token: str) -> tuple[str, bytes] | None:
@@ -442,7 +471,12 @@ class PreviewEdit(BaseModel):
     y1: float
     text: str = ""
     caret: int | None = None
+    merge_up: bool = False
     following: list[PreviewLine] = Field(default_factory=list)
+    bold: bool | None = None
+    italic: bool | None = None
+    align: str | None = None
+    fontsize: float | None = Field(default=None, ge=4, le=72)
 
 
 class PageOperation(BaseModel):
@@ -467,6 +501,10 @@ class PreviewAnnotation(BaseModel):
     y1: float | None = None
     text: str = ""
     points: list[list[float]] = Field(default_factory=list)
+    bold: bool | None = None
+    italic: bool | None = None
+    align: str | None = None
+    fontsize: float | None = Field(default=None, ge=4, le=72)
 
 
 class BookmarkOperation(BaseModel):
@@ -538,14 +576,33 @@ def edit_job_page(job_id: str, body: PreviewEdit) -> dict:
     marks = _preview_marks(job_id, path)
     snapshot = snapshot_before(path)
     try:
-        if body.caret is None:
-            updated = replace_line(
+        style = {
+            "bold": body.bold,
+            "italic": body.italic,
+            "align": body.align,
+            "fontsize": body.fontsize,
+        }
+        if body.merge_up:
+            updated = merge_line_up(
                 path,
                 body.page,
                 (body.x0, body.y0, body.x1, body.y1),
                 body.text,
                 marks,
             )
+            detail = "Joined this line with the line above."
+            shifted = True
+        elif body.caret is None:
+            updated = replace_line(
+                path,
+                body.page,
+                (body.x0, body.y0, body.x1, body.y1),
+                body.text,
+                marks,
+                style=style,
+            )
+            detail = f"Updated page {body.page}."
+            shifted = False
         else:
             updated = shift_line_down(
                 path,
@@ -555,6 +612,8 @@ def edit_job_page(job_id: str, body: PreviewEdit) -> dict:
                 body.caret,
                 marks,
             )
+            detail = "Moved the text onto the next line."
+            shifted = True
         commit_edit(path, snapshot)
     except ValueError as exc:
         abort_edit(snapshot)
@@ -567,8 +626,9 @@ def edit_job_page(job_id: str, body: PreviewEdit) -> dict:
     return {
         "page": body.page,
         "highlights": updated,
-        "shifted": body.caret is not None,
-        "detail": "Moved the text onto the next line." if body.caret is not None else f"Updated page {body.page}.",
+        "shifted": shifted,
+        "merged_up": body.merge_up,
+        "detail": detail,
     }
 
 
@@ -639,14 +699,24 @@ def annotate_job_pdf(job_id: str, body: PreviewAnnotation) -> dict:
     snapshot = snapshot_before(path)
     try:
         if body.action == "text" and body.x is not None and body.y is not None:
-            add_text(path, body.page, body.x, body.y, body.text)
+            add_text(
+                path,
+                body.page,
+                body.x,
+                body.y,
+                body.text,
+                bold=body.bold,
+                italic=body.italic,
+                align=body.align,
+                fontsize=body.fontsize,
+            )
         elif body.action == "highlight" and None not in (body.x0, body.y0, body.x1, body.y1):
             add_highlight(path, body.page, (body.x0, body.y0, body.x1, body.y1))
         else:
             rect = (body.x0, body.y0, body.x1, body.y1)
             if body.action == "redact" and None not in rect:
                 removed_chars = add_secure_redaction(path, body.page, rect)
-            elif body.action in {"note", "rectangle", "circle", "line", "stamp", "signature"} and None not in rect:
+            elif body.action in {"note", "rectangle", "circle", "line", "hline", "stamp", "signature"} and None not in rect:
                 add_annotation(path, body.page, body.action, rect, text=body.text, points=body.points)
             else:
                 raise ValueError("Choose a tool and provide its position on the page.")

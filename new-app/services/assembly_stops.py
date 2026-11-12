@@ -200,6 +200,8 @@ def stop_reasons(
     cover_address: str | None = None,
     cover_pye: str | None = None,
     selected_checks: list[str] | None = None,
+    known_ssn_pages: list[int] | None = None,
+    result_summary_items: list | None = None,
 ) -> list[str]:
     """Checking whether assembly must stop.
 
@@ -220,6 +222,8 @@ def stop_reasons(
         cover_pye: Cover pye. Type: str | None.
         selected_checks: IDs of individual failure messages the user chose to ignore.
             None enforces all checks; an empty list also ignores none.
+        known_ssn_pages: Optional pages already found by ``ssn_scan.scan_ssns``.
+        result_summary_items: Optional items already produced by ``package_checks``.
 
     Returns:
         a list of str.
@@ -233,7 +237,7 @@ def stop_reasons(
     Side effects:
         None. This function only reads data and returns a value.
     """
-    reasons = _content_reasons(doc, _VALIDATION_IDS)
+    reasons = _content_reasons(doc, _VALIDATION_IDS, known_ssn_pages=known_ssn_pages)
     if _is_valuation_package(source_files, doc):
         reasons.extend(
             _package_reasons(
@@ -249,6 +253,7 @@ def stop_reasons(
                 cover_address=cover_address,
                 cover_pye=cover_pye,
                 selected_checks=_VALIDATION_IDS,
+                result_summary_items=result_summary_items,
             )
         )
     if selected_checks is None:
@@ -262,7 +267,12 @@ def stop_reasons(
     ]
 
 
-def _content_reasons(doc: fitz.Document, selected: set[str] | None = None) -> list[str]:
+def _content_reasons(
+    doc: fitz.Document,
+    selected: set[str] | None = None,
+    *,
+    known_ssn_pages: list[int] | None = None,
+) -> list[str]:
     """Content reasons.
 
     Purpose:
@@ -270,6 +280,7 @@ def _content_reasons(doc: fitz.Document, selected: set[str] | None = None) -> li
 
     Args:
         doc: Open PDF. Must not be closed.
+        known_ssn_pages: Optional pages already found by ``ssn_scan.scan_ssns``.
 
     Returns:
         list[str].
@@ -285,7 +296,12 @@ def _content_reasons(doc: fitz.Document, selected: set[str] | None = None) -> li
     """
     reasons: list[str] = []
     selected = _VALIDATION_IDS if selected is None else selected
-    pages = ssn_scan.scan_ssns(doc) if "ssn" in selected else []
+    if "ssn" not in selected:
+        pages = []
+    elif known_ssn_pages is not None:
+        pages = known_ssn_pages
+    else:
+        pages = ssn_scan.scan_ssns(doc)
     if pages:
         listed = ", ".join(str(page) for page in pages)
         reasons.append(
@@ -324,6 +340,7 @@ def _package_reasons(
     cover_address: str | None = None,
     cover_pye: str | None = None,
     selected_checks: set[str] | None = None,
+    result_summary_items: list | None = None,
 ) -> list[str]:
     """Package reasons.
 
@@ -342,6 +359,7 @@ def _package_reasons(
         cover_company: Cover company. Type: str | None.
         cover_address: Cover address. Type: str | None.
         cover_pye: Cover pye. Type: str | None.
+        result_summary_items: Optional items already produced by ``package_checks``.
 
     Returns:
         a list of str.
@@ -389,7 +407,14 @@ def _package_reasons(
         item = _compliance_check(doc, profile)
         if not item.passed:
             reasons.append(f"{item.label} validation failed: {item.detail}. Assembly stopped.")
-    reasons.extend(_summary_result_reasons(doc, selected, profile.plan_type))
+    reasons.extend(
+        _summary_result_reasons(
+            doc,
+            selected,
+            profile.plan_type,
+            precomputed_items=result_summary_items,
+        )
+    )
     if "cover_excel" in selected:
         reasons.extend(_excel_cover_reasons(
             excel_company=excel_company,
@@ -418,6 +443,8 @@ def _summary_result_reasons(
     doc: fitz.Document,
     selected: set[str] | None = None,
     plan_type: str | None = None,
+    *,
+    precomputed_items: list | None = None,
 ) -> list[str]:
     """Stop if the tester's Result Summary conflicts with the test reports.
 
@@ -428,6 +455,7 @@ def _summary_result_reasons(
         doc: Open PDF. Must not be closed.
         selected: Selected validation ids.
         plan_type: Plan type for 410(b) Result Summary norms.
+        precomputed_items: Optional items already produced by ``package_checks``.
 
     Returns:
         list[str].
@@ -444,8 +472,20 @@ def _summary_result_reasons(
     from services.package_polish import _result_summary_checks
 
     selected = _VALIDATION_IDS if selected is None else selected
+    if precomputed_items is None:
+        items = _result_summary_checks(doc, plan_type)
+    else:
+        # package_checks returns mixed validation items; keep summary-related ones.
+        items = [
+            item
+            for item in precomputed_items
+            if str(getattr(item, "code", "")).startswith("summary_")
+            or str(getattr(item, "code", "")) in {"result_summary", "top_heavy_summary"}
+        ]
+        if not items:
+            items = _result_summary_checks(doc, plan_type)
     failures = []
-    for item in _result_summary_checks(doc, plan_type):
+    for item in items:
         if item.passed:
             continue
         if item.code == "summary_410(b)":

@@ -53,6 +53,31 @@ def _norm(text: str) -> str:
     return re.sub(r"\s+", " ", DATE.sub("<DATE>", text)).strip()
 
 
+def _borders(page: fitz.Page) -> list[tuple[int, int, int]]:
+    """Horizontal rules as (y, x0, x1), sorted for stable compare.
+
+    Includes both stroked lines and thin filled/stroked rectangles (client
+    packages often draw dividers as ``re`` rects rather than ``l`` lines).
+    """
+    out: list[tuple[int, int, int]] = []
+    for drawing in page.get_drawings():
+        for item in drawing.get("items") or []:
+            if not item:
+                continue
+            if item[0] == "l" and len(item) >= 3:
+                start, end = fitz.Point(item[1]), fitz.Point(item[2])
+                if abs(start.y - end.y) > 1.5 or abs(start.x - end.x) < 30:
+                    continue
+                left, right = sorted((start.x, end.x))
+                out.append((round((start.y + end.y) / 2), round(left), round(right)))
+            elif item[0] == "re" and len(item) >= 2:
+                rect = fitz.Rect(item[1])
+                if rect.width < 30 or rect.height > 2.5:
+                    continue
+                out.append((round((rect.y0 + rect.y1) / 2), round(rect.x0), round(rect.x1)))
+    return sorted(set(out))
+
+
 def main(expected_path: str, actual_path: str) -> None:
     exp, act = fitz.open(expected_path), fitz.open(actual_path)
     print(f"Pages: expected={exp.page_count} actual={act.page_count}")
@@ -62,9 +87,22 @@ def main(expected_path: str, actual_path: str) -> None:
             continue
         e, a = _lines(exp[i]), _lines(act[i])
         et, at = [_norm(l["text"]) for l in e], [_norm(l["text"]) for l in a]
-        if et == at and all(x["style"] == y["style"] and abs(x["x"] - y["x"]) <= 1 for x, y in zip(e, a)):
+        eb, ab = _borders(exp[i]), _borders(act[i])
+        text_same = et == at and all(x["style"] == y["style"] and abs(x["x"] - y["x"]) <= 1 for x, y in zip(e, a))
+        borders_same = eb == ab
+        if text_same and borders_same:
             continue
         print(f"\n=== PAGE {i + 1}: {(e[0]['text'] if e else '')[:60]!r} ===")
+        for pair in difflib.SequenceMatcher(None, eb, ab, autojunk=False).get_opcodes():
+            tag, i1, i2, j1, j2 = pair
+            if tag == "equal":
+                continue
+            for y, x0, x1 in eb[i1:i2]:
+                print(f"  BORDER EXP y={y} x=({x0},{x1})")
+            for y, x0, x1 in ab[j1:j2]:
+                print(f"  BORDER ACT y={y} x=({x0},{x1})")
+        if text_same:
+            continue
         sm = difflib.SequenceMatcher(None, et, at, autojunk=False)
         for tag, i1, i2, j1, j2 in sm.get_opcodes():
             if tag == "equal":

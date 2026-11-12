@@ -73,6 +73,24 @@ def _folder_entries(path: Path) -> tuple[list[Path], list[str]]:
     return source_paths, skipped
 
 
+def resolve_folder_pdf(raw_folder: str, raw_name: str) -> Path:
+    """Resolve a PDF inside a Valuation Package folder for inline open/preview."""
+    directory = _resolved_dir(raw_folder)
+    filename = Path((raw_name or "").strip()).name
+    if not filename or filename.startswith(".") or filename.startswith("~$"):
+        raise HTTPException(status_code=400, detail="Choose a PDF file to open")
+    if not filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Only PDF files can be opened")
+    path = (directory / filename).resolve()
+    try:
+        path.relative_to(directory)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="File is outside the folder") from exc
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail=f"File not found: {filename}")
+    return path
+
+
 def list_folder_files(raw_path: str) -> dict:
     """Return PDF/Excel names in a folder so the UI can show Up/Down/Remove.
 

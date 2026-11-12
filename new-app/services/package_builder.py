@@ -463,11 +463,40 @@ def _wrapped_text(
     return y
 
 
+# Year End Recap layout — match client expected compare_pdfs metrics.
+RECAP_TITLE_SIZE = 10.5
+RECAP_TITLE_Y = 48.0
+RECAP_DATE_SIZE = 9.9
+RECAP_DATE_Y = 66.0
+RECAP_PLAN_SIZE = 9.9
+RECAP_PLAN_Y = 79.0
+RECAP_NUMBER_SIZE = 9.9
+# Plan name at baseline 79 occupies ~y68–82; number must sit fully below it.
+RECAP_NUMBER_Y = 95.0
+RECAP_HEADER_RULE_Y = 102.0
+RECAP_HEADER_RULE_X0 = 42.0
+RECAP_HEADER_RULE_X1 = 504.0
+RECAP_IMPORTANT_X = 42.0
+RECAP_IMPORTANT_SIZE = 9.6
+RECAP_IMPORTANT_Y = 123.0
+RECAP_BODY_START_Y = 141.0
+RECAP_BODY_SIZE = 8.1
+RECAP_BODY_LEADING = 10.0
+RECAP_BODY_X = 78.0
+RECAP_BULLET_X = 67.0
+# Kaagaz p4 / MOA packages use a filled disc (~3.6pt), not a Helvetica middle-dot glyph.
+RECAP_BULLET_DIAMETER = 3.6
+RECAP_BULLET_SIZE = 7.3  # legacy glyph size; drawing uses RECAP_BULLET_DIAMETER
+RECAP_BULLET_GAP = 8.0
+# Expected packages center header lines as if the page were A4-wide (~595pt).
+RECAP_CENTER_WIDTH = 595.28
+
+
 def _draw_recap_header_rule(page: fitz.Page) -> None:
-    """Full-width divider under the Year End Recap plan headings."""
+    """Divider under the Year End Recap plan headings (client expected bounds)."""
     page.draw_line(
-        fitz.Point(54, 109.0),
-        fitz.Point(page.rect.width - 54, 109.0),
+        fitz.Point(RECAP_HEADER_RULE_X0, RECAP_HEADER_RULE_Y),
+        fitz.Point(RECAP_HEADER_RULE_X1, RECAP_HEADER_RULE_Y),
         color=_BLACK,
         width=0.8,
         overlay=True,
@@ -500,7 +529,7 @@ def _center(page: fitz.Page, text: str, y: float, size: float, font: str) -> Non
         Changes the PDF passed in. Does not save the file by itself.
     """
     width = fitz.get_text_length(text, fontname=font, fontsize=size)
-    page.insert_text(((page.rect.width - width) / 2, y), text, fontsize=size, fontname=font, color=_BLACK)
+    page.insert_text(((RECAP_CENTER_WIDTH - width) / 2, y), text, fontsize=size, fontname=font, color=_BLACK)
 
 
 def _heading_line(page: fitz.Page, text: str, y: float, color: tuple[float, float, float]) -> float:
@@ -1132,6 +1161,191 @@ def build_year_end_recap_sample() -> fitz.Document:
     return doc
 
 
+def _recap_body_segments(body: str) -> list[tuple[str, str]]:
+    """Split recap copy into regular / bold max-rate / italic Note runs."""
+    text = body.strip()
+    if not text:
+        return []
+    note = re.search(r"(\bNote:\s*.+)$", text, re.I | re.S)
+    maximum = re.search(
+        r"(The maximum average deferral rate\b.*?)(?=\s*\bNote:|\s*$)",
+        text,
+        re.I | re.S,
+    )
+    segments: list[tuple[str, str]] = []
+    cursor = 0
+    if maximum:
+        if maximum.start() > cursor:
+            segments.append(("helv", text[cursor:maximum.start()].rstrip()))
+        segments.append(("hebo", maximum.group(1).strip()))
+        cursor = maximum.end()
+    if note and note.start() >= cursor:
+        if note.start() > cursor:
+            gap = text[cursor:note.start()].strip()
+            if gap:
+                segments.append(("helv", gap))
+        segments.append(("heit", note.group(1).strip()))
+        cursor = note.end()
+    if cursor < len(text):
+        rest = text[cursor:].strip()
+        if rest:
+            segments.append(("helv", rest))
+    return [(font, part) for font, part in segments if part] or [("helv", text)]
+
+
+def _write_recap_bullet_body(
+    page: fitz.Page,
+    body: str,
+    x: float,
+    y: float,
+    size: float,
+    leading: float,
+    width: float,
+) -> float:
+    """Draw one hanging-indent recap bullet with bold max-rate and italic Note runs."""
+    segments = _recap_body_segments(body)
+    words: list[tuple[str, str]] = []
+    for seg_index, (font, segment) in enumerate(segments):
+        parts = segment.split()
+        for word_index, word in enumerate(parts):
+            trailing = " "
+            if word_index == len(parts) - 1 and seg_index == len(segments) - 1:
+                trailing = ""
+            words.append((font, f"{word}{trailing}"))
+    if not words:
+        return y
+    cursor_x = x
+    line_used = 0.0
+    for font, token in words:
+        token_width = fitz.get_text_length(token, fontname=font, fontsize=size)
+        if line_used and line_used + token_width > width:
+            y += leading
+            cursor_x = x
+            line_used = 0.0
+        page.insert_text((cursor_x, y), token, fontsize=size, fontname=font, color=_BLACK)
+        cursor_x += token_width
+        line_used += token_width
+    if line_used:
+        y += leading
+    return y
+
+
+RECAP_UA_TITLE_X = 83.0
+RECAP_UA_BODY_X = 83.0
+RECAP_UA_NEST_BULLET_X = 83.0
+RECAP_UA_NEST_TEXT_X = 101.0
+RECAP_UA_TITLE_SIZE = 8.8
+RECAP_UA_NEST_SIZE = 8.9
+RECAP_UA_FOLLOWON_BULLET_X = 72.0
+
+
+def _is_ua_recap_body(body: str) -> bool:
+    """True when this recap bullet is the 403(b) Universal Availability block."""
+    text = (body or "").strip()
+    if not text:
+        return False
+    upper = text.upper()
+    return upper.startswith("UNIVERSAL AVAILABILITY") or text.lower().startswith('the "universal availability"') or text.lower().startswith("the 'universal availability'") or text.lower().startswith("the universal availability")
+
+
+def _is_ua_followon_body(body: str) -> bool:
+    """True for the UA closing 'If you sponsor…' paragraph (client x≈72/83)."""
+    text = re.sub(
+        r"^(?:[\u2022•\u00b7\u25cf\u25e6\u2219\uf0b7╖■□▪▫*\-·●]+)\s*",
+        "",
+        (body or "").strip(),
+    )
+    return text.lower().startswith("if you sponsor a qualified retirement plan")
+
+
+def _split_ua_recap_body(body: str) -> tuple[str, list[str], str]:
+    """Return (intro_paragraph, nested_exclusion_lines, follow_on) for a UA bullet."""
+    text = re.sub(r"\s+", " ", (body or "").strip())
+    text = re.sub(r"\belection\s+data\s+At\b", "election annually At", text, flags=re.I)
+    text = re.sub(r"^UNIVERSAL AVAILABILITY RULE\s*", "", text, flags=re.I).strip()
+    follow = ""
+    follow_m = re.search(r"\bIf you sponsor a qualified retirement plan\b.*$", text, re.I)
+    if follow_m:
+        follow = follow_m.group(0).strip()
+        text = text[: follow_m.start()].strip()
+    marker = re.search(r"\bincluding\s*:\s*", text, re.I)
+    if not marker:
+        return text, [], follow
+    intro = text[: marker.end()].strip()
+    rest = text[marker.end() :].strip()
+    # Split the flattened exclusion list back into the MOA nested bullets.
+    pattern = re.compile(
+        r"(?=Employees who normally work less than 20 hours per week|"
+        r"Students performing services at a school, college or university|"
+        r"Non-resident aliens with no U\.S\. source income|"
+        r"Employees who are eligible to make elective deferrals under another|"
+        r"Employees not able to defer \$200 during the plan year)",
+        re.I,
+    )
+    parts = [part.strip(" ;") for part in pattern.split(rest) if part and part.strip(" ;")]
+    if len(parts) <= 1 and rest:
+        # Fallback: keep one nested line so layout still has a child bullet.
+        return intro, [rest], follow
+    return intro, parts, follow
+
+
+def _draw_recap_bullet_mark(
+    page: fitz.Page,
+    x: float,
+    baseline_y: float,
+    *,
+    body_size: float | None = None,
+) -> None:
+    """Draw a filled disc bullet matching Kaagaz Year End Recap page 4 (~3.6pt)."""
+    diam = float(RECAP_BULLET_DIAMETER)
+    size = float(RECAP_BODY_SIZE if body_size is None else body_size)
+    # Sit on the x-height of the first body line (insert_text y is the baseline).
+    cy = baseline_y - size * 0.32
+    page.draw_oval(
+        fitz.Rect(x, cy - diam / 2.0, x + diam, cy + diam / 2.0),
+        color=_BLACK,
+        fill=_BLACK,
+        width=0,
+    )
+
+
+def _write_ua_recap_section(
+    page: fitz.Page,
+    body: str,
+    y: float,
+    size: float,
+    leading: float,
+) -> float:
+    """Draw the Universal Availability block with title + nested exclusions (client layout)."""
+    intro, exclusions, follow = _split_ua_recap_body(body)
+    _draw_recap_bullet_mark(page, RECAP_BULLET_X, y, body_size=size)
+    page.insert_text(
+        (RECAP_UA_TITLE_X, y),
+        "UNIVERSAL AVAILABILITY RULE",
+        fontsize=RECAP_UA_TITLE_SIZE,
+        fontname="hebo",
+        color=_BLACK,
+    )
+    y += leading + 2
+    width = max(320.0, page.rect.width - RECAP_UA_BODY_X - 36)
+    if intro:
+        y = _write_recap_bullet_body(page, intro, RECAP_UA_BODY_X, y, size, leading, width)
+    nest_width = max(280.0, page.rect.width - RECAP_UA_NEST_TEXT_X - 36)
+    nest_size = RECAP_UA_NEST_SIZE
+    nest_leading = max(leading, nest_size + 1.5)
+    for item in exclusions:
+        _draw_recap_bullet_mark(page, RECAP_UA_NEST_BULLET_X, y, body_size=nest_size)
+        y = _write_recap_bullet_body(
+            page, item, RECAP_UA_NEST_TEXT_X, y, nest_size, nest_leading, nest_width
+        )
+        y += 2
+    if follow:
+        y += 2
+        _draw_recap_bullet_mark(page, RECAP_UA_FOLLOWON_BULLET_X, y, body_size=size)
+        y = _write_recap_bullet_body(page, follow, RECAP_UA_BODY_X, y, size, leading, width)
+    return y
+
+
 def write_recap_page(
     page: fitz.Page,
     header_lines: list[str],
@@ -1164,76 +1378,94 @@ def write_recap_page(
     Side effects:
         Changes the PDF passed in. Does not save the file by itself.
     """
-    y = 48.0
+    y = RECAP_TITLE_Y
     header_rule_drawn = False
+    bullet_only = re.compile(r"^[\u2022•\u00b7\u25cf\u25e6\u2219\uf0b7╖■□▪▫*\-·●]+$")
     for raw in header_lines:
         line = raw.strip()
         if not line:
             y += 6
             continue
+        # Stray bullet glyphs from split_recap must not be centered as header text
+        # (that placed a ╖ near x≈296 at size 9.9).
+        if bullet_only.match(line):
+            continue
         if line.upper() == "YEAR END RECAP":
-            _center(page, "YEAR END RECAP", y, 13.0, "hebo")
-            y = 66.0
+            _center(page, "YEAR END RECAP", RECAP_TITLE_Y, RECAP_TITLE_SIZE, "hebo")
+            y = RECAP_DATE_Y
             continue
         if line.lower() == "important information":
             if not header_rule_drawn:
                 _draw_recap_header_rule(page)
                 header_rule_drawn = True
-            # Sit just under the header rule (MOA / Kaagaz expected).
-            y = 123.0
-            page.insert_text((54, y), "Important Information", fontsize=11.0, fontname="hebo", color=_BLACK)
-            width = fitz.get_text_length("Important Information", fontname="hebo", fontsize=11.0)
+            y = RECAP_IMPORTANT_Y
+            page.insert_text(
+                (RECAP_IMPORTANT_X, y),
+                "Important Information",
+                fontsize=RECAP_IMPORTANT_SIZE,
+                fontname="hebo",
+                color=_BLACK,
+            )
+            width = fitz.get_text_length(
+                "Important Information", fontname="hebo", fontsize=RECAP_IMPORTANT_SIZE
+            )
             page.draw_line(
-                fitz.Point(54, y + 2),
-                fitz.Point(54 + width, y + 2),
+                fitz.Point(RECAP_IMPORTANT_X, y + 2.5),
+                fitz.Point(RECAP_IMPORTANT_X + width, y + 2.5),
                 color=_BLACK,
                 width=0.7,
                 overlay=True,
             )
-            y = 141.0
+            y = RECAP_BODY_START_Y
             continue
         if re.fullmatch(r"\d{5,7}", line):
-            _center(page, line, 93.0, 10.0, "helv")
+            _center(page, line, RECAP_NUMBER_Y, RECAP_NUMBER_SIZE, "helv")
             continue
         is_plan_name = bool(re.search(r"\b(?:401\s*\(?k\)?|403\s*\(?b\)?|457)\b.*\bplan\b", line, re.I))
         if is_plan_name:
-            _center(page, line, 79.0, 11.0, "hebo")
-            y = 93.0
+            # Client expected packages keep the plan name regular weight.
+            _center(page, line, RECAP_PLAN_Y, RECAP_PLAN_SIZE, "helv")
+            y = RECAP_NUMBER_Y
             continue
-        font = "hebo" if line.replace(",", "").replace(".", "").isupper() else "helv"
-        size = 10.0
-        _center(page, line, y, size, font)
-        y += 12.0
+        font = "helv"
+        _center(page, line, y if y > RECAP_TITLE_Y else RECAP_DATE_Y, RECAP_DATE_SIZE, font)
+        y = RECAP_PLAN_Y if abs(y - RECAP_DATE_Y) < 1 else y + 12.0
     if not header_rule_drawn:
         _draw_recap_header_rule(page)
-    size = 8.0
-    leading = 10.0
-    # Bullets share the divider / Important Information left edge (Kaagaz page 4).
-    # Draw a filled+stroked disc — Helvetica "·" renders tiny/gray in viewers.
-    bullet_x = 54.0
-    bullet_diameter = 3.6
-    hang_x = bullet_x + bullet_diameter + 4.5
-    width = page.rect.width - hang_x - 36
-    for bullet in bullets:
-        body = re.sub(r"^(?:[\u2022•\u00b7\u25cf\u25e6\u2219\uf0b7╖■□▪▫*?\-]\s*)+", "", bullet).strip()
-        if not body:
+        if y < RECAP_BODY_START_Y:
+            y = RECAP_BODY_START_Y
+    size = RECAP_BODY_SIZE
+    leading = RECAP_BODY_LEADING
+    # Client expected: glyph bullet at x=67, hanging body at x=78, wrap at header rule.
+    hang_x = RECAP_BODY_X
+    width = max(360.0, RECAP_HEADER_RULE_X1 - hang_x)
+    bullet_prefix = re.compile(r"^(?:[\u2022•\u00b7\u25cf\u25e6\u2219\uf0b7╖■□▪▫*?\-]\s*)+")
+    exclusion_start = re.compile(
+        r"^(?:Employees who normally work less than 20 hours|"
+        r"Students performing services at a school|"
+        r"Non-resident aliens with no U\.S\. source income|"
+        r"Employees who are eligible to make elective deferrals|"
+        r"Employees not able to defer \$200)",
+        re.I,
+    )
+    index = 0
+    cleaned = [bullet_prefix.sub("", (bullet or "").strip()).strip() for bullet in bullets]
+    cleaned = [body for body in cleaned if body]
+    while index < len(cleaned):
+        body = cleaned[index]
+        index += 1
+        if _is_ua_recap_body(body):
+            while index < len(cleaned) and (
+                exclusion_start.match(cleaned[index]) or _is_ua_followon_body(cleaned[index])
+            ):
+                body = f"{body} {cleaned[index]}".strip()
+                index += 1
+            y = _write_ua_recap_section(page, body, y, size, leading)
+            y += RECAP_BULLET_GAP
             continue
-        lines = _wrap(body, "helv", size, width)
-        for index, wrapped in enumerate(lines):
-            if index == 0:
-                cy = y - size * 0.35
-                oval = fitz.Rect(
-                    bullet_x,
-                    cy - bullet_diameter / 2,
-                    bullet_x + bullet_diameter,
-                    cy + bullet_diameter / 2,
-                )
-                page.draw_oval(oval, color=_BLACK, fill=_BLACK, width=0.7, overlay=True)
-                page.insert_text((hang_x, y), wrapped, fontsize=size, fontname="helv", color=_BLACK)
-            else:
-                page.insert_text((hang_x, y), wrapped, fontsize=size, fontname="helv", color=_BLACK)
-            y += leading
-        y += 8
+        _draw_recap_bullet_mark(page, RECAP_BULLET_X, y, body_size=size)
+        y = _write_recap_bullet_body(page, body, hang_x, y, size, leading, width)
+        y += RECAP_BULLET_GAP
     if number is not None:
         _page_number(page, number)
 

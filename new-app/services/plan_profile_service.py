@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta
 
 from models.plan_profile import PlanProfile
 from services.pdf_extractor import beginning_plan_year
 from services.plan_config import is_457_plan, package_flags
+
+_SH_PLAN_NAME = re.compile(
+    r"\bSAFE\s*HARBOR\b|^\s*SH\b|\bSH\s+401|\bSH\s+403|\bSHNE\b|\bSHM\b",
+    re.I,
+)
 
 
 def finalize_profile(profile: PlanProfile) -> PlanProfile:
@@ -29,6 +35,9 @@ def finalize_profile(profile: PlanProfile) -> PlanProfile:
         None. This function only reads data and returns a value.
     """
     field_sources = profile.extra.setdefault("field_sources", {})
+    if profile.safe_harbor is None and _SH_PLAN_NAME.search(profile.plan_name or ""):
+        profile.safe_harbor = True
+        field_sources["safe_harbor"] = "Derived from plan name"
     if profile.plan_year_start is None and profile.plan_year_end:
         try:
             end = datetime.strptime(profile.plan_year_end, "%m/%d/%Y")
