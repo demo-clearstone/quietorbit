@@ -259,9 +259,10 @@ def process_uploads(
             # not layout or font changes.
             warnings.extend(source_rewrite.apply_cover_date(doc, highlights))
             warnings.extend(source_rewrite.apply_402g_dates(doc, profile, highlights))
-        # Do NOT run layout/format normalizers (cover spacing, From/To columns,
-        # summary dividers, UA/ACTION x-shifts, Name column nudges, etc.).
-        # OPS assemble + keep/remove only — source alignment/fonts must stay intact.
+        # Keep the Result Summary / AV header→body divider (client expected at y≈109).
+        # Do NOT run other layout/format normalizers (cover spacing, From/To columns,
+        # UA/ACTION x-shifts, Name column nudges, etc.) — source fonts/alignment stay intact.
+        warnings.extend(package_polish.ensure_summary_heading_rule(doc))
         if not profile.midyear and not is_457_plan(profile.plan_type):
             warnings.extend(
                 package_builder.ensure_compliance_overview(
