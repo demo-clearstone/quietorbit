@@ -77,12 +77,17 @@
       gap: 10px;
     }
     .controls-head {
-      display: none;
+      display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 8px;
     }
-    .app.has-results .controls-head { display: flex; }
+    .controls-head-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex: 0 0 auto;
+    }
     .controls-head span { font-size: 0.8rem; font-weight: 700; }
     .upload-bar {
       display: none;
@@ -750,7 +755,10 @@
     <section class="card controls" id="controls">
       <div class="controls-head">
         <span>Upload</span>
-        <button type="button" class="btn ghost" id="hide-upload">Hide upload</button>
+        <div class="controls-head-actions">
+          <button type="button" class="btn ghost" id="refresh-upload" title="Clear the file list so you can upload a new set without reloading">Refresh upload</button>
+          <button type="button" class="btn ghost" id="hide-upload">Hide upload</button>
+        </div>
       </div>
       <div class="top-row">
         <div class="drop" id="drop">
@@ -978,10 +986,23 @@
 
     document.getElementById("hide-upload").addEventListener("click", () => setUploadOpen(false));
     document.getElementById("show-upload").addEventListener("click", () => setUploadOpen(true));
+    document.getElementById("refresh-upload").addEventListener("click", () => refreshUpload());
 
     function setUploadOpen(open) {
       app.classList.toggle("upload-hidden", !open);
       if (open) renderFiles();
+    }
+
+    function refreshUpload() {
+      files = [];
+      listedPath = "";
+      picker.value = "";
+      document.getElementById("source-path").value = "";
+      errorEl.textContent = "";
+      setStatus("Upload cleared — add new files or a folder path.");
+      setUploadOpen(true);
+      renderFiles();
+      app.classList.remove("has-files");
     }
 
     picker.addEventListener("change", () => {

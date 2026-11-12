@@ -119,7 +119,7 @@ if __name__ == "__main__":
     run_kwargs = {
         "host": HOST,
         "port": PORT,
-        "reload": False,
+        "reload": True,
         "timeout_keep_alive": 120,
         "http": "h11",
     }
