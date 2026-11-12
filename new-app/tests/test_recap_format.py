@@ -152,8 +152,9 @@ def test_merge_universal_availability_absorbs_exclusion_bullets() -> None:
 
 def test_recap_writes_universal_availability_nested_layout() -> None:
     from services.package_builder import (
-        RECAP_BULLET_SIZE,
+        RECAP_BULLET_DIAMETER,
         RECAP_UA_FOLLOWON_BULLET_X,
+        RECAP_UA_NEST_BULLET_X,
         RECAP_UA_NEST_SIZE,
         RECAP_UA_TITLE_SIZE,
     )
@@ -184,8 +185,6 @@ def test_recap_writes_universal_availability_nested_layout() -> None:
     title_size = None
     nest_xs = []
     nest_sizes = []
-    follow_bullet_x = None
-    bullet_sizes = []
     for block in page.get_text("dict")["blocks"]:
         if block.get("type") != 0:
             continue
@@ -199,16 +198,19 @@ def test_recap_writes_universal_availability_nested_layout() -> None:
             if joined.startswith("Employees who normally work less than 20 hours"):
                 nest_xs.append(round(spans[0]["bbox"][0]))
                 nest_sizes.append(round(float(spans[0]["size"]), 1))
-            if joined in {"·", "•", "╖"}:
-                bullet_sizes.append(round(float(spans[0]["size"]), 1))
-                if abs(float(spans[0]["bbox"][0]) - RECAP_UA_FOLLOWON_BULLET_X) < 1:
-                    follow_bullet_x = round(spans[0]["bbox"][0])
+    discs = [
+        fitz.Rect(drawing.get("rect") or (0, 0, 0, 0))
+        for drawing in page.get_drawings()
+        if drawing.get("fill") in {(0, 0, 0), (0.0, 0.0, 0.0)}
+    ]
+    discs = [rect for rect in discs if 2.5 <= rect.width <= 6 and 2.5 <= rect.height <= 6]
     assert title_x == 83
     assert title_size == RECAP_UA_TITLE_SIZE
     assert nest_xs and nest_xs[0] == 101
     assert nest_sizes and nest_sizes[0] == RECAP_UA_NEST_SIZE
-    assert follow_bullet_x == 72
-    assert bullet_sizes and all(abs(size - RECAP_BULLET_SIZE) < 0.2 for size in bullet_sizes)
+    assert any(abs(rect.x0 - RECAP_UA_FOLLOWON_BULLET_X) < 1 for rect in discs)
+    assert any(abs(rect.x0 - RECAP_UA_NEST_BULLET_X) < 1 for rect in discs)
+    assert discs and all(abs(rect.width - RECAP_BULLET_DIAMETER) < 0.2 for rect in discs)
 
 
 def test_recap_header_ignores_stray_bullet_glyphs() -> None:
@@ -235,14 +237,12 @@ def test_recap_header_ignores_stray_bullet_glyphs() -> None:
         if str(span.get("text") or "").strip() in {"•", "·", "╖", "●"} and float(span["bbox"][0]) > 200
     ]
     assert stray == []
-    assert any(
-        60 <= float(span["bbox"][0]) <= 75
-        for block in page.get_text("dict")["blocks"]
-        if block.get("type") == 0
-        for line in block.get("lines", [])
-        for span in line.get("spans", [])
-        if str(span.get("text") or "").strip() in {"•", "·", "╖", "●"}
-    )
+    discs = [
+        fitz.Rect(drawing.get("rect") or (0, 0, 0, 0))
+        for drawing in page.get_drawings()
+        if drawing.get("fill") in {(0, 0, 0), (0.0, 0.0, 0.0)}
+    ]
+    assert any(60 <= rect.x0 <= 75 and abs(rect.width - 3.6) < 0.2 for rect in discs)
 
 
 def test_recap_with_existing_bullets_is_not_rebuilt_or_changed() -> None:

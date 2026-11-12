@@ -2295,7 +2295,8 @@ def _recap_solid_bullet_count(page: fitz.Page) -> int:
         if fill not in ((0, 0, 0), (0.0, 0.0, 0.0)):
             continue
         rect = fitz.Rect(drawing.get("rect") or (0, 0, 0, 0))
-        if 2.5 <= rect.width <= 6 and 2.5 <= rect.height <= 6 and 50 <= rect.x0 <= 80:
+        # Main bullets ~x67, follow-on ~x72, nested UA ~x83.
+        if 2.5 <= rect.width <= 6 and 2.5 <= rect.height <= 6 and 50 <= rect.x0 <= 90:
             count += 1
     return count
 

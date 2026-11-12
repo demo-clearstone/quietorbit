@@ -484,7 +484,9 @@ RECAP_BODY_SIZE = 8.1
 RECAP_BODY_LEADING = 10.0
 RECAP_BODY_X = 78.0
 RECAP_BULLET_X = 67.0
-RECAP_BULLET_SIZE = 7.3
+# Kaagaz p4 / MOA packages use a filled disc (~3.6pt), not a Helvetica middle-dot glyph.
+RECAP_BULLET_DIAMETER = 3.6
+RECAP_BULLET_SIZE = 7.3  # legacy glyph size; drawing uses RECAP_BULLET_DIAMETER
 RECAP_BULLET_GAP = 8.0
 # Expected packages center header lines as if the page were A4-wide (~595pt).
 RECAP_CENTER_WIDTH = 595.28
@@ -1287,6 +1289,26 @@ def _split_ua_recap_body(body: str) -> tuple[str, list[str], str]:
     return intro, parts, follow
 
 
+def _draw_recap_bullet_mark(
+    page: fitz.Page,
+    x: float,
+    baseline_y: float,
+    *,
+    body_size: float | None = None,
+) -> None:
+    """Draw a filled disc bullet matching Kaagaz Year End Recap page 4 (~3.6pt)."""
+    diam = float(RECAP_BULLET_DIAMETER)
+    size = float(RECAP_BODY_SIZE if body_size is None else body_size)
+    # Sit on the x-height of the first body line (insert_text y is the baseline).
+    cy = baseline_y - size * 0.32
+    page.draw_oval(
+        fitz.Rect(x, cy - diam / 2.0, x + diam, cy + diam / 2.0),
+        color=_BLACK,
+        fill=_BLACK,
+        width=0,
+    )
+
+
 def _write_ua_recap_section(
     page: fitz.Page,
     body: str,
@@ -1296,13 +1318,7 @@ def _write_ua_recap_section(
 ) -> float:
     """Draw the Universal Availability block with title + nested exclusions (client layout)."""
     intro, exclusions, follow = _split_ua_recap_body(body)
-    page.insert_text(
-        (RECAP_BULLET_X, y),
-        "·",
-        fontsize=RECAP_BULLET_SIZE,
-        fontname="helv",
-        color=_BLACK,
-    )
+    _draw_recap_bullet_mark(page, RECAP_BULLET_X, y, body_size=size)
     page.insert_text(
         (RECAP_UA_TITLE_X, y),
         "UNIVERSAL AVAILABILITY RULE",
@@ -1318,26 +1334,14 @@ def _write_ua_recap_section(
     nest_size = RECAP_UA_NEST_SIZE
     nest_leading = max(leading, nest_size + 1.5)
     for item in exclusions:
-        page.insert_text(
-            (RECAP_UA_NEST_BULLET_X, y),
-            "·",
-            fontsize=RECAP_BULLET_SIZE,
-            fontname="helv",
-            color=_BLACK,
-        )
+        _draw_recap_bullet_mark(page, RECAP_UA_NEST_BULLET_X, y, body_size=nest_size)
         y = _write_recap_bullet_body(
             page, item, RECAP_UA_NEST_TEXT_X, y, nest_size, nest_leading, nest_width
         )
         y += 2
     if follow:
         y += 2
-        page.insert_text(
-            (RECAP_UA_FOLLOWON_BULLET_X, y),
-            "·",
-            fontsize=RECAP_BULLET_SIZE,
-            fontname="helv",
-            color=_BLACK,
-        )
+        _draw_recap_bullet_mark(page, RECAP_UA_FOLLOWON_BULLET_X, y, body_size=size)
         y = _write_recap_bullet_body(page, follow, RECAP_UA_BODY_X, y, size, leading, width)
     return y
 
@@ -1459,14 +1463,7 @@ def write_recap_page(
             y = _write_ua_recap_section(page, body, y, size, leading)
             y += RECAP_BULLET_GAP
             continue
-        # Helvetica maps several bullet codepoints to ·; x/size still match compare.
-        page.insert_text(
-            (RECAP_BULLET_X, y),
-            "·",
-            fontsize=RECAP_BULLET_SIZE,
-            fontname="helv",
-            color=_BLACK,
-        )
+        _draw_recap_bullet_mark(page, RECAP_BULLET_X, y, body_size=size)
         y = _write_recap_bullet_body(page, body, hang_x, y, size, leading, width)
         y += RECAP_BULLET_GAP
     if number is not None:
