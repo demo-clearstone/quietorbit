@@ -255,12 +255,13 @@ def process_uploads(
         if rewrite_sources:
             warnings.extend(source_rewrite.apply_source_rewrites(doc, profile, highlights))
         else:
+            # Content stamps OPS already did (today's cover date / 402(g) years) —
+            # not layout or font changes.
             warnings.extend(source_rewrite.apply_cover_date(doc, highlights))
             warnings.extend(source_rewrite.apply_402g_dates(doc, profile, highlights))
-        warnings.extend(source_rewrite.normalize_cover_address_spacing(doc))
-        warnings.extend(source_rewrite.normalize_cover_census_wrap(doc))
-        warnings.extend(source_rewrite.normalize_date_range_spacing(doc))
-        warnings.extend(source_rewrite.normalize_from_to_columns(doc))
+        # Do NOT run layout/format normalizers (cover spacing, From/To columns,
+        # summary dividers, UA/ACTION x-shifts, Name column nudges, etc.).
+        # OPS assemble + keep/remove only — source alignment/fonts must stay intact.
         if not profile.midyear and not is_457_plan(profile.plan_type):
             warnings.extend(
                 package_builder.ensure_compliance_overview(
@@ -271,10 +272,7 @@ def process_uploads(
                     plan_year_end=profile.plan_year_end,
                 )
             )
-        warnings.extend(package_polish.ensure_summary_heading_rule(doc))
-        warnings.extend(package_polish.normalize_coverage_satisfy_heading(doc))
         warnings.extend(package_polish.renumber_footers(doc))
-        warnings.extend(package_polish.normalize_report_layout(doc))
         # 6. Bookmarks, SSN scan, and assembly stops.
         profile.detected_sections = pdf_extractor.detect_sections(doc)
         profile_debug_path = str(

@@ -108,6 +108,35 @@ def test_action_overflow_packs_onto_previous_page_with_whitespace() -> None:
     assert "REMOVE LOCAL" not in text1
 
 
+def test_apply_decisions_adds_action_when_only_green_remains_without_removals() -> None:
+    """All-clear AV page already has green only — still needs ACTION REQUIRED."""
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((54, 80), "Annual Valuation Report", fontsize=16, fontname="hebo")
+    page.insert_text((54, 100), "Plan Year End: 12/31/2025", fontsize=11)
+    page.insert_text((54, 120), "555001", fontsize=11)
+    page.draw_line(fitz.Point(48, 140), fitz.Point(page.rect.width - 48, 140), width=1)
+    page.insert_text(
+        (54, 180),
+        "NO IMMEDIATE ACTION IS REQUIRED AT THIS TIME",
+        fontsize=11,
+        fontname="hebo",
+        color=(0, 0.45, 0.15),
+    )
+
+    apply_decisions(
+        doc,
+        [RuleDecision(rule_id="G", section="x", action="keep", reason="r")],
+        "401k",
+    )
+
+    page = doc[0]
+    text = page.get_text("text") or ""
+    assert "ACTION REQUIRED" in text
+    assert "NO IMMEDIATE ACTION IS REQUIRED AT THIS TIME" in text
+    assert _text_top(page, "ACTION REQUIRED") < _text_top(page, "NO IMMEDIATE ACTION IS REQUIRED AT THIS TIME")
+
+
 def test_apply_decisions_packs_no_immediate_under_action_heading() -> None:
     doc = fitz.open()
     page = doc.new_page()

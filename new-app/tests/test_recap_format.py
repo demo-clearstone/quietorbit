@@ -14,6 +14,41 @@ from services.package_builder import (
     RECAP_TITLE_SIZE,
     write_recap_page,
 )
+
+
+def test_recap_header_plan_number_does_not_merge_into_plan_name() -> None:
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    write_recap_page(
+        page,
+        [
+            "YEAR END RECAP",
+            "January 1, 2025 - December 31, 2025",
+            "HARBOR MANUFACTURING 401(K) PLAN",
+            "555001",
+            "Important Information",
+        ],
+        ["Based on the definition of Highly Compensated Employee (HCE), sample body."],
+    )
+    plan = None
+    number = None
+    for block in page.get_text("dict")["blocks"]:
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []):
+            text = "".join(span.get("text", "") for span in line.get("spans", [])).strip()
+            if text == "HARBOR MANUFACTURING 401(K) PLAN":
+                plan = line["bbox"]
+            elif text == "555001":
+                number = line["bbox"]
+    assert plan is not None and number is not None
+    # Number must start below the plan-name ink (no vertical merge).
+    assert number[1] >= plan[3] - 0.5
+    assert any(
+        abs(((drawing["rect"].y0 + drawing["rect"].y1) / 2) - RECAP_HEADER_RULE_Y) <= 1
+        for drawing in page.get_drawings()
+        if drawing["rect"].width > 200 and drawing["rect"].height <= 3
+    )
 from services.pdf_modifier import (
     _recap_bullets_have_marks,
     _recap_has_header_rule,
@@ -251,11 +286,10 @@ def test_recap_rebuild_drops_match_bullet_when_rule_says_remove() -> None:
     text = doc[0].get_text("text")
     assert "employer match contribution" not in text
     assert "Your plan is designed to allow participants" in text
-    assert _recap_has_header_rule(doc[0])
 
 
-def test_recap_packs_bullets_after_removals_without_large_gaps() -> None:
-    """Kaagaz page 3 left holes after redacting; page 4 packs bullets under Important Information."""
+def test_recap_remove_packs_remaining_bullets_under_important_information() -> None:
+    """After keep/remove, rebuild packs kept bullets (Kaagaz p4) — no holes/fragments."""
     doc = fitz.open()
     page = doc.new_page()
     page.insert_text((239, 48), "YEAR END RECAP", fontsize=13, fontname="hebo")
@@ -264,11 +298,20 @@ def test_recap_packs_bullets_after_removals_without_large_gaps() -> None:
     page.insert_text((280, 93), "555403", fontsize=10)
     page.draw_line(fitz.Point(54, 109), fitz.Point(page.rect.width - 54, 109), color=(0, 0, 0), width=0.8)
     page.insert_text((54, 123), "Important Information", fontsize=11, fontname="hebo")
-    # Spread like a source page that still has the match / extra paragraphs in between.
     page.insert_text((54, 150), "Based on the definition of Highly Compensated Employee (HCE), the employee(s) listed.", fontsize=8)
     page.insert_text((54, 280), "Your plan is designed to allow participants who were age 50 or older to make catch-up contributions.", fontsize=8)
     page.insert_text((54, 410), "If you sponsor a qualified retirement plan not administered by Mutual of America, please provide.", fontsize=8)
     page.insert_text((54, 540), "The plan's employer match contribution is calculated on a participant's compensation.", fontsize=8)
+
+    def _y(prefix: str) -> float:
+        for block in page.get_text("dict")["blocks"]:
+            if block.get("type") != 0:
+                continue
+            for line in block.get("lines", []):
+                text = "".join(span.get("text", "") for span in line.get("spans", [])).strip()
+                if text.startswith(prefix):
+                    return float(line["bbox"][1])
+        raise AssertionError(f"missing: {prefix}")
 
     apply_recap_bullets(
         doc,
@@ -277,29 +320,14 @@ def test_recap_packs_bullets_after_removals_without_large_gaps() -> None:
     )
 
     page = doc[0]
-    starts = []
-    for block in page.get_text("dict")["blocks"]:
-        if block.get("type") != 0:
-            continue
-        for line in block.get("lines", []):
-            text = "".join(span.get("text", "") for span in line.get("spans", [])).strip()
-            if text.startswith("Based on the definition") or text.startswith("Your plan is designed") or text.startswith("If you sponsor"):
-                starts.append(line["bbox"][1])
-    starts = sorted(set(round(y) for y in starts))
-    assert len(starts) >= 3
-    # Packed rebuild: first bullet soon after Important Information, no 100pt holes.
-    important_y = next(
-        line["bbox"][3]
-        for block in page.get_text("dict")["blocks"] if block.get("type") == 0
-        for line in block.get("lines", [])
-        if "".join(span.get("text", "") for span in line.get("spans", [])).strip().lower() == "important information"
-    )
-    first_bullet_y = min(starts)
-    assert first_bullet_y - important_y < 40
-    gaps = [starts[i + 1] - starts[i] for i in range(len(starts) - 1)]
-    assert max(gaps) < 90
-    assert "employer match contribution" not in page.get_text("text")
-    assert _recap_has_header_rule(page)
+    text = page.get_text("text")
+    assert "employer match contribution" not in text
+    assert "Your plan is designed to allow participants" in text
+    assert "cannot ex" not in text
+    important_y = _y("Important Information")
+    catch_y = _y("Your plan is designed")
+    # Packed under Important Information — not left at the old sparse y≈280.
+    assert catch_y - important_y < 80
 
 
 def test_recap_leaves_sparse_source_spacing_when_no_removals() -> None:
@@ -349,11 +377,10 @@ def test_recap_rebuild_preserves_only_bullets_selected_by_keep_remove_rules() ->
     text = doc[0].get_text("text")
     assert "no employee will be considered highly compensated" not in text
     assert "Your plan is designed to allow participants" in text
-    assert _recap_bullets_have_marks(doc[0])
 
 
-def test_recap_rebuild_uses_moa_body_font_and_space_under_header_rule() -> None:
-    """When a remove forces rebuild, rewritten page uses MOA Recap metrics."""
+def test_recap_remove_preserves_remaining_source_font_size() -> None:
+    """Simple keep/remove must not rewrite remaining Recap text into MOA fonts."""
     doc = _recap(bullets=False, include_match=True)
     apply_recap_bullets(
         doc,
@@ -361,33 +388,19 @@ def test_recap_rebuild_uses_moa_body_font_and_space_under_header_rule() -> None:
         "401k",
     )
     page = doc[0]
-
-    important = next(
-        line
-        for block in page.get_text("dict")["blocks"] if block.get("type") == 0
-        for line in block.get("lines", [])
-        if "".join(span.get("text", "") for span in line.get("spans", [])).strip().lower()
-        == "important information"
-    )
-    body = next(
-        (line, span)
+    assert "employer match contribution" not in page.get_text("text")
+    body_size = next(
+        float(span["size"])
         for block in page.get_text("dict")["blocks"] if block.get("type") == 0
         for line in block.get("lines", [])
         for span in line.get("spans", [])
         if "Based on the definition" in span.get("text", "")
     )
-    rules = _header_rules(page)
-    rule_y = next(y for y, left, right in rules if right - left > 200)
-
-    assert abs(rule_y - RECAP_HEADER_RULE_Y) <= 1
-    assert abs(round(important["bbox"][0]) - RECAP_IMPORTANT_X) <= 1
-    assert abs(float(important["spans"][0]["origin"][1]) - RECAP_IMPORTANT_Y) <= 1
-    assert abs(float(body[1]["size"]) - RECAP_BODY_SIZE) <= 0.3
-    assert abs(round(body[0]["bbox"][0]) - RECAP_BODY_X) <= 2
-    assert body[0]["bbox"][1] - important["bbox"][3] >= 4
+    # Fixture body uses fontsize=8 via textbox — must remain source size.
+    assert abs(body_size - 8) <= 0.3
 
 
-def test_recap_safe_harbor_bullet_uses_bold_and_italic_runs() -> None:
+def test_recap_safe_harbor_remove_match_preserves_source_sh_text() -> None:
     doc = fitz.open()
     page = doc.new_page()
     page.insert_text((239, 48), "YEAR END RECAP", fontsize=13, fontname="hebo")
@@ -402,7 +415,6 @@ def test_recap_safe_harbor_bullet_uses_bold_and_italic_runs() -> None:
         "in 2026 is the lesser of $24,500 or the annual addition limit.",
         fontsize=8,
     )
-    # Extra match bullet forces a rule-driven rebuild while keeping Safe Harbor wording.
     page.insert_text(
         (62, 280),
         "The plan's employer match contribution is calculated on a participant's compensation.",
@@ -417,25 +429,17 @@ def test_recap_safe_harbor_bullet_uses_bold_and_italic_runs() -> None:
         ],
         "401k",
     )
-    fonts = {
-        str(span.get("font") or "")
+    text = doc[0].get_text("text")
+    assert "Safe Harbor Plan" in text
+    assert "employer match contribution" not in text
+    body_size = next(
+        float(span["size"])
         for block in doc[0].get_text("dict")["blocks"] if block.get("type") == 0
         for line in block.get("lines", [])
         for span in line.get("spans", [])
-        if span.get("text", "").strip()
-    }
-    assert any("Bold" in font for font in fonts)
-    assert any("Oblique" in font or "Italic" in font for font in fonts)
-    assert abs(
-        next(
-            float(span["size"])
-            for block in doc[0].get_text("dict")["blocks"] if block.get("type") == 0
-            for line in block.get("lines", [])
-            for span in line.get("spans", [])
-            if "Based on the definition" in span.get("text", "")
-        )
-        - RECAP_BODY_SIZE
-    ) <= 0.3
+        if "Based on the definition" in span.get("text", "")
+    )
+    assert abs(body_size - 8) <= 0.3
 
 
 def test_recap_parser_preserves_currency_lines_at_line_start() -> None:

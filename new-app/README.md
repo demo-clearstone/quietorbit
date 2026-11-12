@@ -4,6 +4,8 @@ Greenfield app in `new-app/`. It does **not** use the existing POC backend or `p
 
 Workflow: upload PDFs and the Val Assembly Excel **or** a Valuation Package folder path → assemble in TEST23 SOP order → extract a Plan Profile → preview keep/remove rules → add bookmarks → save `{PlanNumber}_{BeginningPlanYear}-Valuation.pdf`. Required identity, result-summary, missing-report, SSN, and final-order checks stop saving by default when they fail.
 
+**Source-faithful edits:** Process assembles pages and applies keep/remove (plus necessary content stamps like cover date / 402(g) years). It does **not** invent new layout, column x-positions, fonts, or alignment — remaining source formatting stays as OPS left it.
+
 The preview editor supports manual page rotation, reordering, deletion and insertion; crop and page-canvas sizing; text search; bookmark add/rename/delete/validation; undo/redo; text replacement/insertion; notes, stamps, shapes, drawn signatures and highlights; and permanent redaction. Preview edits use a working copy, leaving the assembled original untouched; choose **Save edited copy** to download a separate edited PDF. Search uses the PDF text layer (scanned-image pages need OCR), page-size changes adjust the canvas without scaling the page content, and drawn signatures are visual annotations rather than cryptographic signatures. Assembly-stop checks are enabled by default; keep them on for production assembly. The automated checks do not replace a visual review of the final package.
 
 Developer onboarding (folder map, pipeline, how to change rules): [`docs/Developer-Guide.md`](docs/Developer-Guide.md).  

@@ -21,7 +21,7 @@ from services.preview_view import merge_line_up, page_lines, page_png, replace_l
 from services.preview_history import abort as abort_edit
 from services.preview_history import active_path, commit as commit_edit, edited_copy_path, editable_path, history_state, redo as redo_edit, snapshot_before, undo as undo_edit
 from services.audit_log import audit_log_path, write_audit_log
-from services.folder_loader import apply_file_order, list_folder_files, load_pdfs_from_folder
+from services.folder_loader import apply_file_order, list_folder_files, load_pdfs_from_folder, resolve_folder_pdf
 from services.pdf_pages import expand_uploads_by_page, pdf_page_count, pdf_page_texts
 from services.orchestrator import process_uploads
 from services.console_trace import read_trace, run_traced, start_trace
@@ -230,6 +230,35 @@ def list_source_folder(path: str = "") -> dict:
     if not folder:
         raise HTTPException(status_code=400, detail="Enter a Valuation Package folder path")
     return list_folder_files(folder)
+
+
+@router.get("/folder-file")
+def open_folder_pdf(folder: str = "", name: str = "") -> FileResponse:
+    """Open one PDF from a Valuation Package folder in the browser."""
+    path = resolve_folder_pdf(folder, name)
+    return FileResponse(
+        path,
+        media_type="application/pdf",
+        filename=path.name,
+        content_disposition_type="inline",
+    )
+
+
+@router.get("/uploads/{upload_id}")
+def open_uploaded_pdf(upload_id: str) -> Response:
+    """Open a previously uploaded PDF blob in the browser."""
+    stored = _stored_upload(upload_id)
+    if not stored:
+        raise HTTPException(status_code=404, detail="Upload not found — add the file again")
+    name, data = stored
+    if not str(name).lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Only PDF files can be opened")
+    safe_name = Path(str(name)).name.replace('"', "")
+    return Response(
+        content=data,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{safe_name}"'},
+    )
 
 
 def _stored_upload(token: str) -> tuple[str, bytes] | None:

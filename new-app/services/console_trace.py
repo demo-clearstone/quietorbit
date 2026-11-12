@@ -55,7 +55,7 @@ _PURPOSE = {
     "services/rules_engine.py:evaluate": "Deciding which paragraphs to keep or remove",
     "services/profile_debug.py:write_profile_debug": "Saving a copy of the plan profile",
     "services/pdf_modifier.py:apply_decisions": "Removing Action Required paragraphs that do not apply",
-    "services/pdf_modifier.py:apply_recap_bullets": "Removing Year End Recap bullets that do not apply",
+    "services/pdf_modifier.py:apply_recap_bullets": "Applying Year End Recap keep/remove (preserve source layout)",
     "services/pdf_modifier.py:fill_qnec_placeholders": "Filling the QNEC amounts on the excess notice",
     "services/plan_config.py:package_flags": "Loading the rules for this plan type",
     "services/plan_config.py:is_457_plan": "Checking whether the plan is a 457 plan",

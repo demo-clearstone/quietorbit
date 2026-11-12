@@ -202,6 +202,12 @@
       text-overflow: ellipsis;
       white-space: nowrap;
     }
+    .file-row .file-actions {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      flex: 0 0 auto;
+    }
     .file-row button {
       background: #f1f5f9;
       color: var(--text);
@@ -209,6 +215,11 @@
       padding: 2px 6px;
       font-size: 0.7rem;
       line-height: 1.2;
+    }
+    .file-row button.open-pdf {
+      background: #eff6ff;
+      color: #1d4ed8;
+      border-color: #bfdbfe;
     }
     .file-row button:disabled { opacity: 0.4; }
     .path-row {
@@ -1258,6 +1269,54 @@
       if (sourcePath && sourcePath !== listedPath) loadPathFiles();
     });
 
+    function isPdfItem(item) {
+      return String(item && item.name || "").toLowerCase().endsWith(".pdf");
+    }
+
+    async function openUploadPdf(event, item) {
+      event.preventDefault();
+      event.stopPropagation();
+      errorEl.textContent = "";
+      if (!isPdfItem(item)) {
+        errorEl.textContent = "Only PDF files can be opened.";
+        return;
+      }
+      let url = "";
+      let revoke = "";
+      try {
+        if (item.file instanceof Blob) {
+          url = URL.createObjectURL(item.file);
+          revoke = url;
+        } else if (item.uploadId) {
+          url = apiBase() + "/api/uploads/" + encodeURIComponent(item.uploadId);
+        } else if (isPathFile(item)) {
+          const folder = listedPath || (document.getElementById("source-path").value || "").trim();
+          if (!folder) {
+            errorEl.textContent = "Folder path is missing.";
+            return;
+          }
+          url = apiBase() + "/api/folder-file?" + new URLSearchParams({
+            folder: folder,
+            name: item.name,
+          });
+        } else {
+          errorEl.textContent = "Cannot open that file yet — wait for upload to finish.";
+          return;
+        }
+        if (item.page) url += "#page=" + item.page;
+        const opened = window.open(url, "_blank", "noopener,noreferrer");
+        if (!opened) {
+          errorEl.textContent = "Popup blocked — allow popups to open the PDF.";
+        }
+      } catch (err) {
+        errorEl.textContent = err.message || String(err);
+      } finally {
+        if (revoke) {
+          setTimeout(() => URL.revokeObjectURL(revoke), 60000);
+        }
+      }
+    }
+
     function renderFiles() {
       app.classList.toggle("has-files", files.length > 0);
       fileList.innerHTML = "";
@@ -1265,6 +1324,19 @@
         const row = document.createElement("div");
         row.className = "file-row";
         row.innerHTML = `<span>${index + 1}. ${escapeHtml(fileLabel(file))}</span>`;
+        const actions = document.createElement("div");
+        actions.className = "file-actions";
+        const openBtn = document.createElement("button");
+        openBtn.type = "button";
+        openBtn.className = "open-pdf";
+        openBtn.textContent = "Open";
+        openBtn.title = isPdfItem(file) ? "Open PDF" : "Only PDF files can be opened";
+        openBtn.disabled = !isPdfItem(file);
+        openBtn.onclick = (event) => {
+          openUploadPdf(event, file).catch((err) => {
+            errorEl.textContent = err.message || String(err);
+          });
+        };
         const up = document.createElement("button");
         up.type = "button";
         up.textContent = "Up";
@@ -1284,7 +1356,8 @@
           files.splice(index, 1);
           renderFiles();
         };
-        row.append(up, down, remove);
+        actions.append(openBtn, up, down, remove);
+        row.append(actions);
         fileList.appendChild(row);
       });
     }
