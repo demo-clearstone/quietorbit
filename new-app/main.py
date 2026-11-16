@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 
 def _keep_upload_socket_open() -> None:
@@ -31,9 +32,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
 from api.jobs import router as jobs_router
-from config.settings import HOST, LOG_DIR, PORT, TEMPLATES_DIR
+from config.settings import FROZEN, HOST, LOG_DIR, OUTPUT_DIR, PORT, TEMPLATES_DIR
 
 LOG_DIR.mkdir(parents=True, exist_ok=True)
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(
     title="MOA Valuation Package Automation",
@@ -116,13 +118,19 @@ if __name__ == "__main__":
     print(f"Keep this window open. App: http://127.0.0.1:{PORT}", flush=True)
     threading.Thread(target=_open_browser, daemon=True).start()
     _keep_upload_socket_open()
+    # Reload breaks PyInstaller frozen apps; keep it for local source runs only.
+    use_reload = (not FROZEN) and os.environ.get("MOA_RELOAD", "1") != "0"
     run_kwargs = {
         "host": HOST,
         "port": PORT,
-        "reload": True,
+        "reload": use_reload,
         "timeout_keep_alive": 120,
         "http": "h11",
     }
     if sys.platform == "win32":
         print("Windows uploads are sent in small pieces so the connection stays open.", flush=True)
-    uvicorn.run("main:app", **run_kwargs)
+    if FROZEN:
+        # Pass the app object — string import paths fail inside the freeze.
+        uvicorn.run(app, **run_kwargs)
+    else:
+        uvicorn.run("main:app", **run_kwargs)

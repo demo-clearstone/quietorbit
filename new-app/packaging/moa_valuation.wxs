@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  WiX 3.x product definition for MOA Valuation.
+  File components are harvested at build time into harvested.wxs
+  (see packaging/build_msi.ps1).
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product
+      Id="*"
+      Name="MOA Valuation"
+      Language="1033"
+      Version="$(var.ProductVersion)"
+      Manufacturer="Mutual of America"
+      UpgradeCode="A7B3C1D2-E4F5-6789-ABCD-EF0123456789">
+
+    <Package
+        InstallerVersion="500"
+        Compressed="yes"
+        InstallScope="perMachine"
+        Description="MOA Valuation Package Automation"
+        Comments="Double-click MOA_Valuation.exe or use the Start Menu shortcut." />
+
+    <MajorUpgrade
+        DowngradeErrorMessage="A newer version of MOA Valuation is already installed."
+        Schedule="afterInstallInitialize" />
+
+    <MediaTemplate EmbedCab="yes" />
+
+    <Feature Id="ProductFeature" Title="MOA Valuation" Level="1">
+      <ComponentGroupRef Id="MOAFiles" />
+      <ComponentRef Id="ApplicationShortcut" />
+      <ComponentRef Id="DesktopShortcut" />
+    </Feature>
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLDIR" Name="MOA Valuation" />
+      </Directory>
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="ApplicationProgramsFolder" Name="MOA Valuation" />
+      </Directory>
+      <Directory Id="DesktopFolder" Name="Desktop" />
+    </Directory>
+
+    <DirectoryRef Id="ApplicationProgramsFolder">
+      <Component Id="ApplicationShortcut" Guid="B1C2D3E4-F5A6-7890-BCDE-F12345678901">
+        <Shortcut
+            Id="StartMenuShortcut"
+            Name="MOA Valuation"
+            Description="Launch MOA Valuation Package Automation"
+            Target="[INSTALLDIR]MOA_Valuation.exe"
+            WorkingDirectory="INSTALLDIR"
+            Icon="AppIcon" />
+        <RemoveFolder Id="CleanApplicationProgramsFolder" Directory="ApplicationProgramsFolder" On="uninstall" />
+        <RegistryValue
+            Root="HKCU"
+            Key="Software\Mutual of America\MOA Valuation"
+            Name="StartMenuShortcut"
+            Type="integer"
+            Value="1"
+            KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <DirectoryRef Id="DesktopFolder">
+      <Component Id="DesktopShortcut" Guid="C2D3E4F5-A6B7-8901-CDEF-123456789012">
+        <Shortcut
+            Id="DesktopShortcutLink"
+            Name="MOA Valuation"
+            Description="Launch MOA Valuation Package Automation"
+            Target="[INSTALLDIR]MOA_Valuation.exe"
+            WorkingDirectory="INSTALLDIR"
+            Icon="AppIcon" />
+        <RegistryValue
+            Root="HKCU"
+            Key="Software\Mutual of America\MOA Valuation"
+            Name="DesktopShortcut"
+            Type="integer"
+            Value="1"
+            KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <Icon Id="AppIcon" SourceFile="$(var.AppExe)" />
+  </Product>
+</Wix>

@@ -24,7 +24,23 @@ python main.py
 UI: http://127.0.0.1:8002  
 API docs: http://127.0.0.1:8002/docs
 
-## Client PC (Windows, Python already installed)
+## Windows installer (no Python on the client)
+
+Preferred for client PCs: download the GitHub Actions build artifacts and install or unzip. Clients do **not** need Python, pip, or typed CMD commands.
+
+1. Open the repo on GitHub → **Actions** → **Build Windows EXE + MSI** → latest successful run.
+2. Download artifacts:
+   - **`MOA_Valuation_Setup`** → run `MOA_Valuation_Setup.msi` (Start Menu + Desktop shortcuts; uninstall via Windows Settings).
+   - **`MOA_Valuation_portable`** → unzip → double-click `MOA_Valuation.exe`.
+3. Keep the black console window open while using the app. The browser opens to http://127.0.0.1:8002. Closing the console stops the server.
+
+Output PDFs and logs are written under `%LOCALAPPDATA%\MOA Valuation\` (override with `MOA_OUTPUT_DIR` / `MOA_DATA_DIR`).
+
+Packaging details and local Windows build steps: [`packaging/README.md`](packaging/README.md).
+
+To **build** the EXE/MSI on a Windows PC that has this source folder: double-click [`packaging/build_windows.bat`](packaging/build_windows.bat) (needs Python 3.12+; WiX 3.x for MSI). End users who only run the app do not need that script — give them the built `.msi` or portable zip instead.
+
+### Alternative: Python already installed on the client
 
 Do not minify the backend into one pasted file. The app still needs `pip install pymupdf` (a binary wheel).
 
