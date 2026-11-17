@@ -1,0 +1,170 @@
+# Order of the pages in the valuation package. Missing pages are skipped.
+combine_order:
+  - Cover Letter
+  - Test Summary
+  - Compensation Limit Failure Summary
+  - Combined Testing Report
+  - Action Required
+  - ADP/ACP Excess After 12 Months Current
+  - ADP/ACP Excess After 12 Months Prior
+  - ADP/ACP Excess Current Year
+  - 415 Failure Information
+  - ADP/ACP Failure Letter
+  - 402(g) Failure Letter
+  - 415 Failure Letter
+  - Failed Test Notice
+  - Variance
+  - PS Variance
+  - SHNE Variance
+  - Year End Recap
+  - Compliance Reports
+  - Valuation Reports
+  - Summary of Compliance Test Results
+  - Test Summary
+  - Contribution Analysis
+  - HCE/Key
+  - Future HCE
+  - ADP/ACP
+  - 402(g)
+  - "410(b)"
+  - "401(a)(4)"
+  - Average Benefit Percentage Test
+  - BRF
+  - "414(s)"
+  - "415"
+  - Top Heavy
+  - Census
+
+expected_order:
+  - name: Cover Letter
+    aliases:
+      - "Cover Letter"
+      - "Cover Page"
+      - "Valuation Pkg"
+      - "Valuation Package"
+      - "Valuation"
+    label: Cover Letter
+    split_pages: true
+    split_page_labels:
+      - Cover Letter
+      - Action required page 1
+      - Action required page 2
+      - Action required page 3
+      - ADP/ACP Failure excess page after 12 months (Current year Testing Method)
+      - ADP/ACP Failure excess page after 12 months (Prior year Testing Method)
+      - ADP/ACP Failure excess page Current year
+      - 415 Failure information
+      - ADP/ACP Failure letter
+      - 402g Failure letter
+      - 415 Failure letter
+      - Year End Recap
+      - Compliance Report 1
+      - Compliance Report 2
+      - Compliance Report 3
+  - name: Test Summary
+    aliases: ["ResultSumm", "Result Summary", "Compliance Summary", "Test Summary", "Result"]
+  - name: Action Required
+    aliases: ["Action Required", "IMMEDIATE ACTION REQUIRED"]
+    label: Action required
+  - name: 415 Failure Information
+    label: 415 Failure information
+    aliases: ["415 Failure information", "415 Failure Information", "415(c) Failure", "IRC 415) Test Failure"]
+  - name: Year End Recap
+    label: Year End Recap
+    aliases: ["Year End Recap", "Year-End Recap", "Important Information"]
+  - name: Compliance Reports
+    label: Compliance Reports
+    aliases: ["Compliance Testing Reports", "Compliance and Administrative", "Compliance Reports", "Compliance Report", "Overview and Descriptions"]
+  - name: Valuation Reports
+    aliases: ["Valuation Reports"]
+  - name: Summary of Compliance Test Results
+    aliases: ["Summary of Compliance Test Results"]
+  - name: Combined Testing Report
+    aliases: ["Combined Testing Report", "Combined Compliance Testing Report"]
+  - name: Failed Test Notice
+    aliases: ["Failed Test Notice", "Failure Notice", "Excess Summary", "Excess Return Notice", "Failed Compliance Testing"]
+  - name: ADP/ACP Excess After 12 Months Current
+    label: ADP/ACP Failure excess page after 12 months (Current year Testing Method)
+    aliases:
+      - "ADP/ACP Failure excess page after 12 months (Current year Testing Method)"
+      - "After 12-months (Current"
+      - "After 12 months (Current"
+      - "after 12 months Current"
+  - name: ADP/ACP Excess After 12 Months Prior
+    label: ADP/ACP Failure excess page after 12 months (Prior year Testing Method)
+    aliases:
+      - "ADP/ACP Failure excess page after 12 months (Prior year Testing Method)"
+      - "After 12-months (Prior"
+      - "After 12 months (Prior"
+      - "after 12 months Prior"
+  - name: ADP/ACP Excess Current Year
+    label: ADP/ACP Failure excess page Current year
+    aliases:
+      - "ADP/ACP Failure excess page Current year"
+      - "Failed Compliance Testing (Current"
+      - "excess page Current year"
+  - name: ADP/ACP Failure Letter
+    label: ADP/ACP Failure letter
+    aliases: ["ADP/ACP Failure letter", "ADP Failure letter", "ACP Failure letter", "Sample Letter ADP", "Sample Letter ACP"]
+  - name: 402(g) Failure Letter
+    label: 402g Failure letter
+    aliases: ["402g Failure letter", "402(g) Failure letter", "Sample Letter 402"]
+  - name: 415 Failure Letter
+    label: 415 Failure letter
+    aliases: ["415 Failure letter", "Sample Letter 415"]
+  - name: HCE/Key
+    aliases: ["HCE/Key", "HCE Key", "HCEKey"]
+  - name: Future HCE
+    aliases: ["Future HCE", "Future Year HCE", "FYHCE"]
+  - name: ADP/ACP
+    aliases: ["ADP/ACP", "ADP ACP", "ADP Test", "ACP Test", "ADP", "ACP"]
+  - name: "410(b)"
+    aliases: ["410(b)", "410b", "410B", "410"]
+  - name: Variance
+    aliases: ["Variance Report", "Variance", "MaVar"]
+  - name: Compensation Limit Failure Summary
+    aliases: ["Compensation Limit Failure", "SHMaVar", "SHMa"]
+  - name: PS Variance
+    aliases: ["PS Variance Report", "PS Variance", "PSVar"]
+  - name: SHNE Variance
+    aliases: ["SHNE Variance Report", "SHNE Variance", "SHNEVar"]
+  - name: "402(g)"
+    aliases: ["402(g)", "402g", "402G", "402"]
+  - name: Contribution Analysis
+    aliases: ["Contribution Analysis", "ContriAnalysis", "Contri"]
+  - name: Top Heavy
+    aliases: ["Top Heavy", "Top-Heavy", "TH"]
+  - name: "415"
+    aliases: ["415 Limit", "415 Test", "Section 415", "415"]
+  - name: Census
+    aliases: ["Census"]
+  - name: "401(a)(4)"
+    aliases: ["401(a)(4)", "401(a)(4) Test", "401a4", "401a"]
+  - name: Average Benefit Percentage Test
+    aliases: ["Average Benefit Percentage", "Average Benefits", "ABPT"]
+  - name: "414(s)"
+    aliases: ["414(s)", "414s"]
+  - name: BRF
+    aliases: ["Benefits, Rights and Features", "BRF Test", "BRF"]
+  - name: 457 Limit
+    aliases: ["457 Limit Test", "457 Limit", "Section 457"]
+
+# Bookmark titles from TEST23.docx §O (only for sections that remain).
+bookmarks:
+  Cover Letter: Cover Letter
+  Test Summary: Test Summary
+  Compliance Summary: Test Summary
+  Contribution Analysis: Contribution Analysis
+  HCE/Key: HCE/Key
+  Future HCE: Future HCE
+  ADP/ACP: ADP/ACP Tests
+  BRF: Benefits, Rights and Features Test
+  402(g): 402(g) Test
+  410(b): 410(b) Test
+  401(a)(4): 401(a)(4) Test
+  Average Benefit Percentage Test: Average Benefit Percentage Test
+  414(s): 414(s) Test
+  415: 415 Limit Test
+  457 Limit: 457 Limit Test
+  Top Heavy: Top Heavy
+  Census: Census

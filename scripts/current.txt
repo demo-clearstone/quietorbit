@@ -1,0 +1,434 @@
+=== PAGE 3: 'Annual Valuation Report' ===
+  FMT  'ACTION REQUIRED': x exp=38 act=36
+  FMT  'NO IMMEDIATE ACTION IS REQUIRED AT THIS TIME': x exp=39 act=30; cols exp=[(39, 'NO IMMEDIATE ACTION IS REQUIRED AT THIS TIME')] act=[(30, 'NO IMMEDIATE ACTION IS REQUIRED AT THIS TIME')]
+
+=== PAGE 4: 'YEAR END RECAP' ===
+  ACT  x=67   -- ╖
+  ---
+  EXP  x=67   -- ╖
+  ---
+  ACT  x=67   -- ╖
+  ---
+  EXP  x=67   -- ╖
+  ---
+  ACT  x=66   -- ╖
+  ---
+  EXP  x=67   -- ╖
+  ---
+  FMT  '╖': x exp=65 act=60; cols exp=[(65, '╖')] act=[(60, '╖')]
+  FMT  'UNIVERSAL AVAILABILITY RULE': x exp=83 act=78; cols exp=[(83, 'UNIVERSAL AVAILABILITY RULE')] act=[(78, 'UNIVERSAL AVAILABILITY RULE')]
+  FMT  'The ôuniversal availabilityö generally requires everyone must be able to defer. ': x exp=83 act=78; cols exp=[(83, 'The ôuniversal availabilityö generally requires everyone must be able to defer. There is no age or service')] act=[(78, 'The ôuniversal availabilityö generally requires everyone must be able to defer. There is no age or service')]
+  FMT  'requirement permitted.  To satisfy universal availability, all employees must ha': x exp=83 act=78; cols exp=[(83, 'requirement permitted.  To satisfy universal availability, all employees must have ôeffective opportunityö to')] act=[(78, 'requirement permitted.  To satisfy universal availability, all employees must have ôeffective opportunityö to')]
+  FMT  'make this deferral election annually At least once during a plan year the plan m': x exp=83 act=78; cols exp=[(83, 'make this deferral election annually'), (227, 'At least once during a plan year the plan must provide an employee')] act=[(78, 'make this deferral election annually'), (222, 'At least once during a plan year the plan must provide an employee')]
+  FMT  '(whether part-time or full-time) with an effective opportunity to make or change': x exp=83 act=78; cols exp=[(83, '(whether part-time or full-time) with an effective opportunity to make or change an elective deferral')] act=[(78, '(whether part-time or full-time) with an effective opportunity to make or change an elective deferral')]
+  FMT  'election, up to the dollar limit in effect, including any catch-up deferrals per': x exp=83 act=78; cols exp=[(83, 'election, up to the dollar limit in effect, including any catch-up deferrals permitted under the plan, as well')] act=[(78, 'election, up to the dollar limit in effect, including any catch-up deferrals permitted under the plan, as well')]
+  FMT  'as Roth contributions if the plan permits. Certain employees may be excluded, in': x exp=83 act=78; cols exp=[(83, 'as Roth contributions if the plan permits. Certain employees may be excluded, including:')] act=[(78, 'as Roth contributions if the plan permits. Certain employees may be excluded, including:')]
+  FMT  '╖': x exp=83 act=78; cols exp=[(83, '╖')] act=[(78, '╖')]
+  FMT  'Employees who normally work less than 20 hours per week*': x exp=101 act=96; cols exp=[(101, 'Employees who normally work less than 20 hours per week*')] act=[(96, 'Employees who normally work less than 20 hours per week*')]
+  FMT  '╖': x exp=83 act=78; cols exp=[(83, '╖')] act=[(78, '╖')]
+  FMT  'Students performing services at a school, college or university*': x exp=101 act=96; cols exp=[(101, 'Students performing services at a school, college or university*')] act=[(96, 'Students performing services at a school, college or university*')]
+  FMT  '╖': x exp=83 act=78; cols exp=[(83, '╖')] act=[(78, '╖')]
+  FMT  'Non-resident aliens with no U.S. source income': x exp=101 act=96; cols exp=[(101, 'Non-resident aliens with no U.S. source income')] act=[(96, 'Non-resident aliens with no U.S. source income')]
+  FMT  '╖': x exp=83 act=78; cols exp=[(83, '╖')] act=[(78, '╖')]
+  FMT  'Employees who are eligible to make elective deferrals under another 401(k), 403(': x exp=101 act=96; cols exp=[(101, 'Employees who are eligible to make elective deferrals under another 401(k), 403(b) or 457(b) plan')] act=[(96, 'Employees who are eligible to make elective deferrals under another 401(k), 403(b) or 457(b) plan')]
+  FMT  'sponsored by the same employer': x exp=101 act=96; cols exp=[(101, 'sponsored by the same employer')] act=[(96, 'sponsored by the same employer')]
+  FMT  '╖': x exp=83 act=78; cols exp=[(83, '╖')] act=[(78, '╖')]
+  FMT  'Employees not able to defer $200 during the plan year': x exp=101 act=96; cols exp=[(101, 'Employees not able to defer $200 during the plan year')] act=[(96, 'Employees not able to defer $200 during the plan year')]
+  FMT  '╖': x exp=72 act=67; cols exp=[(72, '╖')] act=[(67, '╖')]
+  FMT  'If you sponsor a qualified retirement plan not administered by Mutual of America': x exp=83 act=78; cols exp=[(83, 'If you sponsor a qualified retirement plan not administered by Mutual of America, please provide your service provider')] act=[(78, 'If you sponsor a qualified retirement plan not administered by Mutual of America, please provide your service provider')]
+  FMT  'with a copy of this Valuation Report to complete the combined plan testing.  Upo': x exp=83 act=78; cols exp=[(83, 'with a copy of this Valuation Report to complete the combined plan testing.  Upon request, we can perform the')] act=[(78, 'with a copy of this Valuation Report to complete the combined plan testing.  Upon request, we can perform the')]
+  FMT  'combined plan testing.  Please contact your local regional office representative': x exp=83 act=78; cols exp=[(83, 'combined plan testing.  Please contact your local regional office representative to discuss.')] act=[(78, 'combined plan testing.  Please contact your local regional office representative to discuss.')]
+
+=== PAGE 12: 'DEERFIELD BEHAVIORAL HEALTH OF WARREN' ===
+  FMT  'DEERFIELD BEHAVIORAL HEALTH OF WARREN': x exp=178 act=181; cols exp=[(178, 'DEERFIELD BEHAVIORAL HEALTH OF WARREN')] act=[(181, 'DEERFIELD BEHAVIORAL HEALTH OF WARREN')]
+  FMT  'DEERFIELD BEHAVIORAL HEALTH OF WARREN LLC 403(B) PLAN': x exp=134 act=137; cols exp=[(134, 'DEERFIELD BEHAVIORAL HEALTH OF WARREN LLC 403(B) PLAN')] act=[(137, 'DEERFIELD BEHAVIORAL HEALTH OF WARREN LLC 403(B) PLAN')]
+  FMT  'ACP Nondiscrimination Test for Plan Year End 06/30/2026': x exp=170 act=173; cols exp=[(170, 'ACP Nondiscrimination Test for Plan Year End 06/30/2026')] act=[(173, 'ACP Nondiscrimination Test for Plan Year End 06/30/2026')]
+  EXP  x=268  B- TEST RESULTS
+  EXP  x=120  -- ACP TEST
+  EXP  x=42   -- ACP for 5 HCEs
+  EXP  x=162  --  1.80
+  EXP  x=204  -- %
+  EXP  x=42   -- ACP for 27 NHCEs
+  EXP  x=162  --  1.72
+  EXP  x=204  -- %
+  EXP  x=42   -- NHCE ACP x 1.25 = 2.15%
+  EXP  x=42   -- Lesser of NHCE ACP x 2 or +2 = 3.44%
+  EXP  x=42   -- The HCE ADP (0.00%) is less than or equal to the NHCE ADP % x 1.25 (0.00%),  and therefore the first ADP test passes.
+  EXP  x=42   -- The HCE ACP (1.80%) is less than or equal to the NHCE ACP% x 1.25 (2.15%), and therefore the first ACP test passes.
+  EXP  x=42   -- This plan passes the ADP/ACP Nondiscrimination Test!
+  ACT  x=259  BI EMPLOYEE LISTING
+  ACT  x=228  -- HIGHLY COMPENSATED EMPLOYEES
+  ACT  x=235  B- ACP
+  ACT  x=340  B- ACP
+  ACT  x=36   B- SS #
+  ACT  x=108  B- Name
+  ACT  x=216  B- Compensation
+  ACT  x=288  B- Amount                      %
+  ACT  x=102  -- ALBAUGH, MARY
+  ACT  x=221  --  231,333.41
+  ACT  x=284  --  6,940.04
+  ACT  x=368  --  3.00
+  ACT  x=102  -- BORCZON, DENNIS
+  ACT  x=222  --  211,410.42
+  ACT  x=284  --  6,342.30
+  ACT  x=368  --  3.00
+  ACT  x=102  -- DIXSON, CLARICE
+  ACT  x=221  --  217,407.92
+  ACT  x=300  --  0.00
+  ACT  x=368  --  0.00
+  ACT  x=102  -- JOHN, JOHN
+  ACT  x=221  --  276,000.06
+  ACT  x=284  --  8,280.02
+  ACT  x=368  --  3.00
+  ACT  x=102  -- RICHMAN, CRAIG
+  ACT  x=222  --  308,115.00
+  ACT  x=300  --  0.00
+  ACT  x=368  --  0.00
+  ACT  x=36   B- Totals
+  ACT  x=214  --  1,244,266.81
+  ACT  x=280  --  21,562.36
+  ACT  x=42   -- The ACP for the 5 HCE(s) is 1.80% (9.00/5).
+  ACT  x=217  -- NON-HIGHLY COMPENSATED EMPLOYEES
+  ACT  x=235  B- ACP
+  ACT  x=340  B- ACP
+  ACT  x=36   B- SS #
+  ACT  x=108  B- Name
+  ACT  x=216  B- Compensation
+  ACT  x=288  B- Amount                      %
+  ACT  x=102  -- ALLEN, ALYSSA
+  ACT  x=226  --  52,729.85
+  ACT  x=291  --  791.03
+  ACT  x=368  --  1.50
+  ACT  x=102  -- ALLEN, KELLY
+  ACT  x=221  --  132,699.75
+  ACT  x=284  --  3,980.89
+  ACT  x=368  --  3.00
+  ACT  x=102  -- BARTON, RICHARD
+  ACT  x=221  --  146,425.00
+  ACT  x=300  --  0.00
+  ACT  x=368  --  0.00
+  ACT  x=102  -- BRILL, SANDRA
+  ACT  x=230  --  7,869.20
+  ACT  x=291  --  196.73
+  ACT  x=368  --  2.50
+  ACT  x=102  -- BULARD, HANNAH
+  ACT  x=230  --  2,758.61
+  ACT  x=296  --  82.76
+  ACT  x=368  --  3.00
+  ACT  x=102  -- CHEW, ANGELA
+  ACT  x=226  --  74,266.62
+  ACT  x=284  --  1,979.41
+  ACT  x=368  --  2.67
+  ACT  x=102  -- DEVEY, LORI
+  ACT  x=230  --  4,568.77
+  ACT  x=300  --  0.00
+  ACT  x=368  --  0.00
+  ACT  x=102  -- FUGATE, MARK
+  ACT  x=221  --  103,000.04
+  ACT  x=300  --  0.00
+  ACT  x=368  --  0.00
+  ACT  x=102  -- GUIFFRE, DAWN
+  ACT  x=242  --  65.45
+  ACT  x=300  --  0.98
+  ACT  x=368  --  1.50
+  ACT  x=102  -- HARRISON, NICHOLE
+  ACT  x=226  --  20,736.34
+  ACT  x=291  --  432.50
+  ACT  x=368  --  2.09
+  ACT  x=102  -- HUMBLE, GRETCHEN
+  ACT  x=226  --  47,521.72
+  ACT  x=300  --  0.00
+  ACT  x=368  --  0.00
+  ACT  x=102  -- JAMES, SARAH
+  ACT  x=226  --  26,861.31
+  ACT  x=291  --  165.89
+  ACT  x=368  --  0.62
+  ACT  x=102  -- KELLY, PATRICIA
+  ACT  x=226  --  36,994.80
+  ACT  x=291  --  652.99
+  ACT  x=368  --  1.77
+  ACT  x=102  -- KELSEY, MEGHAN
+  ACT  x=226  --  18,888.99
+  ACT  x=296  --  76.60
+  ACT  x=368  --  0.41
+  ACT  x=102  -- KNEPP, MORGAN
+  ACT  x=221  --  105,104.80
+  ACT  x=284  --  2,627.67
+  ACT  x=368  --  2.50
+  ACT  x=102  -- MOORE, CHRISTINA
+  ACT  x=226  --  41,510.30
+  ACT  x=284  --  1,037.74
+  ACT  x=368  --  2.50
+  ACT  x=102  -- PANWAR, VIKRAM
+  ACT  x=221  --  243,300.10
+  ACT  x=284  --  3,649.56
+  ACT  x=368  --  1.50
+  ACT  x=102  -- POLLOCK, KIMBERLY
+  ACT  x=226  --  20,574.78
+  ACT  x=300  --  0.00
+  ACT  x=368  --  0.00
+  ACT  x=102  -- POREBSKI, DIANA
+  ACT  x=226  --  29,266.95
+  ACT  x=291  --  439.08
+  ACT  x=368  --  1.50
+  ACT  x=102  -- ROBERTS, MELANIE
+  ACT  x=226  --  79,615.44
+  ACT  x=291  --  398.10
+  ACT  x=368  --  0.50
+  ACT  x=102  -- SCHUMACHER, TRACI
+  ACT  x=222  --  119,999.88
+  ACT  x=284  --  3,323.04
+  ACT  x=368  --  2.77
+  ACT  x=102  -- SHIREY, PEGGY
+  ACT  x=222  --  118,356.00
+  ACT  x=284  --  3,550.74
+  ACT  x=368  --  3.00
+  ACT  x=102  -- SIMORA, JOHN
+  ACT  x=221  --  285,157.10
+  ACT  x=284  --  7,615.30
+  ACT  x=368  --  2.67
+  ACT  x=102  -- SU, SEAN
+  ACT  x=221  --  278,568.88
+  ACT  x=284  --  8,357.04
+  ACT  x=368  --  3.00
+  ACT  x=102  -- VAN EVERY, ABBI
+  ACT  x=226  --  34,755.44
+  ACT  x=291  --  521.37
+  ACT  x=368  --  1.50
+  ACT  x=102  -- WENZEL, ABBY
+  ACT  x=221  --  103,797.74
+  ACT  x=284  --  3,057.75
+  ACT  x=368  --  2.95
+  ---
+  FMT  'Page 1': x exp=288 act=294; cols exp=[(288, 'Page 1')] act=[(294, 'Page 1')]
+
+=== PAGE 13: 'DEERFIELD BEHAVIORAL HEALTH OF WARREN' ===
+  EXP  x=259  BI EMPLOYEE LISTING
+  EXP  x=228  -- HIGHLY COMPENSATED EMPLOYEES
+  EXP  x=235  B- ACP
+  EXP  x=340  B- ACP
+  EXP  x=36   B- SS #
+  EXP  x=108  B- Name
+  EXP  x=216  B- Compensation
+  EXP  x=288  B- Amount
+  EXP  x=360  B- %
+  EXP  x=102  -- ALBAUGH, MARY
+  EXP  x=221  --  231,333.41
+  EXP  x=284  --  6,940.04
+  EXP  x=368  --  3.00
+  EXP  x=102  -- BORCZON, DENNIS
+  EXP  x=222  --  211,410.42
+  EXP  x=284  --  6,342.30
+  EXP  x=368  --  3.00
+  EXP  x=102  -- DIXSON, CLARICE
+  EXP  x=221  --  217,407.92
+  EXP  x=300  --  0.00
+  EXP  x=368  --  0.00
+  EXP  x=102  -- JOHN, JOHN
+  EXP  x=221  --  276,000.06
+  EXP  x=284  --  8,280.02
+  EXP  x=368  --  3.00
+  EXP  x=102  -- RICHMAN, CRAIG
+  EXP  x=222  --  308,115.00
+  EXP  x=300  --  0.00
+  EXP  x=368  --  0.00
+  EXP  x=36   B- Totals
+  EXP  x=214  --  1,244,266.81
+  EXP  x=280  --  21,562.36
+  EXP  x=42   -- The ACP for the 5 HCE(s) is 1.80% (9.00/5).
+  ---
+  EXP  x=288  B- Amount
+  EXP  x=360  B- %
+  EXP  x=102  -- ALLEN, ALYSSA
+  EXP  x=226  --  52,729.85
+  EXP  x=291  --  791.03
+  EXP  x=368  --  1.50
+  EXP  x=102  -- ALLEN, KELLY
+  EXP  x=221  --  132,699.75
+  EXP  x=284  --  3,980.89
+  ACT  x=288  B- Amount                      %
+  ACT  x=102  -- WRIGHT, KRISTOPHER
+  ACT  x=226  --  29,881.61
+  ACT  x=291  --  896.47
+  ---
+  EXP  x=102  -- BARTON, RICHARD
+  EXP  x=221  --  146,425.00
+  EXP  x=300  --  0.00
+  EXP  x=368  --  0.00
+  EXP  x=102  -- BRILL, SANDRA
+  EXP  x=230  --  7,869.20
+  EXP  x=291  --  196.73
+  EXP  x=368  --  2.50
+  EXP  x=102  -- BULARD, HANNAH
+  EXP  x=230  --  2,758.61
+  EXP  x=296  --  82.76
+  EXP  x=368  --  3.00
+  EXP  x=102  -- CHEW, ANGELA
+  EXP  x=226  --  74,266.62
+  EXP  x=284  --  1,979.41
+  EXP  x=368  --  2.67
+  EXP  x=102  -- DEVEY, LORI
+  EXP  x=230  --  4,568.77
+  EXP  x=300  --  0.00
+  EXP  x=368  --  0.00
+  EXP  x=102  -- FUGATE, MARK
+  EXP  x=221  --  103,000.04
+  EXP  x=300  --  0.00
+  EXP  x=368  --  0.00
+  EXP  x=102  -- GUIFFRE, DAWN
+  EXP  x=242  --  65.45
+  EXP  x=300  --  0.98
+  EXP  x=368  --  1.50
+  EXP  x=102  -- HARRISON, NICHOLE
+  EXP  x=226  --  20,736.34
+  EXP  x=291  --  432.50
+  EXP  x=368  --  2.09
+  EXP  x=102  -- HUMBLE, GRETCHEN
+  EXP  x=226  --  47,521.72
+  EXP  x=300  --  0.00
+  EXP  x=368  --  0.00
+  EXP  x=102  -- JAMES, SARAH
+  EXP  x=226  --  26,861.31
+  EXP  x=291  --  165.89
+  EXP  x=368  --  0.62
+  EXP  x=102  -- KELLY, PATRICIA
+  EXP  x=226  --  36,994.80
+  EXP  x=291  --  652.99
+  EXP  x=368  --  1.77
+  EXP  x=102  -- KELSEY, MEGHAN
+  EXP  x=226  --  18,888.99
+  EXP  x=296  --  76.60
+  EXP  x=368  --  0.41
+  EXP  x=102  -- KNEPP, MORGAN
+  EXP  x=221  --  105,104.80
+  EXP  x=284  --  2,627.67
+  EXP  x=368  --  2.50
+  EXP  x=102  -- MOORE, CHRISTINA
+  EXP  x=226  --  41,510.30
+  EXP  x=284  --  1,037.74
+  EXP  x=368  --  2.50
+  EXP  x=102  -- PANWAR, VIKRAM
+  EXP  x=221  --  243,300.10
+  EXP  x=284  --  3,649.56
+  EXP  x=368  --  1.50
+  EXP  x=102  -- POLLOCK, KIMBERLY
+  EXP  x=226  --  20,574.78
+  EXP  x=300  --  0.00
+  EXP  x=368  --  0.00
+  EXP  x=102  -- POREBSKI, DIANA
+  EXP  x=226  --  29,266.95
+  EXP  x=291  --  439.08
+  EXP  x=368  --  1.50
+  EXP  x=102  -- ROBERTS, MELANIE
+  EXP  x=226  --  79,615.44
+  EXP  x=291  --  398.10
+  EXP  x=368  --  0.50
+  EXP  x=102  -- SCHUMACHER, TRACI
+  EXP  x=222  --  119,999.88
+  EXP  x=284  --  3,323.04
+  EXP  x=368  --  2.77
+  EXP  x=102  -- SHIREY, PEGGY
+  EXP  x=222  --  118,356.00
+  EXP  x=284  --  3,550.74
+  EXP  x=368  --  3.00
+  EXP  x=102  -- SIMORA, JOHN
+  EXP  x=221  --  285,157.10
+  EXP  x=284  --  7,615.30
+  EXP  x=368  --  2.67
+  EXP  x=102  -- SU, SEAN
+  EXP  x=221  --  278,568.88
+  EXP  x=284  --  8,357.04
+  EXP  x=368  --  3.00
+  EXP  x=102  -- VAN EVERY, ABBI
+  EXP  x=226  --  34,755.44
+  EXP  x=291  --  521.37
+  EXP  x=368  --  1.50
+  EXP  x=102  -- WENZEL, ABBY
+  EXP  x=221  --  103,797.74
+  EXP  x=284  --  3,057.75
+  EXP  x=368  --  2.95
+  EXP  x=294  B- Page 1
+  ACT  x=36   B- Totals
+  ACT  x=214  --  2,165,275.47
+  ACT  x=280  --  43,833.64
+  ACT  x=42   -- The ACP for the 27 NHCE(s) is 1.72% (46.45/27).
+  ACT  x=214  --  3,409,542.28
+  ACT  x=280  --  65,396.00
+  ACT  x=36   B- Grand Totals
+  ACT  x=294  B- Page 2
+  ---
+
+=== PAGE 14: 'DEERFIELD BEHAVIORAL HEALTH OF WARREN' ===
+  FMT  'DEERFIELD BEHAVIORAL HEALTH OF WARREN': x exp=181 act=178; cols exp=[(181, 'DEERFIELD BEHAVIORAL HEALTH OF WARREN')] act=[(178, 'DEERFIELD BEHAVIORAL HEALTH OF WARREN')]
+  FMT  'DEERFIELD BEHAVIORAL HEALTH OF WARREN LLC 403(B) PLAN': x exp=137 act=134; cols exp=[(137, 'DEERFIELD BEHAVIORAL HEALTH OF WARREN LLC 403(B) PLAN')] act=[(134, 'DEERFIELD BEHAVIORAL HEALTH OF WARREN LLC 403(B) PLAN')]
+  FMT  'ACP Nondiscrimination Test for Plan Year End 06/30/2026': x exp=173 act=170; cols exp=[(173, 'ACP Nondiscrimination Test for Plan Year End 06/30/2026')] act=[(170, 'ACP Nondiscrimination Test for Plan Year End 06/30/2026')]
+  EXP  x=217  -- NON-HIGHLY COMPENSATED EMPLOYEES
+  ACT  x=268  B- TEST RESULTS
+  ACT  x=120  -- ACP TEST
+  ACT  x=42   -- ACP for 5 HCEs
+  ACT  x=162  --  1.80
+  ACT  x=204  -- %
+  ACT  x=42   -- ACP for 27 NHCEs
+  ACT  x=162  --  1.72
+  ACT  x=204  -- %
+  ACT  x=42   -- NHCE ACP x 1.25 = 2.15%
+  ACT  x=42   -- Lesser of NHCE ACP x 2 or +2 = 3.44%
+  ACT  x=42   -- The HCE ACP (1.80%) is less than or equal to the NHCE ACP% x 1.25 (2.15%), and therefore the first ACP test passes.
+  ACT  x=42   -- This plan passes the
+  ---
+  FMT  'ACP': style exp=B- act=--; x exp=235 act=116; size exp=7.9 act=8.4; cols exp=[(235, 'ACP')] act=[(116, 'ACP')]
+  EXP  x=340  B- ACP
+  EXP  x=36   B- SS #
+  EXP  x=108  B- Name
+  EXP  x=216  B- Compensation
+  EXP  x=288  B- Amount
+  EXP  x=360  B- %
+  EXP  x=102  -- WRIGHT, KRISTOPHER
+  EXP  x=226  --  29,881.61
+  EXP  x=291  --  896.47
+  EXP  x=368  --  3.00
+  EXP  x=36   B- Totals
+  EXP  x=214  --  2,165,275.47
+  EXP  x=280  --  43,833.64
+  EXP  x=42   -- The ACP for the 27 NHCE(s) is 1.72% (46.45/27).
+  EXP  x=214  --  3,409,542.28
+  EXP  x=280  --  65,396.00
+  EXP  x=36   B- Grand Totals
+  EXP  x=294  B- Page 2
+  ACT  x=155  -- Nondiscrimination Test!
+  ACT  x=288  B- Page 1
+  ---
+
+=== PAGE 15: 'DEERFIELD BEHAVIORAL HEALTH OF WARREN' ===
+  EXP  x=18   -- This plan passes the ADP/ACP Nondiscrimination Test!
+  ACT  x=92   -- ACP
+  ACT  x=18   -- This plan passes the
+  ACT  x=131  -- Nondiscrimination Test!
+  ---
+
+=== PAGE 16: 'DEERFIELD BEHAVIORAL HEALTH OF WARREN LLC 403(B) PLAN' ===
+  FMT  'Name': x exp=42 act=36
+
+=== PAGE 17: 'DEERFIELD BEHAVIORAL HEALTH OF WARREN' ===
+  EXP  x=39   B- Soc. Sec. No.
+  ---
+
+=== PAGE 18: 'DEERFIELD BEHAVIORAL HEALTH OF WARREN' ===
+  EXP  x=39   B- Soc. Sec. No.
+  ---
+
+=== PAGE 19: 'DEERFIELD BEHAVIORAL HEALTH OF WARREN' ===
+  EXP  x=39   B- Soc. Sec. No.
+  ---
+
+=== PAGE 20: 'DEERFIELD BEHAVIORAL HEALTH OF WARREN LLC 403(B) PLAN' ===
+  EXP  x=168  B- Soc. Sec. No.
+  ---
+
+=== PAGE 21: 'DEERFIELD BEHAVIORAL HEALTH OF WARREN LLC 403(B) PLAN' ===
+  EXP  x=168  B- Soc. Sec. No.
+  ---
+
+=== PAGE 22: 'DEERFIELD BEHAVIORAL HEALTH OF WARREN LLC 403(B) PLAN' ===
+  EXP  x=168  B- Soc. Sec. No.
+  ---

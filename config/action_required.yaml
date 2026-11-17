@@ -1,0 +1,212 @@
+# Action Required page.
+# Each entry is one paragraph: the name shown in the app, the heading on the page,
+# and when that paragraph stays. A 403(b) package uses the 403b list for the
+# paragraphs listed there. Rules D and E also keep or remove the after-12-month
+# Excess Return Notice.
+
+paragraphs:
+  - id: A
+    section: Compliance test failure
+    keep_when:
+      all:
+        - field: returns_required
+          equals: true
+        - any_true: [fail_402g, fail_415]
+        - field: fail_402g_after_deadline
+          not_true: true
+    else: remove
+    headings:
+      - heading: IMMEDIATE ACTION REQUIRED - COMPLIANCE TEST FAILURE
+        must_include:
+          - Contribution refunds to participants are required to correct compliance testing failures
+          - Excess Summary
+          - Form W-4R
+
+  - id: B
+    section: ADP/ACP test failure, prior year
+    keep_when:
+      all:
+        - field: testing_method
+          equals: PRIOR
+        - field: returns_required
+          equals: true
+        - any_true: [adp_failed, acp_failed]
+        - field: adp_reclassified
+          not_true: true
+    else: remove
+    headings:
+      - heading: IMMEDIATE ACTION REQUIRED - ADP/ACP TEST FAILURE
+        variant: PRIOR
+        block_excludes: unless QNEC
+        must_include:
+          - Contribution refunds to participants are required to correct ADP/ACP testing failures
+          - ADP/ACP Correction Method summary
+          - Form W-4R
+
+  - id: C
+    section: ADP/ACP test failure, current year, unless QNEC
+    keep_when:
+      all:
+        - field: testing_method
+          equals: CURRENT
+        - field: returns_required
+          equals: true
+        - any_true: [adp_failed, acp_failed]
+        - field: adp_reclassified
+          not_true: true
+    else: remove
+    headings:
+      - heading: IMMEDIATE ACTION REQUIRED - ADP/ACP TEST FAILURE
+        variant: CURRENT
+        block_contains: unless QNEC
+        must_include:
+          - unless QNEC contributions will be made
+          - Form W-4R
+
+  - id: D
+    section: Action Required and Excess Return Notice, after 12 months, current year
+    keep_when:
+      all:
+        - field: testing_method
+          equals: CURRENT
+        - field: after_12_months
+          equals: true
+        - field: returns_required
+          equals: true
+        - any_true: [adp_failed, acp_failed]
+        - field: adp_reclassified
+          not_true: true
+    else: remove
+    headings:
+      - heading: IMMEDIATE ACTION REQUIRED - ADP/ACP CURRENT METHOD TEST FAILURE - AFTER 12-MONTHS
+
+  - id: E
+    section: Action Required and Excess Return Notice, after 12 months, prior year
+    keep_when:
+      all:
+        - field: testing_method
+          equals: PRIOR
+        - field: after_12_months
+          equals: true
+        - field: returns_required
+          equals: true
+        - any_true: [adp_failed, acp_failed]
+        - field: adp_reclassified
+          not_true: true
+    else: remove
+    headings:
+      - heading: IMMEDIATE ACTION REQUIRED - ADP/ACP PRIOR METHOD TEST FAILURE - AFTER 12-MONTHS
+
+  - id: F
+    section: Top heavy
+    keep_when:
+      all:
+        - field: top_heavy
+          equals: true
+    else: remove
+    headings:
+      - heading: IMMEDIATE ACTION REQUIRED - TOP HEAVY
+      - heading: ATTENTION REQUIRED - TOP HEAVY DETERMINATION
+
+  - id: G
+    section: No immediate action
+    keep_when:
+      all:
+        - field: has_action_required
+          equals: false
+    else: remove
+    headings:
+      - heading: NO IMMEDIATE ACTION IS REQUIRED AT THIS TIME
+
+  - id: H
+    section: Variance
+    keep_when:
+      all:
+        - field: variance_report
+          equals: true
+    else: remove
+    headings:
+      - heading: IMMEDIATE ACTION REQUIRED - VARIANCE
+
+  - id: M
+    section: Contributions
+    keep_when:
+      all:
+        - field: contributions_required
+          equals: true
+    else: remove
+    headings:
+      - heading: IMMEDIATE ACTION REQUIRED - CONTRIBUTIONS
+
+# These replace the 401(k) paragraph with the same id. The other paragraphs above still apply.
+403b:
+  - id: B
+    section: ACP test failure, prior year
+    keep_when:
+      all:
+        - field: testing_method
+          equals: PRIOR
+        - field: returns_required
+          equals: true
+        - field: acp_failed
+          equals: true
+        - field: adp_reclassified
+          not_true: true
+    else: remove
+    headings:
+      - heading: IMMEDIATE ACTION REQUIRED - ACP TEST FAILURE
+        variant: PRIOR
+        block_excludes: unless QNEC
+
+  - id: C
+    section: ACP test failure, current year, unless QNEC
+    keep_when:
+      all:
+        - field: testing_method
+          equals: CURRENT
+        - field: returns_required
+          equals: true
+        - field: acp_failed
+          equals: true
+    else: remove
+    headings:
+      - heading: IMMEDIATE ACTION REQUIRED - ACP TEST FAILURE
+        variant: CURRENT
+        block_contains: unless QNEC
+        must_include:
+          - unless QNEC contributions will be made
+          - Excess Summary
+          - Form W-4P
+
+  - id: D
+    section: Action Required and Excess Return Notice, ACP after 12 months, current year
+    keep_when:
+      all:
+        - field: testing_method
+          equals: CURRENT
+        - field: after_12_months
+          equals: true
+        - field: returns_required
+          equals: true
+        - field: acp_failed
+          equals: true
+    else: remove
+    headings:
+      - heading: IMMEDIATE ACTION REQUIRED - ACP CURRENT METHOD TEST FAILURE - AFTER 12-MONTHS
+
+  - id: E
+    section: Action Required and Excess Return Notice, ACP after 12 months, prior year
+    keep_when:
+      all:
+        - field: testing_method
+          equals: PRIOR
+        - field: after_12_months
+          equals: true
+        - field: returns_required
+          equals: true
+        - field: acp_failed
+          equals: true
+    else: remove
+    headings:
+      - heading: IMMEDIATE ACTION REQUIRED - ACP PRIOR METHOD TEST FAILURE - AFTER 12-MONTHS
+      - heading: IMMEDIATE ACTION REQUIRED - ACP PRIOR METHOD TEST FAILURE

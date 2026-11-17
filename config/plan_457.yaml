@@ -1,0 +1,45 @@
+# 457 plan differences. Loaded only when the plan type is 457.
+# Year End Recap starts from 401(k) year_end_recap.yaml, then these recap_rules
+# replace matching ids and add 457-only bullets.
+
+package:
+  keep_soc: true
+  require_full_reports: false
+
+# Non-recap overlays (none today).
+rules: []
+
+# 457 Year End Recap additions / replacements on top of the 401(k) recap baseline.
+recap_rules:
+  - id: Y11
+    section: Year End Recap, 457 age 50 catch-up
+    keep_when:
+      all:
+        - field: catchup_disallowed
+          not_true: true
+    else: remove
+
+  - id: Y12
+    section: Year End Recap, forfeitures reallocated
+    keep_when:
+      all:
+        - field: forfeitures_reallocated
+          equals: true
+    else: remove
+
+  - id: Y13
+    section: Year End Recap, no forfeitures
+    keep_when:
+      all:
+        - field: no_forfeitures
+          equals: true
+    else: remove
+
+paragraphs:
+  recap_bullets:
+    - id: Y11
+      match: catch-up contribution is an amount up to
+    - id: Y12
+      match: reallocation of forfeitures
+    - id: Y13
+      match: no forfeitures available to reallocate

@@ -1,0 +1,2 @@
+-r requirements-run.txt
+pyinstaller>=6.0

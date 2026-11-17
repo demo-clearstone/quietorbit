@@ -1,0 +1,3190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MOA Valuation Package</title>
+  <style>
+    :root {
+      --bg: #eef2f6;
+      --card: #fff;
+      --text: #1a1f2e;
+      --muted: #5b6475;
+      --line: #e2e8f0;
+      --accent: #1d4ed8;
+      --ok: #166534;
+      --ok-bg: #dcfce7;
+      --fail: #b91c1c;
+      --fail-bg: #fee2e2;
+      --warn: #92400e;
+      --warn-bg: #fef3c7;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.4;
+    }
+    .app {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      padding: 8px 12px;
+      gap: 8px;
+      min-height: 0;
+      overflow: hidden;
+    }
+    header {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: baseline;
+      flex-wrap: wrap;
+      gap: 4px 12px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 1rem;
+      line-height: 1.2;
+      white-space: nowrap;
+    }
+    .lead {
+      margin: 0;
+      flex: 1 1 220px;
+      color: var(--muted);
+      font-size: 0.75rem;
+      line-height: 1.25;
+    }
+    .status-line {
+      font-size: 0.75rem;
+      line-height: 1.25;
+    }
+    .status-line:empty { display: none; }
+    .app.has-results .lead { display: none; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    .controls {
+      position: relative;
+      flex: 0 0 auto;
+      width: 100%;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .controls-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .controls-head-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex: 0 0 auto;
+    }
+    .controls-head span { font-size: 0.8rem; font-weight: 700; }
+    .upload-bar {
+      display: none;
+      flex: 0 0 auto;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 8px 12px;
+    }
+    .app.upload-hidden #controls { display: none; }
+    .app.upload-hidden .upload-bar { display: flex; }
+    .app.has-results:not(.upload-hidden) #results { display: none; }
+    .upload-bar span { color: var(--muted); font-size: 0.78rem; }
+    .top-row {
+      display: flex;
+      align-items: stretch;
+      gap: 12px;
+    }
+    .drop {
+      flex: 1 1 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      border: 1px dashed #93c5fd;
+      background: #f8fbff;
+      border-radius: 8px;
+      padding: 10px 12px;
+      cursor: pointer;
+    }
+    .drop.drag { background: #eff6ff; border-color: var(--accent); }
+    .drop-title { display: block; font-weight: 700; font-size: 0.88rem; line-height: 1.3; }
+    .drop-hint { display: block; color: var(--muted); font-size: 0.75rem; line-height: 1.4; }
+    .drop-pick {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 6px;
+      cursor: pointer;
+    }
+    .browse-files {
+      display: inline-block;
+      background: #fff;
+      color: var(--accent);
+      border: 1px solid #93c5fd;
+      border-radius: 6px;
+      padding: 6px 12px;
+      font-size: 0.82rem;
+      font-weight: 600;
+    }
+    .drop-pick input[type="file"] {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      opacity: 0;
+      cursor: pointer;
+      font-size: 16px;
+    }
+    #file-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin-top: 4px;
+    }
+    .app.has-files .controls {
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow: hidden;
+    }
+    .app.has-files .top-row {
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow: hidden;
+    }
+    .app.has-files .drop {
+      min-height: 0;
+      overflow: hidden;
+    }
+    .app.has-files #file-list {
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow-y: scroll;
+      scrollbar-gutter: stable;
+      scrollbar-width: auto;
+      scrollbar-color: #1d4ed8 #e2e8f0;
+    }
+    .app.has-files #file-list::-webkit-scrollbar {
+      width: 12px;
+    }
+    .app.has-files #file-list::-webkit-scrollbar-track {
+      background: #e2e8f0;
+      border-radius: 8px;
+    }
+    .app.has-files #file-list::-webkit-scrollbar-thumb {
+      background: #1d4ed8;
+      border-radius: 8px;
+      border: 2px solid #e2e8f0;
+    }
+    .file-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex: 0 0 auto;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 3px 6px;
+      font-size: 0.74rem;
+    }
+    .file-row span {
+      flex: 1 1 auto;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .file-row .file-actions {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      flex: 0 0 auto;
+    }
+    .file-row button {
+      background: #f1f5f9;
+      color: var(--text);
+      border: 1px solid var(--line);
+      padding: 2px 6px;
+      font-size: 0.7rem;
+      line-height: 1.2;
+    }
+    .file-row button.open-pdf {
+      background: #eff6ff;
+      color: #1d4ed8;
+      border-color: #bfdbfe;
+    }
+    .file-row button:disabled { opacity: 0.4; }
+    .path-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .path-row label {
+      display: inline-block;
+      margin: 0;
+      font-weight: 600;
+      font-size: 0.75rem;
+      white-space: nowrap;
+    }
+    #source-path {
+      flex: 1 1 auto;
+      min-width: 0;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 6px 8px;
+      font-size: 0.8rem;
+    }
+    .run-wrap {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 8px;
+      flex: 0 0 210px;
+    }
+    button {
+      background: var(--accent);
+      color: #fff;
+      border: 0;
+      border-radius: 6px;
+      padding: 8px 12px;
+      font: inherit;
+      font-size: 0.85rem;
+      cursor: pointer;
+    }
+    button:disabled { opacity: 0.55; cursor: not-allowed; }
+    .check { font-size: 0.75rem; font-weight: 500; }
+    .check input { width: auto; margin-right: 4px; }
+    .validation-dialog { width: min(760px, calc(100vw - 32px)); max-width: none; max-height: min(85vh, 900px); padding: 0; border: 1px solid var(--line); border-radius: 12px; color: var(--text); box-shadow: 0 24px 80px #0f172a55; }
+    .validation-dialog::backdrop { background: #0f172a88; }
+    .validation-dialog-body { display: flex; flex-direction: column; max-height: min(85vh, 900px); }
+    .validation-dialog-head { padding: 18px 22px 12px; border-bottom: 1px solid var(--line); }
+    .validation-dialog-head h2 { margin: 0 0 4px; font-size: 1.05rem; }
+    .validation-dialog-head p { margin: 0; color: var(--muted); font-size: 0.82rem; }
+    .validation-menu { min-height: 0; overflow-y: auto; padding: 10px 22px; background: #fff; }
+    .validation-actions { display: flex; gap: 6px; margin-bottom: 6px; }
+    .validation-actions button { padding: 3px 7px; font-size: 0.7rem; }
+    .validation-option { display: block; margin: 10px 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: #f8fafc; font-weight: 400; }
+    .validation-option input { width: auto; margin-right: 7px; }
+    .validation-detail { margin: 6px 0 0 25px; padding-left: 22px; color: var(--fail); font-size: 0.78rem; white-space: normal; }
+    .validation-detail li { padding-left: 3px; margin: 4px 0; }
+    .validation-dialog-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 22px 16px; border-top: 1px solid var(--line); }
+    .validation-dialog-foot button { min-width: 100px; }
+    #status { color: var(--muted); font-size: 0.75rem; }
+    @keyframes time-blink {
+      0%, 45% { background: #7e22ce; color: #fff; }
+      55%, 100% { background: #f3e8ff; color: #581c87; }
+    }
+    .time-blink {
+      display: inline-block;
+      animation: time-blink 0.9s step-start 5;
+      color: #7e22ce;
+      font-weight: 800;
+      padding: 3px 8px;
+      border-radius: 6px;
+    }
+    #status.time-blink { font-size: 0.85rem; }
+    @media (prefers-reduced-motion: reduce) {
+      .time-blink { animation: none; background: #7e22ce; color: #fff; }
+    }
+    #error { color: var(--fail); font-size: 0.75rem; white-space: normal; }
+    #error ol { margin: 3px 0 0; padding-left: 22px; }
+    #error li { margin: 1px 0; }
+    .workspace {
+      flex: 1 1 auto;
+      min-height: 0;
+      display: none;
+    }
+    .workspace.open {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .workspace.open .summary {
+      flex: 1 1 auto;
+    }
+    .workspace.preview-on {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(380px, 480px);
+      grid-template-rows: minmax(0, 1fr);
+      grid-template-areas: "preview summary";
+      align-items: stretch;
+      gap: 10px;
+      overflow: hidden;
+    }
+    .workspace.preview-on .preview-wrap { grid-area: preview; }
+    .workspace.preview-on .summary { grid-area: summary; }
+    .preview-wrap {
+      min-height: 0;
+      min-width: 0;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .summary {
+      min-height: 0;
+      min-width: 0;
+      overflow: hidden;
+      padding: 12px 14px;
+      display: grid;
+      grid-template-columns: minmax(280px, 0.9fr) minmax(0, 1.2fr);
+      grid-template-rows: minmax(0, 1fr);
+      gap: 14px;
+    }
+    .summary-meta, .summary-detail {
+      min-height: 0;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .summary-meta {
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      padding-right: 4px;
+    }
+    .summary-detail {
+      border-left: 1px solid var(--line);
+      padding-left: 14px;
+    }
+    .workspace.preview-on .summary {
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+      overflow-x: hidden;
+      overscroll-behavior: contain;
+    }
+    .workspace.preview-on .summary-meta,
+    .workspace.preview-on .summary-detail {
+      overflow: visible;
+      flex: 0 0 auto;
+      border-left: 0;
+      padding-left: 0;
+      padding-right: 0;
+    }
+    .workspace.preview-on .pane {
+      flex: 0 0 auto;
+      min-height: 0;
+      overflow: visible;
+    }
+    .summary-head, .actions, .facts, .source-block {
+      flex-shrink: 0;
+    }
+    .summary-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+    .summary-head h2 { margin: 0 0 2px; font-size: 1rem; }
+    #filename {
+      margin: 0;
+      font-size: 0.84rem;
+      font-weight: 700;
+      word-break: break-all;
+    }
+    #plan-line {
+      margin: 2px 0 0;
+      color: var(--muted);
+      font-size: 0.75rem;
+    }
+    #build-time {
+      margin: 8px 0 0;
+      font-size: 0.95rem;
+    }
+    #build-time:empty { display: none; }
+    .outcome {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      justify-content: flex-end;
+      max-width: 100%;
+    }
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 0 0 10px;
+    }
+    a.btn, button.btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--accent);
+      color: #fff;
+      border: 0;
+      border-radius: 6px;
+      padding: 7px 11px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      text-decoration: none;
+      cursor: pointer;
+    }
+    a.btn.ghost, button.btn.ghost {
+      background: #fff;
+      color: var(--accent);
+      border: 1px solid #bfdbfe;
+    }
+    .counts { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
+    .pill {
+      border-radius: 999px;
+      padding: 3px 9px;
+      font-size: 0.72rem;
+      font-weight: 700;
+    }
+    .pill.keep { background: var(--ok-bg); color: var(--ok); }
+    .pill.remove { background: var(--fail-bg); color: var(--fail); }
+    .pill.skip { background: var(--warn-bg); color: var(--warn); }
+    .pill.neutral { background: #e2e8f0; color: #334155; }
+    .tabs { display: flex; gap: 4px; margin: 0 0 8px; flex-wrap: wrap; flex: 0 0 auto; }
+    .tabs button {
+      background: #f1f5f9;
+      color: var(--text);
+      padding: 5px 9px;
+      font-size: 0.74rem;
+    }
+    .tabs button.active { background: var(--accent); color: #fff; }
+    .pane {
+      flex: 1 1 0%;
+      min-height: 140px;
+      overflow: auto;
+      overscroll-behavior: contain;
+    }
+    table { width: 100%; border-collapse: collapse; font-size: 0.74rem; }
+    th, td { text-align: left; padding: 5px 4px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    th { width: 38%; color: var(--muted); font-weight: 600; }
+    .rule-board {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    .rule-col {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f8fafc;
+      min-height: 0;
+    }
+    .rule-col h3 {
+      margin: 0;
+      padding: 7px 8px;
+      font-size: 0.74rem;
+      border-bottom: 1px solid var(--line);
+    }
+    .rule-col.keep h3 { color: var(--ok); background: var(--ok-bg); }
+    .rule-col.remove h3 { color: var(--fail); background: var(--fail-bg); }
+    .rule-col.skip h3 { color: var(--warn); background: var(--warn-bg); }
+    .rule-row {
+      padding: 6px 8px;
+      border-bottom: 1px solid var(--line);
+      font-size: 0.73rem;
+    }
+    .rule-row:last-child { border-bottom: 0; }
+    .rule-row b { display: block; font-size: 0.72rem; }
+    .rule-row small { display: block; color: var(--muted); font-size: 0.68rem; margin-top: 2px; }
+    .pass { color: var(--ok); }
+    .fail { color: var(--fail); }
+    .skip { color: var(--warn); }
+    .facts {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 6px;
+      margin-bottom: 10px;
+    }
+    .fact { background: #f8fafc; border: 1px solid var(--line); border-radius: 7px; padding: 6px 8px; }
+    .fact span { display: block; color: var(--muted); font-size: 0.68rem; }
+    .fact strong { font-size: 0.8rem; word-break: break-word; }
+    .fact.on { border-color: #bbf7d0; background: #f0fdf4; }
+    .fact.off { border-color: #fecaca; background: #fef2f2; }
+    .source-block { margin: 0 0 10px; }
+    .source-label {
+      display: block;
+      color: var(--muted);
+      font-size: 0.68rem;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+    #source-order {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      color: var(--muted);
+      font-size: 0.72rem;
+    }
+    #source-order li { display: inline; }
+    #source-order li:not(:last-child)::after { content: " · "; }
+    #tab-warnings { margin: 0; padding-left: 16px; font-size: 0.72rem; color: var(--muted); }
+    .preview-wrap { padding: 0; display: none; flex-direction: column; }
+    .workspace.preview-on .preview-wrap { display: flex; }
+    .preview-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      border-bottom: 1px solid var(--line);
+      font-size: 0.75rem;
+      flex: 0 0 auto;
+    }
+    .preview-tools {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 6px;
+      margin-left: auto;
+    }
+    .preview-tools > button, .preview-tools > a { padding: 5px 7px; font-size: 0.72rem; }
+    .preview-note { color: var(--muted); font-size: 0.7rem; }
+    .editor-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 4px 6px;
+      padding: 6px 10px;
+      border-bottom: 1px solid var(--line);
+      background: #f8fafc;
+      flex: 0 0 auto;
+    }
+    .editor-group {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      padding-right: 8px;
+      margin-right: 2px;
+      border-right: 1px solid var(--line);
+    }
+    .editor-group:last-child { border-right: 0; padding-right: 0; margin-right: 0; }
+    .editor-toolbar button,
+    .editor-toolbar select,
+    .editor-toolbar input[type="search"] {
+      font-size: 0.7rem;
+      line-height: 1.2;
+      padding: 4px 7px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: #fff;
+      color: var(--text);
+      cursor: pointer;
+    }
+    .editor-toolbar button.active {
+      background: #dbeafe;
+      border-color: #93c5fd;
+      color: var(--accent);
+      font-weight: 700;
+    }
+    .editor-toolbar button:disabled { opacity: 0.45; cursor: default; }
+    .editor-toolbar select { padding-right: 4px; }
+    .editor-toolbar input[type="search"] {
+      width: 140px;
+      cursor: text;
+    }
+    .editor-hint {
+      color: var(--muted);
+      font-size: 0.68rem;
+      white-space: nowrap;
+    }
+    .page-line.selected {
+      background: rgba(29, 78, 216, 0.22);
+      outline: 1px solid rgba(29, 78, 216, 0.7);
+      outline-offset: 1px;
+    }
+    .draw-overlay {
+      position: absolute;
+      inset: 0;
+      z-index: 5;
+      cursor: crosshair;
+      display: none;
+    }
+    .preview-scroll.draw-mode .draw-overlay { display: block; }
+    .preview-scroll.draw-mode .page-lines { pointer-events: none; }
+    .draw-rect {
+      position: absolute;
+      border: 1.5px dashed #1d4ed8;
+      background: rgba(29, 78, 216, 0.12);
+      pointer-events: none;
+    }
+    .draw-rect.line-tool {
+      border: 0;
+      background: transparent;
+      border-top: 2px solid #111;
+      height: 0 !important;
+    }
+    .preview-body {
+      flex: 1 1 auto;
+      min-height: 0;
+      display: flex;
+      background: #fff;
+    }
+    .bookmark-panel {
+      flex: 0 0 200px;
+      min-height: 0;
+      overflow: auto;
+      background: #f8fafc;
+      border-right: 1px solid var(--line);
+      padding: 8px 6px 12px;
+    }
+    .bookmark-head {
+      font-size: 0.68rem;
+      font-weight: 700;
+      color: var(--muted);
+      padding: 2px 6px 6px;
+    }
+    #bookmark-list button {
+      display: block;
+      width: 100%;
+      text-align: left;
+      background: transparent;
+      border: 0;
+      border-radius: 4px;
+      padding: 4px 6px;
+      font-size: 0.72rem;
+      line-height: 1.3;
+      color: var(--text);
+      cursor: pointer;
+    }
+    #bookmark-list button:hover { background: #e2e8f0; }
+    #bookmark-list button.active { background: #dbeafe; color: var(--accent); font-weight: 700; }
+    .preview-scroll {
+      flex: 1 1 auto;
+      min-width: 0;
+      min-height: 0;
+      overflow: auto;
+      background: #525659;
+      padding: 12px;
+    }
+    .page-sheet {
+      position: relative;
+      margin: 0 auto 12px;
+      background: #fff;
+      width: 100%;
+      aspect-ratio: 8.5 / 11;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+    }
+    .page-sheet img { display: block; width: 100%; height: 100%; object-fit: contain; user-select: none; }
+    .page-lines, .page-marks { position: absolute; inset: 0; }
+    .page-marks { z-index: 2; pointer-events: none; }
+    .page-lines { z-index: 3; }
+    .page-line {
+      position: absolute;
+      background: transparent;
+      border: 0;
+      padding: 0;
+      margin: 0;
+      cursor: text;
+    }
+    .page-line:hover { background: rgba(29, 78, 216, 0.18); }
+    .mark-box {
+      position: absolute;
+      display: none;
+      background: rgba(255, 214, 50, 0.45);
+      border: 1px solid rgba(180, 110, 0, 0.85);
+    }
+    .preview-scroll.show-marks .mark-box { display: block; }
+    .inline-edit {
+      position: absolute;
+      z-index: 6;
+      box-sizing: border-box;
+      margin: 0;
+      padding: 1px 4px;
+      border: 2px solid #1d4ed8;
+      border-radius: 2px;
+      background: #fffef5;
+      color: #111;
+      font-family: "Times New Roman", Times, serif;
+      line-height: 1.15;
+      caret-color: #dc2626;
+      outline: none;
+      box-shadow: 0 0 0 3px rgba(29, 78, 216, 0.25);
+      min-height: 1.4em;
+    }
+    .hidden { display: none !important; }
+    @media (max-width: 900px) {
+      .app { height: auto; min-height: 100%; }
+      .workspace.preview-on {
+        grid-template-columns: 1fr;
+        grid-template-rows: 50vh minmax(0, 1fr);
+        grid-template-areas:
+          "preview"
+          "summary";
+      }
+      .workspace.preview-on .summary { max-height: none; }
+      .preview-wrap { height: 50vh; }
+      .bookmark-panel { flex-basis: 140px; }
+      .top-row { flex-direction: column; }
+      .run-wrap { flex: 0 0 auto; }
+      .summary {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto minmax(240px, 1fr);
+      }
+      .summary-meta { max-height: 38vh; }
+      .summary-detail { border-left: 0; padding-left: 0; border-top: 1px solid var(--line); padding-top: 10px; }
+      .facts { grid-template-columns: 1fr 1fr; }
+      .rule-board { grid-template-columns: 1fr; }
+      .outcome { max-width: 100%; justify-content: flex-start; }
+      .summary-head { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <h1>MOA Valuation Package</h1>
+      <p class="lead">Upload PDFs, Excel, and the testing summary, or paste a short folder path.</p>
+      <div class="status-line" id="status"></div>
+      <div class="status-line" id="error" role="alert"></div>
+    </header>
+
+    <section class="card upload-bar" id="upload-bar">
+      <span>Upload is hidden so the summary has more space.</span>
+      <button type="button" class="btn ghost" id="show-upload">Show upload</button>
+    </section>
+
+    <section class="card controls" id="controls">
+      <div class="controls-head">
+        <span>Upload</span>
+        <div class="controls-head-actions">
+          <button type="button" class="btn ghost" id="refresh-upload" title="Clear the file list so you can upload a new set without reloading">Refresh upload</button>
+          <button type="button" class="btn ghost" id="hide-upload">Hide upload</button>
+        </div>
+      </div>
+      <div class="top-row">
+        <div class="drop" id="drop">
+          <label class="drop-pick">
+            <span class="drop-title">Upload files</span>
+            <span class="drop-hint">Drop PDFs and Excel, or click Browse files. A 15-page Cover Letter / Valuation Pkg splits into Cover Letter, Action required pages, excess notices, letters, Year End Recap, and Compliance Report 1–3. Other files stay one row. Auto-order sorts them.</span>
+            <span class="browse-files">Browse files</span>
+            <input id="picker" type="file" accept=".pdf,.xlsx,.xls" multiple />
+          </label>
+          <div id="file-list"></div>
+        </div>
+        <div class="run-wrap">
+          <label class="check"><input id="auto-order" type="checkbox" checked /> Auto-order</label>
+          <label class="check"><input id="rewrite-sources" type="checkbox" /> Retype 402(g) dates and HCE %. The cover letter date is set to today on every Process.</label>
+          <label class="check"><input id="assembly-stops" type="checkbox" checked /> Assembly stops (recommended; stop on missing reports or validation issues)</label>
+          <button type="button" class="btn ghost hidden" id="validation-open">Review failed validations</button>
+          <label class="check"><input id="log-steps" type="checkbox" /> Log assembly steps in the browser console</label>
+          <button id="run" type="button">Process package</button>
+        </div>
+      </div>
+      <div class="path-row">
+        <label for="source-path">or path</label>
+        <input id="source-path" type="text" placeholder="K:\Mutual of America\800643\Testing\Valuation Package" />
+        <button type="button" class="btn ghost" id="load-path">Show files</button>
+      </div>
+    </section>
+
+    <section id="results" class="workspace">
+      <div class="card summary">
+        <div class="summary-meta">
+          <div class="summary-head">
+            <div>
+              <h2>Result summary</h2>
+              <p id="filename"></p>
+              <p id="plan-line"></p>
+              <p id="build-time" class="time-blink"></p>
+            </div>
+            <div class="outcome" id="outcome"></div>
+          </div>
+          <div class="actions">
+            <a class="btn" id="download" href="#">Download PDF</a>
+            <button type="button" class="btn ghost" id="preview-link">Preview</button>
+            <a class="btn ghost hidden" id="email-link" href="#">Email tester</a>
+            <a class="btn ghost hidden" id="eml-link" href="#">Outlook draft</a>
+            <a class="btn ghost hidden" id="log-link" href="#">Assembly log</a>
+            <a class="btn ghost hidden" id="audit-log-link" href="#">Audit log</a>
+          </div>
+          <div class="facts" id="facts"></div>
+          <div class="source-block">
+            <span class="source-label">Source files</span>
+            <ol id="source-order"></ol>
+          </div>
+        </div>
+        <div class="summary-detail">
+          <div class="tabs">
+            <button type="button" class="active" data-tab="rules" id="tab-btn-rules">Keep / remove</button>
+            <button type="button" data-tab="checks" id="tab-btn-checks">Checks</button>
+            <button type="button" data-tab="validations" id="tab-btn-validations">Validations</button>
+            <button type="button" data-tab="profile">Profile</button>
+            <button type="button" data-tab="warnings" id="tab-btn-warnings">Notes</button>
+          </div>
+          <div class="pane">
+            <div id="tab-rules" class="rule-board"></div>
+            <table id="tab-checks" class="hidden"></table>
+            <table id="tab-validations" class="hidden"></table>
+            <table id="tab-profile" class="hidden"></table>
+            <ul id="tab-warnings" class="hidden"></ul>
+          </div>
+        </div>
+      </div>
+      <div class="card preview-wrap" id="preview-wrap">
+        <div class="preview-bar">
+          <span>Assembled file</span>
+          <div class="preview-tools">
+            <label class="check" for="highlight-changes">
+              <input id="highlight-changes" type="checkbox" checked />
+              <span id="highlight-label">Highlight changes</span>
+            </label>
+            <span class="preview-note" id="highlight-note"></span>
+            <span class="preview-note" id="active-page-label">Page 1</span>
+            <button type="button" class="btn ghost" id="page-up" title="Move this page earlier">Earlier</button>
+            <button type="button" class="btn ghost" id="page-down" title="Move this page later">Later</button>
+            <button type="button" class="btn ghost" id="page-rotate" title="Rotate this page">Rotate</button>
+            <button type="button" class="btn ghost" id="page-delete" title="Delete this page">Delete page</button>
+            <button type="button" class="btn ghost" id="undo-edit" title="Undo the last change">Undo</button>
+            <button type="button" class="btn ghost" id="redo-edit" title="Redo the last undone change">Redo</button>
+            <button type="button" class="btn ghost" id="save-edited" title="Save a separate edited PDF copy">Save edited copy</button>
+            <a class="btn ghost" id="preview-download" href="#">Download</a>
+            <button type="button" class="btn ghost" id="zoom-out" title="Smaller">−</button>
+            <button type="button" class="btn ghost" id="zoom-in" title="Larger">+</button>
+            <span class="preview-note" id="edit-status"></span>
+            <button type="button" class="btn ghost" id="close-preview">Close preview</button>
+          </div>
+        </div>
+        <div class="editor-toolbar" id="editor-toolbar" role="toolbar" aria-label="PDF editor">
+          <div class="editor-group">
+            <button type="button" class="tool-btn active" data-tool="select" title="Select and edit text">Select</button>
+            <button type="button" class="tool-btn" data-tool="text" title="Click the page to add text">Add text</button>
+            <button type="button" id="remove-spaces" title="Remove spaces between words on the selected line">Remove spaces</button>
+            <button type="button" id="shift-newline" title="Move text after the caret onto the next line">New line</button>
+            <button type="button" id="join-up" title="Join this line with the line above. Cursor at front + Delete also does this.">Join up</button>
+          </div>
+          <div class="editor-group">
+            <button type="button" id="fmt-bold" title="Bold selected line"><b>B</b></button>
+            <button type="button" id="fmt-italic" title="Italic selected line"><i>I</i></button>
+            <select id="fmt-size" title="Font size for selected or new text" aria-label="Font size">
+              <option value="">Size</option>
+              <option value="8">8</option>
+              <option value="9">9</option>
+              <option value="10">10</option>
+              <option value="11">11</option>
+              <option value="12">12</option>
+              <option value="14">14</option>
+              <option value="16">16</option>
+              <option value="18">18</option>
+              <option value="24">24</option>
+            </select>
+          </div>
+          <div class="editor-group">
+            <button type="button" id="align-left" title="Align selected line left">Left</button>
+            <button type="button" id="align-center" title="Align selected line center">Center</button>
+            <button type="button" id="align-right" title="Align selected line right">Right</button>
+          </div>
+          <div class="editor-group">
+            <button type="button" class="tool-btn" data-tool="hline" title="Drag to draw a horizontal line">H-Line</button>
+            <button type="button" class="tool-btn" data-tool="line" title="Drag to draw a diagonal line">Line</button>
+            <button type="button" class="tool-btn" data-tool="rectangle" title="Drag to draw a rectangle">Rect</button>
+            <button type="button" class="tool-btn" data-tool="circle" title="Drag to draw a circle">Circle</button>
+          </div>
+          <div class="editor-group">
+            <button type="button" class="tool-btn" data-tool="highlight" title="Drag to highlight">Highlight</button>
+            <button type="button" class="tool-btn" data-tool="note" title="Drag to place a note">Note</button>
+            <button type="button" class="tool-btn" data-tool="stamp" title="Drag to place a stamp">Stamp</button>
+            <button type="button" class="tool-btn" data-tool="redact" title="Drag to permanently redact">Redact</button>
+            <button type="button" class="tool-btn" data-tool="signature" title="Draw a signature">Sign</button>
+          </div>
+          <div class="editor-group">
+            <input type="search" id="preview-search" placeholder="Find in PDF" aria-label="Search PDF text" />
+            <button type="button" id="search-prev" title="Previous match">‹</button>
+            <button type="button" id="search-next" title="Next match">›</button>
+            <span class="editor-hint" id="search-status"></span>
+          </div>
+          <span class="editor-hint" id="tool-hint">Click a line. Cursor at front + Delete joins with the line above. Enter moves text down.</span>
+        </div>
+        <div class="preview-body">
+          <aside class="bookmark-panel" id="bookmark-panel">
+            <div class="bookmark-head">Bookmarks</div>
+            <div id="bookmark-list"></div>
+          </aside>
+          <div class="preview-scroll show-marks" id="preview-scroll"></div>
+        </div>
+      </div>
+    </section>
+    <dialog class="validation-dialog" id="validation-dialog" aria-labelledby="validation-dialog-title">
+      <div class="validation-dialog-body">
+        <div class="validation-dialog-head">
+          <h2 id="validation-dialog-title">Review failed validations</h2>
+          <p>Check messages to ignore. Close removes those from the list above. Process package continues with the remaining ignores applied.</p>
+        </div>
+        <div class="validation-menu">
+          <div class="validation-actions">
+            <button type="button" class="btn ghost" id="validation-select-all">Ignore all</button>
+            <button type="button" class="btn ghost" id="validation-select-none">Enforce all</button>
+          </div>
+          <div id="validation-options"></div>
+        </div>
+        <div class="validation-dialog-foot">
+          <button type="button" class="btn ghost" id="validation-dialog-close" title="Apply ignored validations to the list above">Close</button>
+        </div>
+      </div>
+    </dialog>
+  </div>
+  <script>
+    const picker = document.getElementById("picker");
+    const drop = document.getElementById("drop");
+    const fileList = document.getElementById("file-list");
+    const runBtn = document.getElementById("run");
+    const statusEl = document.getElementById("status");
+    const errorEl = document.getElementById("error");
+    const results = document.getElementById("results");
+    const previewLink = document.getElementById("preview-link");
+    const closePreview = document.getElementById("close-preview");
+    const highlightChanges = document.getElementById("highlight-changes");
+    const previewScroll = document.getElementById("preview-scroll");
+    const bookmarkList = document.getElementById("bookmark-list");
+    const editStatus = document.getElementById("edit-status");
+    const activePageLabel = document.getElementById("active-page-label");
+    const previewDownload = document.getElementById("preview-download");
+    const app = document.querySelector(".app");
+    let files = [];
+    let currentPreview = "";
+    let highlightCount = 0;
+    let listedPath = "";
+    let currentJob = null;
+    let viewerJobId = "";
+    let previewVersion = 0;
+    let pageZoom = 1;
+    let activePage = 1;
+    let selectedLine = null;
+    let selectedButton = null;
+    let inlineInput = null;
+    let inlineSkipBlur = false;
+    let activeTool = "select";
+    let drawState = null;
+    let searchMatches = [];
+    let searchIndex = -1;
+    let fmtBold = false;
+    let fmtItalic = false;
+    const pageLoads = new Map();
+    const dragTools = new Set(["hline", "line", "rectangle", "circle", "highlight", "note", "stamp", "redact", "signature"]);
+    const toolHints = {
+      select: "Click a line to edit. Cursor at the front + Delete/Backspace joins with the line above. Enter moves text down.",
+      text: "Click on the page to place new text. Set Bold / Size / Align first if needed.",
+      hline: "Drag across the page to draw a horizontal line.",
+      line: "Drag from one point to another to draw a line.",
+      rectangle: "Drag to draw a rectangle.",
+      circle: "Drag to draw a circle.",
+      highlight: "Drag over text to highlight it.",
+      note: "Drag a box, then enter note text.",
+      stamp: "Drag a box, then enter stamp text.",
+      redact: "Drag over content to permanently remove it.",
+      signature: "Click and drag to draw a signature stroke.",
+    };
+    let pageObserver = null;
+
+    document.getElementById("hide-upload").addEventListener("click", () => setUploadOpen(false));
+    document.getElementById("show-upload").addEventListener("click", () => setUploadOpen(true));
+    document.getElementById("refresh-upload").addEventListener("click", () => refreshUpload());
+
+    function setUploadOpen(open) {
+      app.classList.toggle("upload-hidden", !open);
+      if (open) renderFiles();
+    }
+
+    function refreshUpload() {
+      files = [];
+      listedPath = "";
+      picker.value = "";
+      document.getElementById("source-path").value = "";
+      errorEl.textContent = "";
+      setStatus("Upload cleared — add new files or a folder path.");
+      setUploadOpen(true);
+      renderFiles();
+      app.classList.remove("has-files");
+    }
+
+    picker.addEventListener("change", () => {
+      const chosen = Array.from(picker.files || []);
+      picker.value = "";
+      addFiles(chosen);
+    });
+    ["dragenter", "dragover"].forEach((eventName) => {
+      drop.addEventListener(eventName, (event) => {
+        event.preventDefault();
+        drop.classList.add("drag");
+      });
+    });
+    ["dragleave", "drop"].forEach((eventName) => {
+      drop.addEventListener(eventName, (event) => {
+        event.preventDefault();
+        drop.classList.remove("drag");
+      });
+    });
+    drop.addEventListener("drop", (event) => addFiles(event.dataTransfer && event.dataTransfer.files));
+
+    document.querySelectorAll(".tabs button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".tabs button").forEach((item) => item.classList.remove("active"));
+        btn.classList.add("active");
+        ["rules", "checks", "validations", "profile", "warnings"].forEach((name) => {
+          document.getElementById("tab-" + name).classList.toggle("hidden", name !== btn.dataset.tab);
+        });
+        const summary = document.querySelector(".summary");
+        const pane = document.querySelector(".pane");
+        if (!pane) return;
+        if (results.classList.contains("preview-on") && summary) {
+          const nextTop = pane.getBoundingClientRect().top - summary.getBoundingClientRect().top + summary.scrollTop - 8;
+          summary.scrollTop = Math.max(0, nextTop);
+        } else {
+          pane.scrollTop = 0;
+        }
+      });
+    });
+
+    function coverPageTitles() {
+      return [
+        "Cover Letter",
+        "Action required page 1",
+        "Action required page 2",
+        "Action required page 3",
+        "ADP/ACP Failure excess page after 12 months (Current year Testing Method)",
+        "ADP/ACP Failure excess page after 12 months (Prior year Testing Method)",
+        "ADP/ACP Failure excess page Current year",
+        "415 Failure information",
+        "ADP/ACP Failure letter",
+        "402g Failure letter",
+        "415 Failure letter",
+        "Year End Recap",
+        "Compliance Report 1",
+        "Compliance Report 2",
+        "Compliance Report 3",
+      ];
+    }
+
+    function isCoverFile(name) {
+      const n = String(name || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+      return n.includes("coverletter") || n.includes("coverpage") || n.includes("valuation");
+    }
+
+    function expandListed(meta, extra) {
+      const pages = Number(meta && meta.pages) || 1;
+      const name = meta.name;
+      const size = meta.size || 0;
+      const rank = Number(meta && meta.rank);
+      const apiLabels = Array.isArray(meta && meta.labels) ? meta.labels : [];
+      const pageRanks = Array.isArray(meta && meta.ranks) ? meta.ranks : [];
+      const cover = isCoverFile(name);
+      const titles = coverPageTitles();
+      const split = meta.split === true || (cover && pages > 1);
+      if (split && pages > 1) {
+        const rows = [];
+        for (let page = 1; page <= pages; page += 1) {
+          const pageRank = Number(pageRanks[page - 1]);
+          rows.push(Object.assign({
+            name: name,
+            size: size,
+            page: page,
+            pageCount: pages,
+            rank: Number.isFinite(pageRank) ? pageRank : (Number.isFinite(rank) ? rank : (cover ? 0 : 1000)),
+        label: apiLabels[page - 1] || titles[page - 1] || ("Cover Letter page " + page),
+          }, extra));
+        }
+        return rows;
+      }
+      return [Object.assign({
+        name: name,
+        size: size,
+        rank: Number.isFinite(rank) ? rank : 1000,
+        label: (apiLabels[0] || (meta && meta.label) || name),
+      }, extra)];
+    }
+
+    function sortFilesIfAutoOrder() {
+      if (!document.getElementById("auto-order").checked) return;
+      files = files.slice().sort((a, b) => {
+        const rankA = Number.isFinite(a.rank) ? a.rank : 1000;
+        const rankB = Number.isFinite(b.rank) ? b.rank : 1000;
+        const rank = rankA - rankB;
+        if (rank) return rank;
+        const page = (a.page || 0) - (b.page || 0);
+        if (page) return page;
+        return String(a.name || "").localeCompare(String(b.name || ""));
+      });
+    }
+
+    function retitleCoverRows() {
+      const titles = coverPageTitles();
+      const covers = files.filter((item) => isCoverFile(item.name) && !item.page);
+      if (covers.length < 2) return;
+      covers.forEach((item, index) => {
+        item.label = titles[index] || ("Cover Letter page " + (index + 1));
+      });
+    }
+
+    function addFiles(list) {
+      const incoming = Array.from(list || []);
+      if (!incoming.length) return;
+      inspectAndAdd(incoming);
+    }
+
+    async function refreshBatchFileClassifications() {
+      if (!files.length) return;
+      const form = new FormData();
+      files.forEach((item) => {
+        form.append("item_name", item.name);
+        form.append("item_page", String(item.page || 0));
+        form.append("item_page_count", String(item.pageCount || 1));
+      });
+      try {
+        const payload = await postJson("/api/classify-files", form);
+        (payload.files || []).forEach((classified, index) => {
+          const item = files[index];
+          if (!item || item.name !== classified.name || (item.page || 0) !== classified.page) return;
+          item.label = classified.label || item.label;
+          item.rank = Number.isFinite(Number(classified.rank)) ? Number(classified.rank) : item.rank;
+        });
+        sortFilesIfAutoOrder();
+        retitleCoverRows();
+        renderFiles();
+      } catch (err) {
+        console.warn("Could not refresh report labels from the full filename set", err);
+      }
+    }
+
+    async function inspectAndAdd(incoming) {
+      errorEl.textContent = "";
+      setStatus("Adding " + incoming.length + " file(s)…");
+      const fresh = [];
+      incoming.forEach((file) => {
+        if (files.some((item) => item.name === file.name && item.file)) return;
+        files.push({ name: file.name, size: file.size, file: file, label: file.name, rank: 1000 });
+        fresh.push(file);
+      });
+      renderFiles();
+      if (!fresh.length) {
+        setStatus("Listed " + files.length + " file(s).");
+        return;
+      }
+      const metas = [];
+      try {
+        for (const file of fresh) {
+          const sent = await sendFileParts(file);
+          metas.push(sent.meta);
+          files = files.filter((item) => !(item.file && item.name === file.name && !item.uploadId));
+          expandListed(sent.meta, { file: file, uploadId: sent.uploadId }).forEach((row) => files.push(row));
+          sortFilesIfAutoOrder();
+          retitleCoverRows();
+          renderFiles();
+        }
+        await refreshBatchFileClassifications();
+        const extraPages = metas.filter((item) => item.split);
+        setStatus(extraPages.length
+          ? extraPages.map((item) => (item.label || item.name) + " listed as " + item.pages + " page(s).").join(" ")
+          : "Listed " + files.length + " file(s).");
+      } catch (err) {
+        const failedNames = new Set(fresh.map((file) => file.name));
+        files = files.filter((item) => !(item.file && failedNames.has(item.name) && !item.uploadId));
+        renderFiles();
+        const raw = err.message || String(err);
+        errorEl.textContent = raw === "Failed to fetch"
+          ? "The file did not reach the API. Keep the python main.py window open and use http://127.0.0.1:8002."
+          : raw;
+        setStatus("Listed " + files.length + " file(s).");
+      }
+    }
+
+    async function sendFileParts(file) {
+      const uploadId = (window.crypto && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : ("up" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10));
+      const chunkSize = 2 * 1024 * 1024;
+      const total = Math.max(1, Math.ceil((file.size || 0) / chunkSize));
+      let meta = null;
+      for (let index = 0; index < total; index += 1) {
+        const start = index * chunkSize;
+        const piece = file.slice(start, Math.min(file.size || 0, start + chunkSize));
+        setStatus("Uploading " + file.name + "… " + (index + 1) + " of " + total);
+        const form = new FormData();
+        form.append("upload_id", uploadId);
+        form.append("name", file.name);
+        form.append("index", String(index));
+        form.append("total", String(total));
+        form.append("chunk", piece, file.name);
+        const payload = await postJson("/api/upload-part", form);
+        if (payload.complete && payload.file) meta = payload.file;
+      }
+      if (!meta) throw new Error("Upload did not finish for " + file.name);
+      return { uploadId: uploadId, meta: meta };
+    }
+
+    function fileLabel(file) {
+      return file.label || file.name;
+    }
+
+    function isPathFile(item) {
+      return Boolean(item && item.fromPath);
+    }
+
+    async function loadPathFiles() {
+      const sourcePath = (document.getElementById("source-path").value || "").trim();
+      errorEl.textContent = "";
+      if (!sourcePath) {
+        errorEl.textContent = "Enter a folder path first.";
+        return;
+      }
+      setStatus("Loading files from path…");
+      try {
+        const response = await fetch(apiBase() + "/api/folder?" + new URLSearchParams({ path: sourcePath }));
+        const text = await response.text();
+        let payload = {};
+        try {
+          payload = text ? JSON.parse(text) : {};
+        } catch {
+          throw new Error(text || response.statusText);
+        }
+        if (!response.ok) {
+          throw new Error(formatDetail(payload.detail) || response.statusText);
+        }
+        listedPath = sourcePath;
+        const uploads = files.filter((item) => !isPathFile(item));
+        const listed = [];
+        (payload.files || []).forEach((item) => {
+          expandListed(item, { fromPath: true }).forEach((row) => listed.push(row));
+        });
+        files = uploads.concat(listed);
+        sortFilesIfAutoOrder();
+        retitleCoverRows();
+        renderFiles();
+        const skipped = (payload.warnings || []).join(" ");
+        setStatus("Listed " + listed.length + " file(s). Use Up/Down/Remove, then Process package."
+          + (skipped ? " " + skipped : ""));
+      } catch (err) {
+        listedPath = "";
+        const raw = err.message || String(err);
+        errorEl.textContent = raw === "Failed to fetch"
+          ? "Cannot reach the API. Keep python main.py running and open http://127.0.0.1:8002."
+          : raw;
+        setStatus("");
+      }
+    }
+
+    document.getElementById("auto-order").addEventListener("change", () => {
+      sortFilesIfAutoOrder();
+      renderFiles();
+    });
+    document.getElementById("load-path").addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      loadPathFiles();
+    });
+    document.getElementById("source-path").addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        loadPathFiles();
+      }
+    });
+    document.getElementById("source-path").addEventListener("blur", () => {
+      const sourcePath = (document.getElementById("source-path").value || "").trim();
+      if (sourcePath && sourcePath !== listedPath) loadPathFiles();
+    });
+
+    function isPdfItem(item) {
+      return String(item && item.name || "").toLowerCase().endsWith(".pdf");
+    }
+
+    async function openUploadPdf(event, item) {
+      event.preventDefault();
+      event.stopPropagation();
+      errorEl.textContent = "";
+      if (!isPdfItem(item)) {
+        errorEl.textContent = "Only PDF files can be opened.";
+        return;
+      }
+      let url = "";
+      let revoke = "";
+      try {
+        if (item.file instanceof Blob) {
+          url = URL.createObjectURL(item.file);
+          revoke = url;
+        } else if (item.uploadId) {
+          url = apiBase() + "/api/uploads/" + encodeURIComponent(item.uploadId);
+        } else if (isPathFile(item)) {
+          const folder = listedPath || (document.getElementById("source-path").value || "").trim();
+          if (!folder) {
+            errorEl.textContent = "Folder path is missing.";
+            return;
+          }
+          url = apiBase() + "/api/folder-file?" + new URLSearchParams({
+            folder: folder,
+            name: item.name,
+          });
+        } else {
+          errorEl.textContent = "Cannot open that file yet — wait for upload to finish.";
+          return;
+        }
+        if (item.page) url += "#page=" + item.page;
+        const opened = window.open(url, "_blank", "noopener,noreferrer");
+        if (!opened) {
+          errorEl.textContent = "Popup blocked — allow popups to open the PDF.";
+        }
+      } catch (err) {
+        errorEl.textContent = err.message || String(err);
+      } finally {
+        if (revoke) {
+          setTimeout(() => URL.revokeObjectURL(revoke), 60000);
+        }
+      }
+    }
+
+    function renderFiles() {
+      app.classList.toggle("has-files", files.length > 0);
+      fileList.innerHTML = "";
+      files.forEach((file, index) => {
+        const row = document.createElement("div");
+        row.className = "file-row";
+        row.innerHTML = `<span>${index + 1}. ${escapeHtml(fileLabel(file))}</span>`;
+        const actions = document.createElement("div");
+        actions.className = "file-actions";
+        const openBtn = document.createElement("button");
+        openBtn.type = "button";
+        openBtn.className = "open-pdf";
+        openBtn.textContent = "Open";
+        openBtn.title = isPdfItem(file) ? "Open PDF" : "Only PDF files can be opened";
+        openBtn.disabled = !isPdfItem(file);
+        openBtn.onclick = (event) => {
+          openUploadPdf(event, file).catch((err) => {
+            errorEl.textContent = err.message || String(err);
+          });
+        };
+        const up = document.createElement("button");
+        up.type = "button";
+        up.textContent = "Up";
+        up.disabled = index === 0;
+        up.onclick = (event) => moveFile(event, index, index - 1);
+        const down = document.createElement("button");
+        down.type = "button";
+        down.textContent = "Down";
+        down.disabled = index === files.length - 1;
+        down.onclick = (event) => moveFile(event, index, index + 1);
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.textContent = "Remove";
+        remove.onclick = (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          files.splice(index, 1);
+          renderFiles();
+        };
+        actions.append(openBtn, up, down, remove);
+        row.append(actions);
+        fileList.appendChild(row);
+      });
+    }
+
+    function moveFile(event, from, to) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (to < 0 || to >= files.length) return;
+      const copy = files.slice();
+      const item = copy[from];
+      copy[from] = copy[to];
+      copy[to] = item;
+      files = copy;
+      document.getElementById("auto-order").checked = false;
+      renderFiles();
+    }
+
+    function apiBase() {
+      if (location.protocol === "file:") return "http://127.0.0.1:8002";
+      return "";
+    }
+
+    async function postJson(path, form) {
+      let lastError = null;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          const response = await fetch(apiBase() + path, { method: "POST", body: form });
+          const text = await response.text();
+          let payload = {};
+          try {
+            payload = text ? JSON.parse(text) : {};
+          } catch {
+            throw new Error(text || response.statusText);
+          }
+          if (!response.ok) {
+            const error = new Error(formatDetail(payload.detail) || response.statusText);
+            error.detail = payload.detail;
+            throw error;
+          }
+          return payload;
+        } catch (err) {
+          lastError = err;
+          const message = err && err.message ? err.message : String(err);
+          if (attempt === 0 && message === "Failed to fetch") {
+            await new Promise((resolve) => setTimeout(resolve, 300));
+            continue;
+          }
+          throw err;
+        }
+      }
+      throw lastError;
+    }
+
+    function formatDetail(detail) {
+      if (!detail) return "";
+      if (typeof detail === "string") return detail;
+      if (Array.isArray(detail)) {
+        return detail.map((item) => item.msg || JSON.stringify(item)).join("; ");
+      }
+      if (typeof detail === "object" && detail.message) return detail.message;
+      return JSON.stringify(detail);
+    }
+
+    async function startConsoleTrace(traceId) {
+      try {
+        const response = await fetch(apiBase() + "/health", { cache: "no-store" });
+        const health = response.ok ? await response.json() : {};
+        if (!health.console_trace) {
+          console.warn("[Assembly] Console tracing requires restarting the Python app. Close the old server, start the app again, then refresh this page.");
+          return async () => {};
+        }
+      } catch (error) {
+        console.warn("[Assembly] Console tracing unavailable: cannot reach the Python app.", error);
+        return async () => {};
+      }
+      let cursor = 0;
+      let stopped = false;
+      let pending = Promise.resolve();
+      let truncationReported = false;
+      console.log("[Assembly] Started", { traceId });
+      console.log("[Assembly] Each step is closed. Click it to open the input and output.");
+      let sawOldTrace = false;
+      async function poll() {
+        try {
+          const response = await fetch(apiBase() + "/api/console-traces/" + traceId + "?after=" + cursor);
+          if (!response.ok) {
+            stopped = true;
+            console.warn("[Assembly] Console trace endpoint unavailable. Restart the Python app and refresh this page.");
+            return;
+          }
+          const trace = await response.json();
+          for (const event of trace.events) {
+            if (event.event !== "step" && event.event !== "error") {
+              if (!sawOldTrace) {
+                sawOldTrace = true;
+                console.warn("[Assembly] The running Python app is still writing one line per helper call. Stop python main.py, start it again, then refresh this page.");
+              }
+              cursor = event.sequence;
+              continue;
+            }
+            const purpose = event.purpose || "Running " + (event.function || "this step");
+            const codeLink = event.code_link || (event.file && event.line ? event.file + ":" + event.line : event.file || "");
+            const title = "#" + event.sequence + "  " + purpose + "  |  " + codeLink;
+            if (event.event === "error") console.group(title);
+            else console.groupCollapsed(title);
+            console.log("purpose: " + purpose);
+            console.log("file name: " + (event.file || ""));
+            console.log("function: " + (event.function || ""));
+            console.log("code link: " + codeLink);
+            console.log("input object:");
+            console.dir(event.input);
+            console.log("output object:");
+            console.dir(event.output);
+            console.groupEnd();
+            cursor = event.sequence;
+          }
+          if (trace.truncated && !truncationReported) {
+            console.warn("[Assembly] Console trace limit reached; remaining calls are omitted.");
+            truncationReported = true;
+          }
+          return trace;
+        } catch (error) {
+          console.warn("[Assembly] Could not fetch console trace", error);
+        }
+      }
+      async function tick() {
+        if (stopped) return;
+        pending = poll();
+        await pending;
+        if (!stopped) setTimeout(tick, 500);
+      }
+      tick();
+      return async function finish() {
+        stopped = true;
+        await pending;
+        let trace;
+        do {
+          trace = await poll();
+        } while (trace && cursor < trace.total);
+        if (trace && trace.status === "waiting") {
+          console.warn("[Assembly] No service trace was created. The request may have failed before assembly started; check the error shown on the page.");
+        }
+        console.log("[Assembly] Finished", { traceId, status: trace ? trace.status : "unavailable" });
+      };
+    }
+
+    const validationDialog = document.getElementById("validation-dialog");
+    const validationOpen = document.getElementById("validation-open");
+    const validationOptions = document.getElementById("validation-options");
+    const validationTitle = document.getElementById("validation-dialog-title");
+    let validationSelectionActive = false;
+    const knownValidations = new Map();
+    let lastAssemblyError = null;
+    function activeValidationEntries() {
+      return [...knownValidations.values()].filter((validation) => !validation.ignored);
+    }
+    function ignoredValidationEntries() {
+      return [...knownValidations.values()].filter((validation) => validation.ignored);
+    }
+    function appendAuditLogLink(host, url) {
+      if (!url) return;
+      const link = document.createElement("a");
+      link.href = /^https?:\/\//i.test(url) ? url : apiBase() + url;
+      link.textContent = "Download audit log";
+      link.className = "audit-download-link";
+      link.setAttribute("download", "assembly-audit.json");
+      host.append(document.createElement("br"), link);
+    }
+    function renderUpperValidationList(message, validations, auditLogUrl) {
+      errorEl.replaceChildren();
+      const heading = message || "Assembly stopped.";
+      const active = (validations || []).filter((validation) => !validation.ignored);
+      const ignoredCount = (validations || []).filter((validation) => validation.ignored).length;
+      if (!active.length && ignoredCount) {
+        errorEl.append(
+          document.createTextNode(
+            "Ignored validations were removed from this list. Click Process package to continue with those ignores."
+          )
+        );
+        appendAuditLogLink(errorEl, auditLogUrl);
+        return;
+      }
+      errorEl.append(document.createTextNode(heading));
+      if (active.length) {
+        const list = document.createElement("ol");
+        active.forEach((validation) => {
+          (validation.details || [validation.label]).forEach((text) => {
+            const item = document.createElement("li");
+            item.textContent = text;
+            list.append(item);
+          });
+        });
+        errorEl.append(list);
+      }
+      if (ignoredCount) {
+        const note = document.createElement("p");
+        note.style.margin = "8px 0 0";
+        note.style.color = "var(--muted)";
+        note.style.fontSize = "0.78rem";
+        note.textContent = ignoredCount === 1
+          ? "1 validation ignored and hidden. Process package to continue with that ignore."
+          : ignoredCount + " validations ignored and hidden. Process package to continue with those ignores.";
+        errorEl.append(note);
+      }
+      appendAuditLogLink(errorEl, auditLogUrl);
+    }
+    function refreshUpperValidationList() {
+      if (!knownValidations.size) return;
+      const message = (lastAssemblyError && lastAssemblyError.message)
+        || "Assembly stopped.";
+      const auditLogUrl = lastAssemblyError && lastAssemblyError.audit_log_url;
+      renderUpperValidationList(
+        message,
+        [...knownValidations.values()],
+        auditLogUrl
+      );
+      validationSelectionActive = knownValidations.size > 0;
+      validationOpen.classList.toggle("hidden", !validationSelectionActive);
+      updateValidationSummary();
+    }
+    function showError(detail) {
+      errorEl.replaceChildren();
+      const message = detail && typeof detail === "object" ? detail.message : "";
+      const validations = detail && typeof detail === "object" && Array.isArray(detail.validations)
+        ? detail.validations
+        : [];
+      if (message && (validations.length || detail.audit_log_url)) {
+        lastAssemblyError = {
+          message,
+          audit_log_url: detail.audit_log_url || "",
+        };
+        renderUpperValidationList(
+          message,
+          validations.map((validation) => ({
+            ...validation,
+            ignored: !!(knownValidations.get(validation.id) || {}).ignored,
+          })),
+          detail.audit_log_url
+        );
+        return;
+      }
+      lastAssemblyError = null;
+      const text = typeof detail === "string" ? detail : formatDetail(detail);
+      const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+      const reasonLines = lines.filter((line) => !/^assembly stopped\.?$/i.test(line));
+      if (lines.length > 1 && reasonLines.length) {
+        const heading = lines.find((line) => /^assembly stopped\.?$/i.test(line)) || "Assembly stopped.";
+        errorEl.append(document.createTextNode(heading));
+        const list = document.createElement("ol");
+        reasonLines.forEach((line) => {
+          const item = document.createElement("li");
+          item.textContent = line;
+          list.append(item);
+        });
+        errorEl.append(list);
+        return;
+      }
+      errorEl.textContent = text;
+    }
+    function validationChecks() {
+      return [...validationOptions.querySelectorAll('input[name="validation-check"]')];
+    }
+    function updateValidationSummary() {
+      const checks = validationChecks();
+      const selected = checks.filter((input) => input.checked).length;
+      validationTitle.textContent = `Review failed validations (${selected}/${checks.length} ignored)`;
+    }
+    function failedValidationItems(detail) {
+      if (detail && Array.isArray(detail.validations)) return detail.validations;
+      const text = typeof detail === "string" ? detail : (detail && detail.message) || "";
+      const patterns = [
+        ["ssn", /social security number/i, "Full or masked Social Security numbers"],
+        ["summary_placeholders", /unresolved wording|still says pass\/fail|plan is\/is not/i, "Unresolved Result Summary wording"],
+        ["cover_stamp", /mutual of america stamp/i, "Mutual of America cover stamp"],
+        ["employer_address", /employer address/i, "Employer address completeness"],
+        ["employer_name", /employer name/i, "Employer name consistency"],
+        ["plan_name", /plan name/i, "Plan name consistency"],
+        ["plan_number", /plan number/i, "Plan number consistency"],
+        ["compliance_pages", /compliance reports? \(3 pages\)|compliance report page/i, "Three Compliance and Administrative pages"],
+        ["required_reports", /required reports are missing/i, "Required reports present"],
+        ["report_order", /do not follow test23 order/i, "Report order"],
+        ["coverage_results", /410\(b\).*coverage|coverage.*410\(b\)/i, "410(b) coverage results"],
+        ["brf_result", /brf.*result summary/i, "BRF Result Summary result"],
+        ["cover_excel", /cover letter.*valuation package excel|company address on the cover letter|plan year end on the cover letter/i, "Cover details vs. Val Assembly Excel"],
+        ["plan_year_end", /plan year end does not match|page \d+ shows/i, "Plan year end consistency"],
+        ["summary_results", /result summary validation failed/i, "Result Summary vs. test report results"],
+      ];
+      const lines = text.split(/\r?\n/).filter((line) => line.trim() && !/^assembly stopped\.?$/i.test(line.trim()));
+      const found = new Map();
+      lines.forEach((line) => {
+        const match = patterns.find(([, pattern]) => pattern.test(line));
+        if (!match) return;
+        const [id, , label] = match;
+        if (!found.has(id)) found.set(id, { id, label, details: [] });
+        found.get(id).details.push(line.trim());
+      });
+      return [...found.values()];
+    }
+    function showFailedValidations(validations) {
+      (validations || []).forEach((validation) => {
+        const previous = knownValidations.get(validation.id);
+        knownValidations.set(validation.id, {
+          id: validation.id,
+          label: validation.label || (previous && previous.label) || validation.id,
+          details: validation.details && validation.details.length
+            ? validation.details
+            : (previous && previous.details) || [],
+          ignored: previous ? previous.ignored : false,
+        });
+      });
+      validationOptions.replaceChildren();
+      knownValidations.forEach((validation) => {
+        const label = document.createElement("label");
+        label.className = "validation-option";
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.name = "validation-check";
+        input.value = validation.id;
+        input.checked = validation.ignored;
+        input.addEventListener("change", () => {
+          validation.ignored = input.checked;
+          updateValidationSummary();
+        });
+        input.setAttribute("aria-label", `Ignore ${validation.label}`);
+        label.append(input, document.createTextNode(` Ignore ${validation.label}`));
+        const detail = document.createElement("ol");
+        detail.className = "validation-detail";
+        (validation.details || []).forEach((message) => {
+          const item = document.createElement("li");
+          item.textContent = message;
+          detail.append(item);
+        });
+        label.append(detail);
+        validationOptions.append(label);
+      });
+      validationSelectionActive = validationOptions.childElementCount > 0;
+      validationOpen.classList.toggle("hidden", !validationSelectionActive);
+      if (validationSelectionActive) {
+        updateValidationSummary();
+        if (!validationDialog.open) {
+          validationOpen.disabled = true;
+          validationDialog.showModal();
+        }
+      }
+    }
+    validationOpen.addEventListener("click", () => {
+      if (validationSelectionActive && !validationDialog.open) {
+        validationOpen.disabled = true;
+        validationDialog.showModal();
+      }
+    });
+    document.getElementById("validation-dialog-close").addEventListener("click", () => validationDialog.close());
+    validationDialog.addEventListener("close", () => {
+      validationOpen.disabled = false;
+      // Closing applies ignore selections to the upper list immediately.
+      // Process package is the separate action that continues with those ignores.
+      refreshUpperValidationList();
+      const ignored = ignoredValidationEntries().length;
+      const remaining = activeValidationEntries().length;
+      if (ignored && remaining) {
+        setStatus(
+          ignored + " validation(s) ignored and hidden. "
+          + remaining + " still active. Click Process package only when you want to continue."
+        );
+      } else if (ignored && !remaining) {
+        setStatus("All listed validations ignored and hidden. Click Process package to continue.");
+      }
+    });
+    validationDialog.addEventListener("cancel", () => {
+      validationOpen.disabled = false;
+      refreshUpperValidationList();
+    });
+    document.getElementById("validation-select-all").addEventListener("click", () => {
+      validationChecks().forEach((input) => {
+        input.checked = true;
+        const validation = knownValidations.get(input.value);
+        if (validation) validation.ignored = true;
+      });
+      updateValidationSummary();
+    });
+    document.getElementById("validation-select-none").addEventListener("click", () => {
+      validationChecks().forEach((input) => {
+        input.checked = false;
+        const validation = knownValidations.get(input.value);
+        if (validation) validation.ignored = false;
+      });
+      updateValidationSummary();
+    });
+
+    runBtn.addEventListener("click", async () => {
+      errorEl.textContent = "";
+      const sourcePath = (document.getElementById("source-path").value || "").trim();
+      if (!files.length && !sourcePath) {
+        errorEl.textContent = "Upload files or enter a short folder path.";
+        return;
+      }
+      const form = new FormData();
+      const pathNames = files.filter(isPathFile).map((item) => item.name);
+      const uploads = files.filter((item) => !isPathFile(item));
+      if (sourcePath && listedPath === sourcePath) {
+        if (pathNames.length) {
+          form.append("source_path", sourcePath);
+        }
+      } else if (sourcePath) {
+        form.append("source_path", sourcePath);
+      }
+      if (!form.has("source_path") && !uploads.length) {
+        errorEl.textContent = "Upload files, or enter a folder path and click Show files.";
+        return;
+      }
+      form.append("auto_order", document.getElementById("auto-order").checked ? "true" : "false");
+      form.append("rewrite_sources", document.getElementById("rewrite-sources").checked ? "true" : "false");
+      form.append("check_assembly_stops", document.getElementById("assembly-stops").checked ? "true" : "false");
+      // Process package is the proceed action: send currently ignored validations.
+      if (knownValidations.size && document.getElementById("assembly-stops").checked) {
+        const ignoredIds = ignoredValidationEntries().map((validation) => validation.id);
+        form.append("validation_checks_configured", "true");
+        ignoredIds.forEach((id) => form.append("validation_checks", id));
+      }
+      const logSteps = document.getElementById("log-steps").checked;
+      form.append("log_steps", logSteps ? "true" : "false");
+      files.forEach((item) => {
+        form.append("item_name", item.name);
+        form.append("item_page", item.page ? String(item.page) : "0");
+      });
+      const seenUpload = {};
+      files.forEach((item) => {
+        if (item.uploadId && !seenUpload[item.uploadId]) {
+          seenUpload[item.uploadId] = true;
+          form.append("upload_id", item.uploadId);
+        }
+      });
+      runBtn.disabled = true;
+      const processStarted = Date.now();
+      const processTimer = setInterval(() => {
+        setStatus("Processing… " + elapsedLabel((Date.now() - processStarted) / 1000));
+      }, 1000);
+      setStatus("Processing… " + elapsedLabel(0));
+      hidePreview();
+      results.classList.remove("open");
+      let finishConsoleTrace = async () => {};
+      if (logSteps) {
+        const traceId = "trace_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2);
+        form.append("trace_id", traceId);
+        finishConsoleTrace = await startConsoleTrace(traceId);
+      }
+      try {
+        const payload = await postJson("/api/jobs", form);
+        knownValidations.clear();
+        lastAssemblyError = null;
+        showFailedValidations([]);
+        showResults(payload);
+        showElapsed("Done. Time to process: ", payload.elapsed_seconds == null ? (Date.now() - processStarted) / 1000 : payload.elapsed_seconds);
+      } catch (err) {
+        const raw = err.message || String(err);
+        const failedValidations = failedValidationItems(err.detail);
+        if (failedValidations.length) showFailedValidations(failedValidations);
+        if (raw === "Failed to fetch") {
+          showError("Cannot reach the API. Keep python main.py running and open http://127.0.0.1:8002.");
+        } else if (err.detail && typeof err.detail === "object") {
+          showError(err.detail);
+        } else {
+          showError(raw);
+        }
+        showElapsed("Stopped after ", (Date.now() - processStarted) / 1000, ".");
+      } finally {
+        clearInterval(processTimer);
+        await finishConsoleTrace();
+        runBtn.disabled = false;
+      }
+    });
+
+    function downloadUrl(job) {
+      const path = job.download_url || ("/api/jobs/" + job.job_id + "/pdf");
+      if (/^https?:\/\//i.test(path)) return path;
+      return apiBase() + path;
+    }
+
+    function previewUrl(job) {
+      const path = job.preview_url || ("/api/jobs/" + job.job_id + "/preview");
+      if (/^https?:\/\//i.test(path)) return path;
+      return apiBase() + path;
+    }
+
+    function syncHighlightLabel() {
+      document.getElementById("highlight-label").textContent = highlightCount
+        ? "Highlight changes (" + highlightCount + ")"
+        : "Highlight changes";
+      document.getElementById("highlight-note").textContent = highlightCount
+        ? ""
+        : "No rewritten text on this file.";
+    }
+
+    function jobApi(suffix) {
+      return apiBase() + "/api/jobs/" + currentJob.job_id + suffix;
+    }
+
+    function showPreview() {
+      results.classList.add("preview-on");
+      previewLink.textContent = "Hide preview";
+      previewScroll.classList.toggle("show-marks", highlightChanges.checked);
+      setActiveTool(activeTool || "select");
+      editStatus.textContent = toolHints[activeTool] || "";
+      if (currentJob && viewerJobId !== currentJob.job_id) buildViewer();
+    }
+
+    function hidePreview() {
+      closeInline();
+      clearSelection();
+      endDraw();
+      results.classList.remove("preview-on");
+      previewLink.textContent = "Preview";
+    }
+
+    function stopPageObserver() {
+      if (pageObserver) pageObserver.disconnect();
+      pageObserver = null;
+    }
+
+    async function buildViewer() {
+      viewerJobId = currentJob.job_id;
+      previewVersion += 1;
+      pageLoads.clear();
+      stopPageObserver();
+      closeInline();
+      selectedLine = null;
+      selectedButton = null;
+      previewScroll.innerHTML = "";
+      let pageCount = 0;
+      try {
+        const response = await fetch(jobApi("/outline"));
+        const payload = await response.json();
+        if (!response.ok) throw new Error(formatDetail(payload.detail) || "Could not open the preview");
+        pageCount = payload.page_count || 0;
+        renderBookmarks(payload.bookmarks || [], pageCount);
+      } catch (err) {
+        viewerJobId = "";
+        editStatus.textContent = err.message || String(err);
+        return;
+      }
+      if (!pageCount) {
+        editStatus.textContent = "This file has no pages.";
+        return;
+      }
+      for (let page = 1; page <= pageCount; page += 1) {
+        const sheet = document.createElement("div");
+        sheet.className = "page-sheet";
+        sheet.id = "pdf-page-" + page;
+        sheet.dataset.page = String(page);
+        const image = document.createElement("img");
+        image.alt = "Page " + page;
+        image.draggable = false;
+        sheet.appendChild(image);
+        const overlay = document.createElement("div");
+        overlay.className = "draw-overlay";
+        overlay.dataset.page = String(page);
+        sheet.appendChild(overlay);
+        sheet.addEventListener("dblclick", (event) => onPageDoubleClick(event, sheet));
+        sheet.addEventListener("click", (event) => onPageClick(event, sheet));
+        overlay.addEventListener("pointerdown", (event) => onDrawStart(event, sheet));
+        previewScroll.appendChild(sheet);
+      }
+      applyZoom();
+      syncDrawMode();
+      pageObserver = new IntersectionObserver((entries) => {
+        entries.forEach((entry) => {
+          const page = Number(entry.target.dataset.page);
+          if (!entry.isIntersecting) return;
+          loadPage(page);
+          if (entry.intersectionRatio >= 0.5) {
+            activePage = page;
+            activePageLabel.textContent = "Page " + page;
+          }
+        });
+      }, { root: previewScroll, rootMargin: "200px", threshold: [0, 0.5] });
+      previewScroll.querySelectorAll(".page-sheet").forEach((sheet) => pageObserver.observe(sheet));
+    }
+
+    function renderBookmarks(items, pageCount) {
+      bookmarkList.innerHTML = "";
+      if (!items.length) {
+        bookmarkList.innerHTML = "<p class='preview-note'>No bookmarks in this file.</p>";
+        return;
+      }
+      items.forEach((item) => {
+        let page = Number(item.page) || 1;
+        if (page < 1) page = 1;
+        if (pageCount && page > pageCount) page = pageCount;
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = item.title || "Bookmark";
+        button.style.paddingLeft = (6 + Math.max(0, (item.level || 1) - 1) * 12) + "px";
+        button.addEventListener("click", () => scrollToPage(page, button));
+        bookmarkList.appendChild(button);
+      });
+    }
+
+    async function scrollToPage(page, button) {
+      bookmarkList.querySelectorAll("button").forEach((node) => node.classList.toggle("active", node === button));
+      for (let number = 1; number <= page; number += 1) await loadPage(number);
+      const sheet = document.getElementById("pdf-page-" + page);
+      if (!sheet) return;
+      const host = previewScroll.getBoundingClientRect();
+      const box = sheet.getBoundingClientRect();
+      previewScroll.scrollTop += box.top - host.top - 8;
+    }
+
+    async function loadPage(page) {
+      const sheet = document.getElementById("pdf-page-" + page);
+      if (!sheet || !currentJob) return;
+      if (sheet.dataset.ready === String(previewVersion)) return;
+      const version = previewVersion;
+      const pending = (async () => {
+        const response = await fetch(jobApi("/pages/" + page + "/lines?v=" + version));
+        const meta = await response.json();
+        if (!response.ok) throw new Error(formatDetail(meta.detail) || "Could not read this page");
+        if (version !== previewVersion || viewerJobId !== currentJob.job_id) return;
+        sheet.dataset.pdfWidth = meta.width;
+        sheet.dataset.pdfHeight = meta.height;
+        sheet.dataset.rotation = meta.rotation || 0;
+        sheet.dataset.baseWidth = meta.base_width || meta.width;
+        sheet.dataset.baseHeight = meta.base_height || meta.height;
+        if (meta.width && meta.height) sheet.style.aspectRatio = meta.width + " / " + meta.height;
+        sheet.querySelector("img").src = jobApi("/pages/" + page + "?v=" + version);
+        placeLines(sheet, meta);
+        placeMarks(sheet, meta, page);
+        sheet.dataset.ready = String(version);
+      })();
+      pageLoads.set(page, pending);
+      try {
+        await pending;
+      } catch (err) {
+        if (version === previewVersion) editStatus.textContent = err.message || String(err);
+      }
+    }
+
+    function placeLines(sheet, meta) {
+      const layer = document.createElement("div");
+      layer.className = "page-lines";
+      (meta.lines || []).forEach((line) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "page-line";
+        const padY = 4 / meta.height * 100;
+        button.style.left = (line.x0 / meta.width * 100) + "%";
+        button.style.top = (line.y0 / meta.height * 100 - padY) + "%";
+        button.style.width = (Math.max(line.x1 - line.x0, 8) / meta.width * 100) + "%";
+        button.style.height = (Math.max(line.y1 - line.y0, 8) / meta.height * 100 + padY * 2) + "%";
+        button.title = line.text;
+        button.dataset.line = JSON.stringify(line);
+        if (
+          selectedLine
+          && selectedLine.page === Number(sheet.dataset.page)
+          && Math.abs(selectedLine.x0 - line.x0) < 0.5
+          && Math.abs(selectedLine.y0 - line.y0) < 0.5
+          && selectedLine.text === line.text
+        ) {
+          button.classList.add("selected");
+          selectedButton = button;
+        }
+        button.addEventListener("click", (event) => {
+          if (activeTool !== "select") return;
+          event.preventDefault();
+          event.stopPropagation();
+          openLineEditor(Number(sheet.dataset.page), line, button, event);
+        });
+        layer.appendChild(button);
+      });
+      sheet.querySelector(".page-lines")?.remove();
+      sheet.appendChild(layer);
+    }
+
+    function placeMarks(sheet, meta, page) {
+      const layer = document.createElement("div");
+      layer.className = "page-marks";
+      (currentJob.highlights || []).forEach((mark) => {
+        if (Number(mark.page) + 1 !== page) return;
+        let { x0, y0, x1, y1 } = mark;
+        const rotation = Number(meta.rotation) || 0;
+        if (rotation === 90) [x0, y0, x1, y1] = [meta.base_height - mark.y1, mark.x0, meta.base_height - mark.y0, mark.x1];
+        else if (rotation === 180) [x0, y0, x1, y1] = [meta.base_width - mark.x1, meta.base_height - mark.y1, meta.base_width - mark.x0, meta.base_height - mark.y0];
+        else if (rotation === 270) [x0, y0, x1, y1] = [mark.y0, meta.base_width - mark.x1, mark.y1, meta.base_width - mark.x0];
+        const box = document.createElement("div");
+        box.className = "mark-box";
+        box.style.left = (x0 / meta.width * 100) + "%";
+        box.style.top = (y0 / meta.height * 100) + "%";
+        box.style.width = (Math.max(x1 - x0, 2) / meta.width * 100) + "%";
+        box.style.height = (Math.max(y1 - y0, 2) / meta.height * 100) + "%";
+        layer.appendChild(box);
+      });
+      sheet.querySelector(".page-marks")?.remove();
+      sheet.appendChild(layer);
+    }
+
+    function lineButtons() {
+      return [...previewScroll.querySelectorAll(".page-line")];
+    }
+
+    function nearestLine(sheet, event) {
+      let best = null;
+      sheet.querySelectorAll(".page-line").forEach((button) => {
+        const rect = button.getBoundingClientRect();
+        const dx = Math.max(rect.left - event.clientX, 0, event.clientX - rect.right);
+        const dy = Math.max(rect.top - event.clientY, 0, event.clientY - rect.bottom);
+        const dist = dx * dx + dy * dy;
+        if (!best || dist < best.dist) best = { button, dist };
+      });
+      if (!best || best.dist > 36 * 36) return null;
+      return best.button;
+    }
+
+    async function onPageDoubleClick(event, sheet) {
+      if (activeTool !== "select") return;
+      if (event.target.closest(".inline-edit")) return;
+      event.preventDefault();
+      const page = Number(sheet.dataset.page);
+      const clicked = event.target.closest(".page-line");
+      const liveSheet = document.getElementById("pdf-page-" + page);
+      if (!liveSheet) return;
+      if (!liveSheet.querySelector(".page-line")) await loadPage(page);
+      const button = (clicked && clicked.isConnected) ? clicked : nearestLine(liveSheet, event);
+      if (!button) {
+        editStatus.textContent = liveSheet.querySelector(".page-line")
+          ? "Click closer to the words to edit them."
+          : "This page has no text to change.";
+        return;
+      }
+      await openLineEditor(page, JSON.parse(button.dataset.line), button, event);
+    }
+
+    function closeInline() {
+      if (inlineInput) inlineInput.remove();
+      inlineInput = null;
+    }
+
+    function caretIndexFromClick(button, event, text) {
+      const value = text || "";
+      if (!value) return 0;
+      const rect = button.getBoundingClientRect();
+      if (!rect.width) return value.length;
+      const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+      return Math.round(ratio * value.length);
+    }
+
+    async function openLineEditor(page, line, button, event) {
+      if (activeTool !== "select") return;
+      let pending = null;
+      if (inlineInput && selectedLine && inlineInput.value !== selectedLine.text) {
+        pending = { line: selectedLine, value: inlineInput.value };
+      }
+      const caret = event ? caretIndexFromClick(button, event, line.text) : null;
+      inlineSkipBlur = true;
+      closeInline();
+      if (pending && !await applyLineEdit(pending.value, pending.line)) {
+        inlineSkipBlur = false;
+        return;
+      }
+      const liveButton = button.isConnected
+        ? button
+        : [...(document.getElementById("pdf-page-" + page)?.querySelectorAll(".page-line") || [])]
+          .find((node) => {
+            const item = JSON.parse(node.dataset.line);
+            return Math.abs(item.x0 - line.x0) < 0.5 && Math.abs(item.y0 - line.y0) < 0.5;
+          });
+      if (!liveButton) {
+        editStatus.textContent = "Could not open that line for editing.";
+        inlineSkipBlur = false;
+        return;
+      }
+      beginEdit(page, JSON.parse(liveButton.dataset.line), liveButton, caret);
+    }
+
+    function beginEdit(page, line, button, caretIndex = null) {
+      const sheet = button.closest(".page-sheet");
+      if (!sheet) return;
+      inlineSkipBlur = true;
+      closeInline();
+      clearSelection();
+      selectedButton = button;
+      selectedLine = { page, x0: line.x0, y0: line.y0, x1: line.x1, y1: line.y1, text: line.text };
+      button.classList.add("selected");
+      inlineInput = document.createElement("input");
+      inlineInput.type = "text";
+      inlineInput.className = "inline-edit";
+      inlineInput.setAttribute("aria-label", "Edit this line");
+      const left = parseFloat(button.style.left) || 0;
+      inlineInput.style.left = left + "%";
+      inlineInput.style.top = button.style.top;
+      inlineInput.style.width = Math.max(parseFloat(button.style.width) || 10, Math.min(92, 98 - left)) + "%";
+      inlineInput.style.height = Math.max(parseFloat(button.style.height) || 2, 3.2) + "%";
+      inlineInput.style.fontSize = Math.max(13, button.getBoundingClientRect().height * 0.78) + "px";
+      inlineInput.value = line.text;
+      inlineInput.addEventListener("keydown", onInlineKey);
+      inlineInput.addEventListener("blur", onInlineBlur);
+      inlineInput.addEventListener("click", (event) => event.stopPropagation());
+      sheet.appendChild(inlineInput);
+      inlineInput.focus();
+      const pos = caretIndex == null ? line.text.length : Math.max(0, Math.min(line.text.length, caretIndex));
+      inlineInput.setSelectionRange(pos, pos);
+      editStatus.textContent = "Cursor ready. At the front, press Delete or Backspace to join with the line above. Enter moves text down.";
+      setTimeout(() => {
+        if (inlineInput) {
+          inlineInput.focus();
+          inlineInput.setSelectionRange(pos, pos);
+        }
+        inlineSkipBlur = false;
+      }, 0);
+    }
+
+    function currentEditText() {
+      if (inlineInput) return inlineInput.value;
+      return selectedLine ? selectedLine.text : "";
+    }
+
+    function splitCaretForNewLine(text) {
+      if (inlineInput) return inlineInput.selectionStart ?? text.length;
+      const value = text || "";
+      if (!value.trim()) return 0;
+      const mid = Math.floor(value.length / 2);
+      let caret = value.lastIndexOf(" ", mid);
+      if (caret < 1) caret = value.indexOf(" ", mid);
+      if (caret < 1) caret = Math.max(1, mid);
+      return caret;
+    }
+
+    function removeSpaceNearCaret(text, caret) {
+      const value = text || "";
+      const pos = Math.max(0, Math.min(caret ?? value.length, value.length));
+      if (pos < value.length && /\s/.test(value[pos])) {
+        return value.slice(0, pos) + value.slice(pos + 1);
+      }
+      if (pos > 0 && /\s/.test(value[pos - 1])) {
+        return value.slice(0, pos - 1) + value.slice(pos);
+      }
+      return value.replace(/[ \t]+/g, "");
+    }
+
+    async function removeSpacesFromSelection() {
+      const line = selectedLine;
+      if (!line) {
+        editStatus.textContent = "Click a line first so the cursor appears, then use Remove spaces.";
+        return;
+      }
+      const source = currentEditText();
+      const caret = inlineInput ? inlineInput.selectionStart : null;
+      const cleaned = caret == null
+        ? source.replace(/[ \t]+/g, "")
+        : removeSpaceNearCaret(source, caret);
+      if (cleaned === source) {
+        editStatus.textContent = "No spaces to remove on that line.";
+        return;
+      }
+      inlineSkipBlur = true;
+      closeInline();
+      const ok = await applyLineEdit(cleaned, line);
+      inlineSkipBlur = false;
+      if (ok) {
+        selectedLine = { ...line, text: cleaned };
+        editStatus.textContent = caret == null || cleaned === source.replace(/[ \t]+/g, "")
+          ? "Removed spaces between words."
+          : "Removed the space at the cursor.";
+      }
+    }
+
+    async function shiftSelectionToNewLine() {
+      const line = selectedLine;
+      if (!line) {
+        editStatus.textContent = "Click a line first so the cursor appears, place it, then click New line.";
+        return;
+      }
+      if (!inlineInput) {
+        const button = selectedButton
+          || [...previewScroll.querySelectorAll(".page-line")].find((node) => {
+            const item = JSON.parse(node.dataset.line);
+            return item.text === line.text
+              && Math.abs(item.x0 - line.x0) < 0.5
+              && Math.abs(item.y0 - line.y0) < 0.5;
+          });
+        if (!button) {
+          editStatus.textContent = "Click the line to show the cursor, then click New line.";
+          return;
+        }
+        beginEdit(line.page, line, button, Math.floor((line.text || "").length / 2));
+        editStatus.textContent = "Cursor is ready. Move it to the split point, then click New line again (or press Enter).";
+        return;
+      }
+      const text = currentEditText();
+      const caret = splitCaretForNewLine(text);
+      if (!text.slice(caret).trim()) {
+        editStatus.textContent = "Move the cursor before the words you want on the next line.";
+        return;
+      }
+      inlineSkipBlur = true;
+      closeInline();
+      await applyLineShift(line, text, caret);
+      inlineSkipBlur = false;
+    }
+
+    function onInlineBlur() {
+      if (inlineSkipBlur || !inlineInput || !selectedLine) return;
+      const line = selectedLine;
+      const value = inlineInput.value;
+      // Delay so toolbar buttons can read the caret before the field closes.
+      setTimeout(() => {
+        if (inlineSkipBlur || !inlineInput) return;
+        inlineSkipBlur = true;
+        closeInline();
+        if (value !== line.text) applyLineEdit(value, line);
+      }, 120);
+    }
+
+    async function onInlineKey(event) {
+      if (!selectedLine || !inlineInput) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        inlineSkipBlur = true;
+        closeInline();
+        editStatus.textContent = "Cancelled.";
+        return;
+      }
+      const caret = inlineInput.selectionStart ?? 0;
+      const atFront = caret === 0 && (inlineInput.selectionEnd ?? 0) === 0;
+      if (atFront && (event.key === "Backspace" || event.key === "Delete")) {
+        event.preventDefault();
+        inlineSkipBlur = true;
+        const line = selectedLine;
+        const value = inlineInput.value;
+        closeInline();
+        await applyMergeUp(line, value);
+        inlineSkipBlur = false;
+        return;
+      }
+      if (event.key === "Home") {
+        // Keep default Home behavior so the cursor can sit at the front of the line.
+        editStatus.textContent = "Cursor at front. Press Delete or Backspace to join with the line above.";
+        return;
+      }
+      if (event.key === "Enter") {
+        event.preventDefault();
+        inlineSkipBlur = true;
+        const line = selectedLine;
+        const value = inlineInput.value;
+        const splitAt = inlineInput.selectionStart;
+        closeInline();
+        await applyLineShift(line, value, splitAt);
+        return;
+      }
+      if (event.key !== "Tab") return;
+      event.preventDefault();
+      inlineSkipBlur = true;
+      const buttons = lineButtons();
+      const index = buttons.indexOf(selectedButton);
+      const line = selectedLine;
+      const value = inlineInput.value;
+      const step = event.shiftKey ? -1 : 1;
+      closeInline();
+      const removed = value.trim() === "" && value !== line.text;
+      if (value !== line.text && !await applyLineEdit(value, line)) {
+        const again = lineButtons()[index];
+        if (again) {
+          beginEdit(line.page, JSON.parse(again.dataset.line), again);
+          if (inlineInput) {
+            inlineInput.value = value;
+            inlineInput.focus();
+          }
+        }
+        return;
+      }
+      const next = await neighborLine(line.page, index, step, removed);
+      if (next) beginEdit(Number(next.closest(".page-sheet").dataset.page), JSON.parse(next.dataset.line), next);
+    }
+
+    async function neighborLine(page, index, step, removed) {
+      let buttons = lineButtons();
+      const nextIndex = removed ? index : index + step;
+      if (nextIndex >= 0 && nextIndex < buttons.length) return buttons[nextIndex];
+      const otherPage = page + (step > 0 ? 1 : -1);
+      const sheet = document.getElementById("pdf-page-" + otherPage);
+      if (!sheet) return buttons[Math.max(0, Math.min(nextIndex, buttons.length - 1))] || null;
+      await loadPage(otherPage);
+      sheet.scrollIntoView({ block: "nearest" });
+      buttons = [...sheet.querySelectorAll(".page-line")];
+      if (!buttons.length) return null;
+      return step > 0 ? buttons[0] : buttons[buttons.length - 1];
+    }
+
+    async function applyLineShift(line, text, caret) {
+      editStatus.textContent = "Moving text to the next line…";
+      try {
+        const response = await fetch(jobApi("/edit"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            page: line.page,
+            x0: line.x0,
+            y0: line.y0,
+            x1: line.x1,
+            y1: line.y1,
+            text,
+            caret,
+          }),
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(formatDetail(payload.detail) || "Could not move that text");
+        currentJob.highlights = payload.highlights || [];
+        highlightCount = currentJob.highlights.length;
+        syncHighlightLabel();
+        pageLoads.delete(line.page);
+        previewVersion += 1;
+        const sheet = document.getElementById("pdf-page-" + line.page);
+        if (sheet) delete sheet.dataset.ready;
+        await loadPage(line.page);
+        if (!payload.shifted) {
+          editStatus.textContent = "Enter did not move the text. Stop python main.py, start it again, then refresh.";
+          return false;
+        }
+        const stillThere = sheet && [...sheet.querySelectorAll(".page-line")].some((button) => {
+          const item = JSON.parse(button.dataset.line);
+          return item.text === text.trim() && Math.abs(item.y0 - line.y0) < 4;
+        });
+        if (stillThere) {
+          editStatus.textContent = "The text stayed on the same line. Stop python main.py, start it again, then refresh.";
+          return false;
+        }
+        editStatus.textContent = "Moved onto the next line.";
+        return true;
+      } catch (err) {
+        editStatus.textContent = err.message || String(err);
+        return false;
+      }
+    }
+
+    async function applyMergeUp(line, text) {
+      editStatus.textContent = "Joining with the line above…";
+      try {
+        const response = await fetch(jobApi("/edit"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            page: line.page,
+            x0: line.x0,
+            y0: line.y0,
+            x1: line.x1,
+            y1: line.y1,
+            text,
+            merge_up: true,
+          }),
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(formatDetail(payload.detail) || "Could not join with the line above");
+        currentJob.highlights = payload.highlights || [];
+        highlightCount = currentJob.highlights.length;
+        syncHighlightLabel();
+        pageLoads.delete(line.page);
+        previewVersion += 1;
+        const sheet = document.getElementById("pdf-page-" + line.page);
+        if (sheet) delete sheet.dataset.ready;
+        await loadPage(line.page);
+        selectedLine = null;
+        selectedButton = null;
+        editStatus.textContent = payload.detail || "Joined with the line above.";
+        return true;
+      } catch (err) {
+        editStatus.textContent = err.message || String(err);
+        return false;
+      }
+    }
+
+    async function joinSelectionUp() {
+      const line = selectedLine;
+      if (!line) {
+        editStatus.textContent = "Click a line first, move the cursor to the front, then press Delete or click Join up.";
+        return;
+      }
+      if (!inlineInput) {
+        const button = selectedButton
+          || [...previewScroll.querySelectorAll(".page-line")].find((node) => {
+            const item = JSON.parse(node.dataset.line);
+            return item.text === line.text
+              && Math.abs(item.x0 - line.x0) < 0.5
+              && Math.abs(item.y0 - line.y0) < 0.5;
+          });
+        if (!button) {
+          editStatus.textContent = "Click the line, put the cursor at the front, then press Delete.";
+          return;
+        }
+        beginEdit(line.page, line, button, 0);
+        editStatus.textContent = "Cursor is at the front. Press Delete/Backspace or click Join up again.";
+        return;
+      }
+      const caret = inlineInput.selectionStart ?? 0;
+      if (caret !== 0) {
+        inlineInput.setSelectionRange(0, 0);
+        editStatus.textContent = "Cursor moved to the front. Press Delete/Backspace or click Join up again.";
+        inlineInput.focus();
+        return;
+      }
+      const text = currentEditText();
+      inlineSkipBlur = true;
+      closeInline();
+      await applyMergeUp(line, text);
+      inlineSkipBlur = false;
+    }
+
+    async function applyLineEdit(text, line, style = {}) {
+      editStatus.textContent = "Saving…";
+      try {
+        const body = {
+          page: line.page,
+          x0: line.x0,
+          y0: line.y0,
+          x1: line.x1,
+          y1: line.y1,
+          text,
+        };
+        if (style.bold != null) body.bold = style.bold;
+        if (style.italic != null) body.italic = style.italic;
+        if (style.align) body.align = style.align;
+        if (style.fontsize) body.fontsize = style.fontsize;
+        const response = await fetch(jobApi("/edit"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(formatDetail(payload.detail) || "Could not update that line");
+        currentJob.highlights = payload.highlights || [];
+        highlightCount = currentJob.highlights.length;
+        syncHighlightLabel();
+        pageLoads.delete(line.page);
+        previewVersion += 1;
+        const sheet = document.getElementById("pdf-page-" + line.page);
+        if (sheet) delete sheet.dataset.ready;
+        await loadPage(line.page);
+        editStatus.textContent = "Saved.";
+        return true;
+      } catch (err) {
+        editStatus.textContent = err.message || String(err);
+        return false;
+      }
+    }
+
+    function clearSelection() {
+      previewScroll.querySelectorAll(".page-line.selected").forEach((node) => node.classList.remove("selected"));
+      selectedLine = null;
+      selectedButton = null;
+    }
+
+    function selectLine(page, line, button) {
+      clearSelection();
+      selectedLine = { page, x0: line.x0, y0: line.y0, x1: line.x1, y1: line.y1, text: line.text };
+      selectedButton = button;
+      if (button) button.classList.add("selected");
+      editStatus.textContent = "Selected: “" + (line.text || "").slice(0, 60) + "”. Use Remove spaces, New line, Bold, or Align.";
+    }
+
+    function setActiveTool(tool) {
+      activeTool = tool;
+      document.querySelectorAll(".tool-btn").forEach((btn) => {
+        btn.classList.toggle("active", btn.dataset.tool === tool);
+      });
+      const hint = document.getElementById("tool-hint");
+      if (hint) hint.textContent = toolHints[tool] || "";
+      syncDrawMode();
+      editStatus.textContent = toolHints[tool] || "";
+    }
+
+    function syncDrawMode() {
+      previewScroll.classList.toggle("draw-mode", dragTools.has(activeTool) || activeTool === "text");
+      previewScroll.querySelectorAll(".draw-overlay").forEach((overlay) => {
+        overlay.style.cursor = activeTool === "text" ? "text" : (dragTools.has(activeTool) ? "crosshair" : "default");
+        overlay.style.display = (dragTools.has(activeTool) || activeTool === "text") ? "block" : "none";
+      });
+    }
+
+    function pdfPointFromEvent(sheet, event) {
+      const rect = sheet.getBoundingClientRect();
+      const width = Number(sheet.dataset.pdfWidth) || rect.width;
+      const height = Number(sheet.dataset.pdfHeight) || rect.height;
+      const x = ((event.clientX - rect.left) / rect.width) * width;
+      const y = ((event.clientY - rect.top) / rect.height) * height;
+      return {
+        x: Math.max(0, Math.min(width, x)),
+        y: Math.max(0, Math.min(height, y)),
+        width,
+        height,
+      };
+    }
+
+    function endDraw() {
+      if (drawState?.box) drawState.box.remove();
+      if (drawState) {
+        window.removeEventListener("pointermove", onDrawMove);
+        window.removeEventListener("pointerup", onDrawEnd);
+      }
+      drawState = null;
+    }
+
+    async function onPageClick(event, sheet) {
+      if (activeTool !== "text") return;
+      if (event.target.closest(".inline-edit")) return;
+      event.preventDefault();
+      const page = Number(sheet.dataset.page);
+      const point = pdfPointFromEvent(sheet, event);
+      const text = window.prompt("Text to add on this page:");
+      if (text == null || !text.trim()) {
+        editStatus.textContent = "Add text cancelled.";
+        return;
+      }
+      await postAnnotation({
+        action: "text",
+        page,
+        x: point.x,
+        y: point.y,
+        text: text.trim(),
+        bold: fmtBold || null,
+        italic: fmtItalic || null,
+        align: document.querySelector("[data-align].active")?.dataset.align || null,
+        fontsize: Number(document.getElementById("fmt-size").value) || null,
+      });
+    }
+
+    function onDrawStart(event, sheet) {
+      if (activeTool === "text") {
+        event.preventDefault();
+        onPageClick(event, sheet);
+        return;
+      }
+      if (!dragTools.has(activeTool)) return;
+      event.preventDefault();
+      const page = Number(sheet.dataset.page);
+      const start = pdfPointFromEvent(sheet, event);
+      const box = document.createElement("div");
+      box.className = "draw-rect" + (activeTool === "hline" || activeTool === "line" ? " line-tool" : "");
+      sheet.appendChild(box);
+      drawState = {
+        sheet,
+        page,
+        tool: activeTool,
+        start,
+        box,
+        points: [[start.x, start.y]],
+      };
+      window.addEventListener("pointermove", onDrawMove);
+      window.addEventListener("pointerup", onDrawEnd);
+    }
+
+    function onDrawMove(event) {
+      if (!drawState) return;
+      const current = pdfPointFromEvent(drawState.sheet, event);
+      drawState.current = current;
+      if (drawState.tool === "signature") {
+        drawState.points.push([current.x, current.y]);
+      }
+      const x0 = Math.min(drawState.start.x, current.x);
+      const y0 = Math.min(drawState.start.y, current.y);
+      const x1 = Math.max(drawState.start.x, current.x);
+      const y1 = Math.max(drawState.start.y, current.y);
+      const width = drawState.start.width;
+      const height = drawState.start.height;
+      if (drawState.tool === "hline") {
+        const mid = ((drawState.start.y + current.y) / 2 / height) * 100;
+        drawState.box.style.left = (x0 / width * 100) + "%";
+        drawState.box.style.top = mid + "%";
+        drawState.box.style.width = ((x1 - x0) / width * 100) + "%";
+        drawState.box.style.height = "0";
+      } else if (drawState.tool === "line") {
+        drawState.box.style.left = (drawState.start.x / width * 100) + "%";
+        drawState.box.style.top = (drawState.start.y / height * 100) + "%";
+        drawState.box.style.width = (Math.hypot(current.x - drawState.start.x, current.y - drawState.start.y) / width * 100) + "%";
+        drawState.box.style.height = "0";
+        const angle = Math.atan2(current.y - drawState.start.y, current.x - drawState.start.x) * 180 / Math.PI;
+        drawState.box.style.transformOrigin = "0 50%";
+        drawState.box.style.transform = "rotate(" + angle + "deg)";
+      } else {
+        drawState.box.style.left = (x0 / width * 100) + "%";
+        drawState.box.style.top = (y0 / height * 100) + "%";
+        drawState.box.style.width = (Math.max(x1 - x0, 2) / width * 100) + "%";
+        drawState.box.style.height = (Math.max(y1 - y0, 2) / height * 100) + "%";
+        drawState.box.style.transform = "";
+      }
+    }
+
+    async function onDrawEnd() {
+      if (!drawState) return;
+      const state = drawState;
+      const current = state.current || state.start;
+      endDraw();
+      const x0 = Math.min(state.start.x, current.x);
+      const y0 = Math.min(state.start.y, current.y);
+      const x1 = Math.max(state.start.x, current.x);
+      const y1 = Math.max(state.start.y, current.y);
+      if (state.tool === "signature") {
+        if ((state.points || []).length < 2) {
+          editStatus.textContent = "Draw a longer signature stroke.";
+          return;
+        }
+        await postAnnotation({
+          action: "signature",
+          page: state.page,
+          x0, y0, x1: Math.max(x1, x0 + 2), y1: Math.max(y1, y0 + 2),
+          points: state.points,
+        });
+        return;
+      }
+      if (Math.abs(x1 - x0) < 2 && Math.abs(y1 - y0) < 2 && state.tool !== "hline") {
+        editStatus.textContent = "Drag a larger area.";
+        return;
+      }
+      let text = "";
+      if (state.tool === "note" || state.tool === "stamp") {
+        text = window.prompt(state.tool === "note" ? "Note text:" : "Stamp text:") || "";
+        if (!text.trim()) {
+          editStatus.textContent = state.tool + " cancelled.";
+          return;
+        }
+      }
+      const payload = {
+        action: state.tool,
+        page: state.page,
+        x0: state.tool === "line" ? state.start.x : x0,
+        y0: state.tool === "line" ? state.start.y : (state.tool === "hline" ? (state.start.y + current.y) / 2 - 1 : y0),
+        x1: state.tool === "line" ? current.x : x1,
+        y1: state.tool === "line" ? current.y : (state.tool === "hline" ? (state.start.y + current.y) / 2 + 1 : y1),
+        text,
+      };
+      await postAnnotation(payload);
+    }
+
+    async function postAnnotation(body) {
+      editStatus.textContent = "Saving…";
+      try {
+        const response = await fetch(jobApi("/annotate"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(formatDetail(payload.detail) || "Could not annotate the page");
+        pageLoads.delete(body.page);
+        previewVersion += 1;
+        const sheet = document.getElementById("pdf-page-" + body.page);
+        if (sheet) delete sheet.dataset.ready;
+        await loadPage(body.page);
+        editStatus.textContent = payload.detail || "Saved.";
+        setActiveTool("select");
+      } catch (err) {
+        editStatus.textContent = err.message || String(err);
+      }
+    }
+
+    async function applyFormat(style) {
+      if (!selectedLine) {
+        editStatus.textContent = "Select a text line first.";
+        return;
+      }
+      await applyLineEdit(selectedLine.text, selectedLine, style);
+    }
+
+    async function runSearch(direction) {
+      const query = document.getElementById("preview-search").value.trim();
+      const status = document.getElementById("search-status");
+      if (!query) {
+        searchMatches = [];
+        searchIndex = -1;
+        status.textContent = "";
+        return;
+      }
+      if (!searchMatches.length || searchMatches.query !== query) {
+        editStatus.textContent = "Searching…";
+        const response = await fetch(jobApi("/search?q=" + encodeURIComponent(query)));
+        const payload = await response.json();
+        if (!response.ok) throw new Error(formatDetail(payload.detail) || "Search failed");
+        searchMatches = payload.matches || [];
+        searchMatches.query = query;
+        searchIndex = -1;
+      }
+      if (!searchMatches.length) {
+        status.textContent = "0 matches";
+        editStatus.textContent = "No matches.";
+        return;
+      }
+      searchIndex = (searchIndex + direction + searchMatches.length) % searchMatches.length;
+      const match = searchMatches[searchIndex];
+      status.textContent = (searchIndex + 1) + " / " + searchMatches.length;
+      await scrollToPage(match.page);
+      editStatus.textContent = "Match on page " + match.page + ": “" + (match.text || query).slice(0, 50) + "”";
+    }
+
+    document.getElementById("editor-toolbar").addEventListener("mousedown", (event) => {
+      if (!inlineInput) return;
+      if (event.target.closest("button, select")) {
+        inlineSkipBlur = true;
+      }
+    });
+    document.querySelectorAll(".tool-btn").forEach((btn) => {
+      btn.addEventListener("click", () => setActiveTool(btn.dataset.tool));
+    });
+    document.getElementById("remove-spaces").addEventListener("click", () => {
+      removeSpacesFromSelection().catch((err) => {
+        editStatus.textContent = err.message || String(err);
+      });
+    });
+    document.getElementById("shift-newline").addEventListener("click", () => {
+      shiftSelectionToNewLine().catch((err) => {
+        editStatus.textContent = err.message || String(err);
+      });
+    });
+    document.getElementById("join-up").addEventListener("click", () => {
+      joinSelectionUp().catch((err) => {
+        editStatus.textContent = err.message || String(err);
+      });
+    });
+    document.getElementById("fmt-bold").addEventListener("click", async () => {
+      fmtBold = !fmtBold;
+      document.getElementById("fmt-bold").classList.toggle("active", fmtBold);
+      if (selectedLine) await applyFormat({ bold: fmtBold });
+    });
+    document.getElementById("fmt-italic").addEventListener("click", async () => {
+      fmtItalic = !fmtItalic;
+      document.getElementById("fmt-italic").classList.toggle("active", fmtItalic);
+      if (selectedLine) await applyFormat({ italic: fmtItalic });
+    });
+    document.getElementById("fmt-size").addEventListener("change", async (event) => {
+      const size = Number(event.target.value);
+      if (!size) return;
+      if (selectedLine) await applyFormat({ fontsize: size });
+    });
+    ["left", "center", "right"].forEach((align) => {
+      const button = document.getElementById("align-" + align);
+      button.dataset.align = align;
+      button.addEventListener("click", async () => {
+        document.querySelectorAll("[data-align]").forEach((node) => node.classList.toggle("active", node === button));
+        if (selectedLine) await applyFormat({ align });
+      });
+    });
+    document.getElementById("search-next").addEventListener("click", () => {
+      runSearch(1).catch((err) => { editStatus.textContent = err.message || String(err); });
+    });
+    document.getElementById("search-prev").addEventListener("click", () => {
+      runSearch(-1).catch((err) => { editStatus.textContent = err.message || String(err); });
+    });
+    document.getElementById("preview-search").addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        searchMatches = [];
+        runSearch(1).catch((err) => { editStatus.textContent = err.message || String(err); });
+      }
+    });
+
+    previewLink.addEventListener("click", (event) => {
+      event.preventDefault();
+      if (!currentPreview) return;
+      if (results.classList.contains("preview-on")) {
+        hidePreview();
+        return;
+      }
+      showPreview();
+    });
+    highlightChanges.addEventListener("change", () => {
+      previewScroll.classList.toggle("show-marks", highlightChanges.checked);
+    });
+    closePreview.addEventListener("click", hidePreview);
+
+    function applyZoom() {
+      previewScroll.querySelectorAll(".page-sheet").forEach((sheet) => {
+        sheet.style.width = (pageZoom * 100) + "%";
+      });
+    }
+
+    async function runPageOperation(action, targetPage) {
+      if (!currentJob) return;
+      editStatus.textContent = "Saving page change…";
+      try {
+        const response = await fetch(jobApi("/pages/operation"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action, page: activePage, target_page: targetPage || null }),
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(formatDetail(payload.detail) || "Could not change the page");
+        activePage = payload.page || activePage;
+        await buildViewer();
+        await scrollToPage(activePage);
+        activePageLabel.textContent = "Page " + activePage;
+        editStatus.textContent = payload.detail || "Page updated.";
+      } catch (err) {
+        editStatus.textContent = err.message || String(err);
+      }
+    }
+
+    document.getElementById("page-rotate").addEventListener("click", () => runPageOperation("rotate"));
+    document.getElementById("page-delete").addEventListener("click", () => {
+      if (!window.confirm("Delete page " + activePage + " from the edited working copy?")) return;
+      runPageOperation("delete");
+    });
+    document.getElementById("page-up").addEventListener("click", () => {
+      if (activePage > 1) runPageOperation("reorder", activePage - 1);
+    });
+    document.getElementById("page-down").addEventListener("click", () => {
+      const count = previewScroll.querySelectorAll(".page-sheet").length;
+      if (activePage < count) runPageOperation("reorder", activePage + 1);
+    });
+    async function runHistory(action) {
+      if (!currentJob) return;
+      try {
+        const response = await fetch(jobApi("/history/" + action), { method: "POST" });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(formatDetail(payload.detail) || ("Nothing to " + action));
+        currentJob.highlights = payload.highlights || [];
+        highlightCount = currentJob.highlights.length;
+        syncHighlightLabel();
+        await buildViewer();
+        await scrollToPage(activePage);
+        editStatus.textContent = payload.detail || (action + " complete.");
+      } catch (err) {
+        editStatus.textContent = err.message || String(err);
+      }
+    }
+    document.getElementById("undo-edit").addEventListener("click", () => runHistory("undo"));
+    document.getElementById("redo-edit").addEventListener("click", () => runHistory("redo"));
+    document.getElementById("save-edited").addEventListener("click", async () => {
+      if (!currentJob) return;
+      editStatus.textContent = "Saving edited copy…";
+      try {
+        const response = await fetch(jobApi("/save-edited"), { method: "POST" });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(formatDetail(payload.detail) || "Could not save edited copy");
+        if (payload.url) {
+          previewDownload.href = apiBase() + payload.url;
+          previewDownload.setAttribute("download", payload.filename || "edited.pdf");
+        }
+        editStatus.textContent = payload.detail || "Edited copy saved.";
+      } catch (err) {
+        editStatus.textContent = err.message || String(err);
+      }
+    });
+    document.getElementById("zoom-in").addEventListener("click", () => {
+      pageZoom = Math.min(2.5, Math.round((pageZoom + 0.25) * 100) / 100);
+      applyZoom();
+    });
+    document.getElementById("zoom-out").addEventListener("click", () => {
+      pageZoom = Math.max(0.75, Math.round((pageZoom - 0.25) * 100) / 100);
+      applyZoom();
+    });
+
+    function showResults(job) {
+      hidePreview();
+      currentJob = job;
+      viewerJobId = "";
+      previewScroll.innerHTML = "";
+      results.classList.add("open");
+      app.classList.add("has-results");
+      setUploadOpen(false);
+      document.getElementById("filename").textContent = job.filename || "";
+      const link = document.getElementById("download");
+      const url = downloadUrl(job);
+      currentPreview = previewUrl(job);
+      highlightCount = (job.highlights || []).length;
+      syncHighlightLabel();
+      previewLink.dataset.url = currentPreview;
+      previewLink.textContent = "Preview";
+      const profile = job.plan_profile || {};
+      const planBits = [profile.plan_name, profile.company_name].filter(Boolean);
+      document.getElementById("plan-line").textContent = planBits.join(" · ");
+      const buildTime = document.getElementById("build-time");
+      buildTime.textContent = "";
+      const names = job.source_files || [];
+      document.getElementById("source-order").innerHTML = names.length
+        ? names.map((name) => `<li>${escapeHtml(name)}</li>`).join("")
+        : "<li>No source files</li>";
+      link.href = url;
+      previewDownload.href = url;
+      previewDownload.setAttribute("download", job.filename || "valuation.pdf");
+      link.setAttribute("download", job.filename || "valuation.pdf");
+      const email = document.getElementById("email-link");
+      const eml = document.getElementById("eml-link");
+      const log = document.getElementById("log-link");
+      const audit = document.getElementById("audit-log-link");
+      if (job.email_subject) {
+        email.href = "mailto:?subject=" + encodeURIComponent(job.email_subject);
+        email.classList.remove("hidden");
+      } else {
+        email.classList.add("hidden");
+      }
+      if (job.job_id && job.email_path) {
+        eml.href = apiBase() + "/api/jobs/" + job.job_id + "/email";
+        eml.classList.remove("hidden");
+      } else {
+        eml.classList.add("hidden");
+      }
+      if (job.job_id && job.log_path) {
+        log.href = apiBase() + "/api/jobs/" + job.job_id + "/log";
+        log.classList.remove("hidden");
+      } else {
+        log.classList.add("hidden");
+      }
+      if (job.job_id && job.audit_log_path) {
+        audit.href = apiBase() + "/api/jobs/" + job.job_id + "/audit-log";
+        audit.classList.remove("hidden");
+      } else {
+        audit.classList.add("hidden");
+      }
+      link.onclick = async (event) => {
+        event.preventDefault();
+        errorEl.textContent = "";
+        try {
+          const response = await fetch(url);
+          if (!response.ok) {
+            throw new Error("Download failed (" + response.status + "). Restart python main.py and process again.");
+          }
+          const blob = await response.blob();
+          const objectUrl = URL.createObjectURL(blob);
+          const saver = document.createElement("a");
+          saver.href = objectUrl;
+          saver.download = job.filename || "valuation.pdf";
+          document.body.appendChild(saver);
+          saver.click();
+          saver.remove();
+          URL.revokeObjectURL(objectUrl);
+        } catch (err) {
+          const raw = err.message || String(err);
+          errorEl.textContent = raw === "Failed to fetch"
+            ? "Cannot download. Keep python main.py running and use http://127.0.0.1:8002"
+            : raw;
+        }
+      };
+      fillFacts(profile);
+      fillProfile(profile);
+      fillReview((job.review && job.review.items) || [], job.review);
+      fillRules(job.rule_decisions || [], job.review);
+      const warnings = job.warnings || [];
+      document.getElementById("tab-btn-warnings").textContent = warnings.length ? "Notes (" + warnings.length + ")" : "Notes";
+      document.getElementById("tab-warnings").innerHTML = warnings.length
+        ? warnings.map((w) => `<li>${escapeHtml(w)}</li>`).join("")
+        : "<li>None</li>";
+    }
+
+    function setStatus(text) {
+      statusEl.classList.remove("time-blink");
+      statusEl.textContent = text;
+    }
+
+    function showElapsed(prefix, seconds, suffix) {
+      statusEl.classList.remove("time-blink");
+      void statusEl.offsetWidth;
+      statusEl.classList.add("time-blink");
+      statusEl.textContent = prefix + elapsedLabel(seconds) + (suffix || "");
+    }
+
+    function elapsedLabel(seconds) {
+      const total = Math.max(0, Math.round(Number(seconds) || 0));
+      const minutes = Math.floor(total / 60);
+      const secs = total % 60;
+      if (minutes) return minutes + " min " + secs + " sec";
+      return secs + " sec";
+    }
+
+    function yn(value) {
+      if (value === true) return "Yes";
+      if (value === false) return "No";
+      return "—";
+    }
+
+    function failTone(value) {
+      if (value === true) return "off";
+      if (value === false) return "on";
+      return "";
+    }
+
+    function fillFacts(profile) {
+      const items = [
+        ["Plan number", profile.plan_number, ""],
+        ["Method", profile.testing_method, ""],
+        ["Plan year end", profile.plan_year_end, ""],
+        ["Plan type", profile.plan_type, ""],
+        ["ADP failed", yn(profile.adp_failed), failTone(profile.adp_failed)],
+        ["ACP failed", yn(profile.acp_failed), failTone(profile.acp_failed)],
+        ["402(g) failed", yn(profile.fail_402g), failTone(profile.fail_402g)],
+        ["415 failed", yn(profile.fail_415), failTone(profile.fail_415)],
+        ["Returns required", yn(profile.returns_required), failTone(profile.returns_required)],
+        ["Top heavy", yn(profile.top_heavy), failTone(profile.top_heavy)],
+        ["QNEC total", profile.total_qnec, ""],
+        ["After 12 months", yn(profile.after_12_months), failTone(profile.after_12_months)],
+      ];
+      document.getElementById("facts").innerHTML = items.map(
+        ([k, v, cls]) => `<div class="fact ${cls}"><span>${k}</span><strong>${escapeHtml(fmt(v))}</strong></div>`
+      ).join("");
+    }
+
+    function fillProfile(profile) {
+      const rows = [
+        ["Plan number", profile.plan_number],
+        ["Plan name", profile.plan_name],
+        ["Plan type", profile.plan_type],
+        ["Company", profile.company_name],
+        ["Address", profile.company_address],
+        ["Plan year start", profile.plan_year_start],
+        ["Plan year end", profile.plan_year_end],
+        ["Beginning plan year", profile.beginning_plan_year],
+        ["Testing method", profile.testing_method],
+        ["Top heavy %", profile.top_heavy_percent],
+        ["Top heavy", yn(profile.top_heavy)],
+        ["ADP failed", yn(profile.adp_failed)],
+        ["ACP failed", yn(profile.acp_failed)],
+        ["402(g) failed", yn(profile.fail_402g)],
+        ["415 failed", yn(profile.fail_415)],
+        ["Returns required", yn(profile.returns_required)],
+        ["HCE current", yn(profile.hce_current)],
+        ["HCE future", yn(profile.hce_future)],
+        ["Safe harbor", yn(profile.safe_harbor)],
+        ["ADP QNEC", profile.adp_qnec],
+        ["ACP QNEC", profile.acp_qnec],
+        ["Total QNEC", profile.total_qnec],
+        ["Deferral refund", profile.deferral_refund],
+        ["Match refund", profile.match_refund],
+        ["Pages", profile.source_page_count],
+        ["MOA stamp", yn(profile.moa_logo_found)],
+        ["MOA stamp detail", profile.moa_stamp_detail],
+      ];
+      document.getElementById("tab-profile").innerHTML = rows.map(
+        ([k, v]) => `<tr><th>${k}</th><td>${escapeHtml(fmt(v))}</td></tr>`
+      ).join("");
+    }
+
+    function fillReview(items, review) {
+      const passed = items.filter((item) => item.passed).length;
+      const failed = items.filter((item) => !item.passed).length;
+      document.getElementById("tab-btn-checks").textContent = failed
+        ? "Checks (" + failed + " fail)"
+        : "Checks (" + passed + " pass)";
+      document.getElementById("tab-checks").innerHTML = items.map((item) => {
+        const cls = item.passed ? "pass" : "fail";
+        const mark = item.passed ? "PASS" : "FAIL";
+        return `<tr><th>${escapeHtml(item.label)}</th><td class="${cls}">${mark} — ${escapeHtml(item.detail)}</td></tr>`;
+      }).join("");
+      const failedItems = items.filter((item) => !item.passed);
+      document.getElementById("tab-btn-validations").textContent = failedItems.length
+        ? "Validations (" + failedItems.length + " fail)"
+        : "Validations";
+      document.getElementById("tab-validations").innerHTML = failedItems.length
+        ? failedItems.map((item) => (
+          `<tr><th>${escapeHtml(item.label)}</th><td class="fail">FAIL — ${escapeHtml(item.detail)}</td></tr>`
+        )).join("")
+        : `<tr><td colspan="2">No failed checks.</td></tr>`;
+      return { passed, failed, ssn: review && review.ssn_found };
+    }
+
+    function shortReason(reason) {
+      return String(reason || "")
+        .replace(/^Rule [A-Z0-9]+ (matched|did not match):\s*/i, "")
+        .replace(/^missing /i, "Missing ");
+    }
+
+    function fillRules(decisions, review) {
+      const groups = { keep: [], remove: [], skipped: [] };
+      decisions.forEach((d) => {
+        if (d.skipped) groups.skipped.push(d);
+        else if (d.action === "keep") groups.keep.push(d);
+        else groups.remove.push(d);
+      });
+      const checks = (review && review.items) || [];
+      const failed = checks.filter((item) => !item.passed).length;
+      const ssn = review && review.ssn_found;
+      document.getElementById("outcome").innerHTML =
+        `<span class="pill keep">${groups.keep.length} keep</span>` +
+        `<span class="pill remove">${groups.remove.length} remove</span>` +
+        (groups.skipped.length ? `<span class="pill skip">${groups.skipped.length} skipped</span>` : "") +
+        `<span class="pill ${failed ? "remove" : "keep"}">${failed ? failed + " checks failed" : "checks passed"}</span>` +
+        `<span class="pill ${ssn ? "remove" : "neutral"}">${ssn ? "SSN found" : "No SSN"}</span>`;
+      document.getElementById("tab-btn-rules").textContent =
+        "Keep / remove (" + groups.keep.length + "/" + groups.remove.length + ")";
+      document.getElementById("tab-rules").innerHTML = ["keep", "remove", "skipped"].map((name) => {
+        const rows = groups[name];
+        if (!rows.length && name === "skipped") return "";
+        const body = rows.length
+          ? rows.map((d) => (
+            `<div class="rule-row">` +
+            `<b>${escapeHtml(d.rule_id)} · ${escapeHtml(d.section)}</b>` +
+            `<small>${escapeHtml(shortReason(d.reason))}</small>` +
+            `</div>`
+          )).join("")
+          : `<div class="rule-row"><small>None</small></div>`;
+        const title = name === "keep" ? "Kept in the PDF" : name === "remove" ? "Removed from the PDF" : "Skipped";
+        return `<div class="rule-col ${name}"><h3>${title} (${rows.length})</h3>${body}</div>`;
+      }).join("");
+    }
+
+    function fmt(value) {
+      if (value === null || value === undefined || value === "") return "—";
+      return String(value);
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;");
+    }
+
+    const apiDown = "Cannot reach the API. Keep python main.py running and open http://127.0.0.1:8002.";
+    fetch(apiBase() + "/health").then((response) => {
+      if (!response.ok) errorEl.textContent = apiDown;
+    }).catch(() => {
+      errorEl.textContent = apiDown;
+    });
+  </script>
+</body>
+</html>
