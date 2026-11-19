@@ -161,6 +161,15 @@ def process_uploads(
             excel_overlays.append(parsed)
             excel_sources.append(f"Excel: {name}")
             warnings.append(f"Read Val Assembly Excel: {name}")
+            if parsed.get("testing_method"):
+                warnings.append(
+                    f"Excel testing method from {name}: {parsed['testing_method']}"
+                )
+            else:
+                warnings.append(
+                    f"Excel {name}: ADP/ACP method cell was blank — Method left empty "
+                    "(Excel is the source for method; PDF text is not used)."
+                )
         summary_overlays: list[dict] = []
         summary_sources: list[str] = []
         for name, text in summary_texts:
@@ -178,6 +187,12 @@ def process_uploads(
                 if parsed.get("adp_failed") is not None or parsed.get("fail_402g") is not None:
                     summary_overlays.append(parsed)
                     summary_sources.append("Result Summary embedded in PDF package")
+        # When Val Assembly Excel is present, testing method comes only from Excel
+        # (Prior / Current / N/A) — not from cover or ADP PDF wording.
+        if excel_overlays:
+            profile.testing_method = None
+            if isinstance(profile.extra.get("field_sources"), dict):
+                profile.extra["field_sources"].pop("testing_method", None)
         # Summary tests are authoritative for pass/fail. Excel remains the final
         # overlay for fields it explicitly provides (identity, method, HCE flags).
         overlays = summary_overlays + excel_overlays

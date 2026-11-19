@@ -3050,9 +3050,12 @@
     }
 
     function fillFacts(profile) {
+      const sources = (profile.extra && profile.extra.field_sources) || {};
+      const methodDisplay = fmt(profile.testing_method)
+        + (sources.testing_method ? " · " + sources.testing_method : "");
       const items = [
         ["Plan number", profile.plan_number, ""],
-        ["Method", profile.testing_method, ""],
+        ["Method", methodDisplay, ""],
         ["Plan year end", profile.plan_year_end, ""],
         ["Plan type", profile.plan_type, ""],
         ["ADP failed", yn(profile.adp_failed), failTone(profile.adp_failed)],

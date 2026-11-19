@@ -48,8 +48,10 @@ def parse_excel(data: bytes) -> dict[str, Any]:
             category=UserWarning,
             module=r"openpyxl\..*",
         )
-        book = load_workbook(io.BytesIO(data), data_only=True)
-    sheet = book.active
+        # Checklist dropdowns are stored values, not formulas. data_only=True can
+        # return blank/stale cached formula results and miss the method the user just set.
+        book = load_workbook(io.BytesIO(data), data_only=False)
+    sheet = _assembly_sheet(book)
     cells: dict[str, str] = {}
     headers: list[str] = []
     header_row = 1
@@ -107,8 +109,17 @@ def parse_excel(data: bytes) -> dict[str, Any]:
         "forfeitures_reallocated": _forfeitures_reallocated(cells),
         "no_forfeitures": _no_forfeitures(cells),
     }
-    if method is None and "sh" in _first(cells, "prior", "current", "adp/acp").lower():
+    # N/A SH (and similar) means safe harbor — method is N/A, not PRIOR/CURRENT.
+    method_cell = ""
+    for key, value in cells.items():
+        if "prior" in key and "current" in key:
+            method_cell = value
+            break
+    if method == "N/A" and re.search(r"\bSH\b|safe\s*harbor", method_cell, re.I):
         overlay["safe_harbor"] = True
+    elif method is None and "sh" in _first(cells, "prior", "current", "adp/acp").lower():
+        overlay["safe_harbor"] = True
+        overlay["testing_method"] = "N/A"
     notes = " ".join(value for key, value in cells.items() if "note" in key or "comment" in key)
     if re.search(r"variance", notes, re.I):
         overlay["variance_report"] = True
@@ -268,6 +279,9 @@ def merge_overlays(
     for index, overlay in enumerate(overlays):
         source = sources[index] if sources and index < len(sources) else "overlay"
         for key, value in overlay.items():
+            # Do not wipe a PDF-derived value with an unread Excel cell (None).
+            if value is None:
+                continue
             setattr(profile, key, value)
             field_sources[key] = source
     profile.extra["field_sources"] = field_sources
@@ -505,31 +519,35 @@ def _digits(value: str) -> str | None:
     return match.group(1) if match else None
 
 
+def _assembly_sheet(book):
+    """Prefer a Val Assembly / checklist sheet over a random active sheet."""
+    for name in book.sheetnames:
+        lowered = name.lower()
+        if "val assembly" in lowered or "assembly" in lowered or "omni" in lowered:
+            return book[name]
+    return book.active
+
+
 def _method(value: str) -> str | None:
-    """Method.
+    """Normalize Excel method cell to PRIOR / CURRENT / N/A.
 
-    Purpose:
-        Method.
-
-    Args:
-        value: Value. Type: str.
-
-    Returns:
-        a str | None.
-
-    Raises:
-        None.
-
-    Example:
-        _method("text") returns a str | None.
-
-    Side effects:
-        None. This function only reads data and returns a value.
+    The dropdown prompt text contains both Prior and Current
+    (Prior / current / N/A SH). That placeholder is not a selection.
     """
-    text = (value or "").upper()
-    if "PRIOR" in text:
+    text = (value or "").strip().upper()
+    if not text:
+        return None
+    compact = re.sub(r"\s+", " ", text)
+    # Unchanged dropdown prompt listing every option — not a real selection.
+    if "PRIOR" in compact and "CURRENT" in compact:
+        return None
+    if compact in {"N/A", "NA", "N/A SH", "SH", "N/A SAFE HARBOR"} or re.fullmatch(
+        r"N\s*/\s*A(?:\s+SH)?", compact
+    ):
+        return "N/A"
+    if re.search(r"\bPRIOR\b", compact):
         return "PRIOR"
-    if "CURRENT" in text:
+    if re.search(r"\bCURRENT\b", compact):
         return "CURRENT"
     return None
 

@@ -11,6 +11,7 @@ logs/*
 !logs/.gitkeep
 dist/
 packaging/harvested.wxs
+packaging/build_log.txt
 docs/drive-download-*.zip
 
 .tmp_scan_compare/

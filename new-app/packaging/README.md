@@ -29,8 +29,21 @@ Workflow file: [`.github/workflows/build-windows.yml`](../../.github/workflows/b
 Copy the whole `new-app/` folder to a Windows PC (or clone the repo), then:
 
 1. Install **Python 3.12+** (check “Add python.exe to PATH”).
-2. Double-click **`packaging\build_windows.bat`**  
-   or from `new-app/`:
+2. Double-click **`packaging\RUN_BUILD.cmd`** (preferred) or **`packaging\build_windows.bat`**.
+
+If a window still does not appear:
+
+- Right-click the file → **Properties** → if you see **Unblock**, check it → Apply.
+- Or open **Command Prompt** and run:
+
+```bat
+cd C:\path\to\new-app\packaging
+build_windows.bat
+```
+
+A log is always written to `packaging\build_log.txt`.
+
+You can also run from `new-app/`:
 
 ```bat
 powershell -ExecutionPolicy Bypass -File packaging\build_windows.ps1
