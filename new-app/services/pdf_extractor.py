@@ -533,11 +533,27 @@ def _pass_fail_source_text(doc: fitz.Document, full_text: str) -> str:
 
 
 def _compliance_summary_slice(text: str) -> str:
-    """Return the Compliance Testing Summary region when present."""
-    match = re.search(r"compliance testing summary of results|result summary|test summary", text or "", re.I)
+    """Return only the Compliance Testing Summary region when present.
+
+    Stop before later packet pages (Action Required, 415 failure notice, Recap)
+    so those titles cannot leak into pass/fail detection.
+    """
+    source = text or ""
+    match = re.search(r"compliance testing summary of results|result summary|test summary", source, re.I)
     if not match:
         return ""
-    return (text or "")[match.start() : match.start() + 3500]
+    start = match.start()
+    rest = source[start:]
+    end_match = re.search(
+        r"\n\s*(?:annual valuation report|action required|immediate action required|"
+        r"annual additions\s*\(irc\s*415\)\s*test failure information|"
+        r"year[- ]end recap|important information|sample/draft)\b",
+        rest[40:],
+        re.I,
+    )
+    if end_match:
+        return rest[: 40 + end_match.start()]
+    return rest[:1800]
 
 
 def _is_failure_notice_or_letter_page(text: str) -> bool:

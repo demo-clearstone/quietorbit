@@ -71,3 +71,22 @@ def re_search_recap(text: str) -> bool:
     import re
 
     return bool(re.search(r"year[- ]end recap", text or "", re.I))
+
+
+def test_drop_415_pages_when_fail_415_not_true() -> None:
+    from services.pdf_modifier import drop_415_failure_pages_unless_failed
+
+    doc = fitz.open()
+    page = doc.new_page()
+    # Wrapped title like client packages often produce.
+    page.insert_text((54, 72), "Annual Additions (IRC 415)", fontsize=12, fontname="hebo")
+    page.insert_text((54, 88), "Test Failure Information", fontsize=12, fontname="hebo")
+    page.insert_text((54, 120), "Body of the notice stays on this page.", fontsize=10)
+    recap = doc.new_page()
+    recap.insert_text((54, 80), "Year End Recap", fontsize=14, fontname="hebo")
+
+    notes = drop_415_failure_pages_unless_failed(doc, fail_415=False)
+    assert notes
+    assert doc.page_count == 1
+    assert "Year End Recap" in (doc[0].get_text("text") or "")
+    assert drop_415_failure_pages_unless_failed(doc, fail_415=True) == []

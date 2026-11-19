@@ -1581,8 +1581,6 @@ def _drop_removed_failure_pages(doc: fitz.Document, remove_ids: set[str]) -> boo
         return False
     drop: list[int] = []
     for page in doc:
-        if page.number == 0:
-            continue
         text = page.get_text("text") or ""
         if _is_415_failure_info_page(text) or _is_415_sample_letter_page(text):
             drop.append(page.number)
@@ -1597,19 +1595,47 @@ def _drop_removed_failure_pages(doc: fitz.Document, remove_ids: set[str]) -> boo
 
 def _is_415_failure_info_page(text: str) -> bool:
     """True when this page is the Annual Additions (IRC 415) Test Failure Information notice."""
-    lines = [re.sub(r"\s+", " ", line).strip() for line in (text or "").splitlines() if line.strip()]
-    if not lines:
+    raw = text or ""
+    if not raw.strip():
         return False
-    head = " ".join(lines[:6])
-    return bool(
-        re.search(
-            r"annual additions\s*\(irc\s*415\)\s*test failure information|"
-            r"415\s*\(?\s*c\s*\)?.{0,40}test failure information|"
-            r"annual additions.{0,40}test failure information",
-            head,
-            re.I,
-        )
-    )
+    # Titles often wrap across lines; squash the top of the page before matching.
+    head = re.sub(r"\s+", " ", raw[:1200]).strip()
+    if re.search(
+        r"annual additions\s*\(?\s*irc\s*415\s*\)?\s*test failure information|"
+        r"415\s*\(?\s*c\s*\)?\s*.{0,60}test failure information|"
+        r"annual additions.{0,60}test failure information",
+        head,
+        re.I,
+    ):
+        # Do not treat the Year End Recap / Important Information overview as this notice.
+        if re.search(r"^\s*year[- ]end recap\b|^\s*important information\b", head, re.I):
+            return False
+        return True
+    return False
+
+
+def drop_415_failure_pages_unless_failed(doc: fitz.Document, fail_415: bool | None) -> list[str]:
+    """Remove 415 failure-info / letter pages unless 415 actually failed.
+
+    Called from the orchestrator so the page cannot remain between Action Required
+    and Year End Recap when fail_415 is not True — even if rule L heading match missed.
+    """
+    if fail_415 is True:
+        return []
+    drop: list[int] = []
+    for page in doc:
+        text = page.get_text("text") or ""
+        # Do not skip page 0 — some packets place this notice early, and tests use a
+        # single-page doc. Cover letters do not match the 415 failure-info title.
+        if _is_415_failure_info_page(text) or _is_415_sample_letter_page(text):
+            drop.append(page.number)
+    if not drop:
+        return []
+    for number in reversed(drop):
+        if doc.page_count <= 1:
+            break
+        doc.delete_page(number)
+    return [f"Removed Annual Additions (IRC 415) Test Failure Information page(s) because fail_415={fail_415!r}"]
 
 
 def _is_415_sample_letter_page(text: str) -> bool:

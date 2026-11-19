@@ -253,6 +253,10 @@ def process_uploads(
         )
         # 5. Edit the PDF.
         removed = pdf_modifier.apply_decisions(doc, decisions, profile.plan_type)
+        # Hard guarantee: 415 failure-info pages stay only when 415 actually failed.
+        warnings.extend(
+            pdf_modifier.drop_415_failure_pages_unless_failed(doc, profile.fail_415)
+        )
         recap_removed = pdf_modifier.apply_recap_bullets(doc, decisions, profile.plan_type)
         flags = package_flags(profile.plan_type)
         if is_457_plan(profile.plan_type):
