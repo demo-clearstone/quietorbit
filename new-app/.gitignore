@@ -12,7 +12,13 @@ logs/*
 dist/
 packaging/harvested.wxs
 packaging/build_log.txt
+docs/drive-download-*/
 docs/drive-download-*.zip
+docs/*.pdf
+build/
 
 .tmp_scan_compare/
 Scanned_*.pdf
+Kaagaz_*.pdf
+TEST23*.docx
+current-status.txt

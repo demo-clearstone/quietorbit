@@ -182,3 +182,53 @@ def test_apply_decisions_packs_no_immediate_under_action_heading() -> None:
     assert action_y - rule_y < 55
     assert 15 < green_y - action_y < 45
     assert "IMMEDIATE ACTION REQUIRED" not in page.get_text()
+
+
+def _text_x(page: fitz.Page, text: str) -> float:
+    for block in page.get_text("dict")["blocks"]:
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []):
+            if "".join(span["text"] for span in line["spans"]).strip() == text:
+                return line["bbox"][0]
+    raise AssertionError(f"text not found: {text}")
+
+
+def test_kept_action_content_keeps_original_x_and_gap_after_removal() -> None:
+    """Remaining ACTION content must keep source left edge and original spacing."""
+    from services.pdf_modifier import _text_blocks
+
+    doc = fitz.open()
+    page = doc.new_page()
+    left = 40.0
+    page.insert_text((left, 80), "Annual Valuation Report", fontsize=16, fontname="hebo")
+    page.insert_text((left, 100), "Plan Year End: 12/31/2025", fontsize=11)
+    page.insert_text((left, 120), "555001", fontsize=11)
+    page.draw_line(fitz.Point(48, 140), fitz.Point(page.rect.width - 48, 140), width=1)
+    page.insert_text((left, 170), "ACTION REQUIRED", fontsize=11, fontname="hebo")
+    page.insert_text((left, 200), "KEEP HEADING ONE", fontsize=11, fontname="hebo")
+    page.insert_text((left, 220), "Keep this body at the original left margin.", fontsize=10)
+    page.insert_text((left, 280), "REMOVE HEADING", fontsize=11, fontname="hebo")
+    page.insert_text((left, 300), "Remove this paragraph entirely.", fontsize=10)
+    page.insert_text((left, 360), "KEEP HEADING TWO", fontsize=11, fontname="hebo")
+    page.insert_text((left, 380), "Second kept body also stays left-aligned.", fontsize=10)
+
+    before_two = _text_top(page, "KEEP HEADING TWO")
+    before_gap = before_two - (_text_top(page, "Keep this body at the original left margin.") + 12)
+    snapshot = _text_blocks(page)
+    removed = fitz.Rect(18, 270, page.rect.width - 28, 330)
+    page.add_redact_annot(removed, fill=(1, 1, 1))
+    page.apply_redactions(images=0)
+    _restack_pages(doc, {0: [removed]}, originals={0: snapshot})
+
+    page = doc[0]
+    assert "REMOVE HEADING" not in page.get_text()
+    assert abs(_text_x(page, "ACTION REQUIRED") - left) < 2.0
+    assert abs(_text_x(page, "KEEP HEADING ONE") - left) < 2.0
+    assert abs(_text_x(page, "Keep this body at the original left margin.") - left) < 2.0
+    assert abs(_text_x(page, "KEEP HEADING TWO") - left) < 2.0
+    after_two = _text_top(page, "KEEP HEADING TWO")
+    after_gap = after_two - (_text_top(page, "Keep this body at the original left margin.") + 12)
+    assert after_two < before_two - 30
+    assert after_gap < before_gap
+    assert after_gap < 80

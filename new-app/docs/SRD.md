@@ -1,6 +1,6 @@
 # MOA Valuation Package Automation — Software Requirements Document
 
-Use this file as project context for Copilot/Cursor. Implementation lives in `new-app/` and starts at Phase 1.
+Implementation lives in `new-app/` and starts at Phase 1.
 
 ## 1. Project overview
 

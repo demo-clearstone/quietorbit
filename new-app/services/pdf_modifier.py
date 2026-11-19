@@ -55,6 +55,8 @@ def apply_decisions(
     ]
     removed: list[str] = []
     touched: dict[int, list[fitz.Rect]] = {}
+    # Snapshot source layout before any redaction so kept spans keep original x/style.
+    originals: dict[int, list[dict]] = {}
     for page in doc:
         if not remove_specs:
             break
@@ -88,10 +90,12 @@ def apply_decisions(
                 if rule_id not in removed:
                     removed.append(rule_id)
         if boxes:
+            # Capture original kept-block geometry before redaction can nudge glyphs.
+            originals[page.number] = _text_blocks(page)
             # No lasting white cover: restack rewrites surviving text into these bands.
             _apply_redact_boxes(page, boxes, cover=False)
     if touched:
-        _restack_pages(doc, touched)
+        _restack_pages(doc, touched, originals=originals)
         _pack_action_across_pages(doc)
         _strip_im_fragments(doc)
         _drop_empty_pages(doc)
@@ -439,50 +443,50 @@ def _block_matches(page: fitz.Page, spec: dict, y0: float, y1: float) -> bool:
     return True
 
 
-def _restack_pages(doc: fitz.Document, touched: dict[int, list[fitz.Rect]]) -> None:
+def _restack_pages(
+    doc: fitz.Document,
+    touched: dict[int, list[fitz.Rect]],
+    originals: dict[int, list[dict]] | None = None,
+) -> None:
     """Collapse removed regions by their exact height while keeping each surviving span at its source x-position and style.
 
-    Purpose:
-        Shift leftover text up, keeping font/size/color. Images stay put.
-
-    Args:
-        doc: Open PDF. Must not be closed.
-        touched: Page-index to removed vertical regions.
-
-    Returns:
-        None.
-
-    Raises:
-        A closed PDF raises from PyMuPDF.
-
-    Example:
-        Text below one removed region moves up by exactly that region's height; text above it stays put.
-
-    Side effects:
-        Changes the PDF passed in. Does not save the file by itself.
+    When ``originals`` is provided (pre-redaction snapshots), kept blocks are taken
+    from that layout so alignment matches the source PDF — redaction must not be
+    allowed to nudge remaining glyph positions before rewrite.
     """
     for page in doc:
         removed = touched.get(page.number)
         if not removed:
             continue
-        blocks = _text_blocks(page)
-        if not blocks:
-            continue
-        body = [block for block in blocks if not _is_page_number_block(page, block)]
-        footer = [block for block in blocks if _is_page_number_block(page, block)]
         removed_bands = _merged_vertical_bands(removed)
         header_rule_y = _top_header_rule_y(page)
-        # Wipe text without lasting white overlays — overlays at old y-positions would
-        # hide content that shifts up into those bands.
-        _apply_redact_boxes(page, [block["bbox"] for block in blocks], cover=False)
+        snapshot = list((originals or {}).get(page.number) or [])
+        if snapshot:
+            # Pre-removal layout: drop blocks that lived inside removed bands.
+            kept = [block for block in snapshot if not _block_covered_by_bands(block, removed_bands)]
+            wipe_sources = snapshot
+        else:
+            # Page already redacted: every remaining block is a survivor.
+            kept = _text_blocks(page)
+            wipe_sources = kept
+        if not kept and not wipe_sources:
+            continue
+        body = [block for block in kept if not _is_page_number_block(page, block)]
+        footer = [block for block in kept if _is_page_number_block(page, block)]
+        # Wipe whatever text is still on the page (post-removal leftovers + survivors).
+        present = _text_blocks(page)
+        wipe = [block["bbox"] for block in present] + [block["bbox"] for block in wipe_sources]
+        if wipe:
+            _apply_redact_boxes(page, wipe, cover=False)
         for block in body:
-            delta = _upshift_delta(block["bbox"].y0, removed_bands)
-            if header_rule_y is not None and block["bbox"].y0 > header_rule_y:
-                # Keep a small gap under the header divider; do not cap later blocks by
-                # the first post-header gap (that left large white holes after mid-page removals).
+            delta = _upshift_delta(float(block["bbox"].y0), removed_bands)
+            if header_rule_y is not None and float(block["bbox"].y0) > header_rule_y:
+                # Cap upshift so content cannot climb into the header divider.
+                # Do not invent a new Kaagaz y — only protect the original gap floor.
                 minimum_y = header_rule_y + 30.0
-                delta = max(delta, minimum_y - block["bbox"].y0)
+                delta = max(delta, minimum_y - float(block["bbox"].y0))
             for span in block["spans"]:
+                # origin.x / font / size come from the pre-removal snapshot.
                 _write_span(page, span, delta)
         for block in footer:
             for span in block["spans"]:
@@ -490,6 +494,23 @@ def _restack_pages(doc: fitz.Document, touched: dict[int, list[fitz.Rect]]) -> N
         # Only clear underlines that sat inside removed bands (orphans). Do not wipe
         # underlines under surviving ACTION / green / kept failure headings.
         _clear_short_rules_in_bands(page, removed_bands)
+
+
+def _block_covered_by_bands(block: dict, bands: list[tuple[float, float]]) -> bool:
+    """True when a text block mostly sits inside a removed vertical band."""
+    if not bands:
+        return False
+    y0 = float(block["bbox"].y0)
+    y1 = float(block["bbox"].y1)
+    height = max(y1 - y0, 1.0)
+    mid = (y0 + y1) / 2.0
+    for top, bottom in bands:
+        if top <= mid <= bottom:
+            return True
+        overlap = max(0.0, min(y1, bottom) - max(y0, top))
+        if overlap / height >= 0.55:
+            return True
+    return False
 
 
 def _upshift_delta(y0: float, bands: list[tuple[float, float]]) -> float:
@@ -1197,7 +1218,11 @@ def _movable_action_overflow(page: fitz.Page) -> list[dict]:
 
 
 def _pack_one_action_overflow(doc: fitz.Document) -> bool:
-    """Move as many leading overflow blocks as fit from one later page onto the prior page."""
+    """Move as many leading overflow blocks as fit from one later page onto the prior page.
+
+    Kept spans keep their original source x. Vertical gaps between consecutively
+    moved blocks reuse the original spacing from the source page.
+    """
     flow = [page for page in doc if _is_action_flow_page(page)]
     for dest, source in zip(flow, flow[1:]):
         footer_limit = float(dest.rect.y1) - 52.0
@@ -1209,22 +1234,33 @@ def _pack_one_action_overflow(doc: fitz.Document) -> bool:
         if not overflow:
             continue
         moved: list[dict] = []
+        prev_source_bottom: float | None = None
+        written_bottom = cursor
         for block in overflow:
             height = float(block["bbox"].height)
             if height + 10 > free:
                 break
-            target_top = cursor
+            if prev_source_bottom is None:
+                target_top = cursor
+            else:
+                # Same gap the two blocks had on the original page.
+                orig_gap = float(block["bbox"].y0) - prev_source_bottom
+                target_top = written_bottom + max(4.0, orig_gap)
+            if target_top + height > footer_limit:
+                break
             delta = target_top - float(block["bbox"].y0)
             for span in block["spans"]:
                 _write_span(dest, span, delta)
             moved.append(block)
-            cursor = target_top + height + 14.0
-            free = footer_limit - cursor
+            prev_source_bottom = float(block["bbox"].y1)
+            written_bottom = target_top + height
+            free = footer_limit - written_bottom
         if not moved:
             continue
         boxes = [block["bbox"] for block in moved]
+        source_snapshot = _text_blocks(source)
         _apply_redact_boxes(source, boxes, cover=False)
-        _restack_pages(doc, {source.number: boxes})
+        _restack_pages(doc, {source.number: boxes}, originals={source.number: source_snapshot})
         return True
     return False
 
@@ -1277,13 +1313,19 @@ def _pull_kept_action_forward(doc: fitz.Document) -> None:
         blocks = _action_blocks_to_move(page)
         if not blocks:
             continue
+        prev_source_bottom: float | None = None
         for block in blocks:
-            # Place the block so its top sits near the current baseline gap.
-            target_top = baseline - 11
-            delta = target_top - block["bbox"].y0
+            # Keep each span's original source x; reuse original vertical gaps.
+            if prev_source_bottom is None:
+                target_top = baseline - 11
+            else:
+                orig_gap = float(block["bbox"].y0) - prev_source_bottom
+                target_top = baseline + max(4.0, orig_gap)
+            delta = target_top - float(block["bbox"].y0)
             for span in block["spans"]:
                 _write_span(anchor, span, delta)
-            baseline = target_top + block["bbox"].height + 16
+            prev_source_bottom = float(block["bbox"].y1)
+            baseline = target_top + float(block["bbox"].height)
         if _is_recap_text(page.get_text("text") or ""):
             _apply_redact_boxes(page, [block["bbox"] for block in blocks])
             continue
