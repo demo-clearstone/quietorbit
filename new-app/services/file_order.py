@@ -534,7 +534,13 @@ def page_label_from_text(text: str, fallback: str) -> str:
         return "Test Summary"
     if re.search(r"^(?:immediate action required|attention required|no immediate action is required)\b", first, re.I):
         return "Action required"
-    if re.fullmatch(r"annual additions\s*\(irc\s*415\)\s*test failure information", first, re.I):
+    if re.search(
+        r"annual additions\s*\(irc\s*415\)\s*test failure information|"
+        r"415\s*\(?\s*c\s*\)?.{0,40}test failure information|"
+        r"^annual additions.{0,40}test failure information",
+        first,
+        re.I,
+    ):
         return "415 Failure information"
     if re.search(r"\b(?:failed compliance testing|excess return notice)\b", head, re.I):
         if re.search(r"after\s+12[- ]months?", head, re.I):

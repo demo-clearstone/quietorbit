@@ -48,6 +48,12 @@ rules:
 notices:
   - id: L
     heading: Annual Additions (IRC 415) Test Failure Information
+  - id: L
+    heading: Annual Additions (IRC 415) Test Failure information
+  - id: L
+    heading: 415(c) Annual Additions Test Failure Information
+  - id: L
+    heading: Annual Additions Test Failure Information
 
 sample_letters:
   - id: J_ACP

@@ -109,6 +109,10 @@ def apply_decisions(
                 # Restore underlines only for kept failure headings after restack.
                 # Never invent/wipe plain ACTION / NO IMMEDIATE underlines.
                 _redraw_action_rules(page, only_failure=True)
+    # Standalone failure-info / letter pages: delete the whole page when removed
+    # (heading-only redaction can miss wrapped titles and leave the sheet in place).
+    if _drop_removed_failure_pages(doc, remove_ids) and "L" not in removed and "L" in remove_ids:
+        removed.append("L")
     # Always run: all-clear pages can lack ACTION REQUIRED even when nothing was
     # removed on that page (green already alone, or pulled forward without a heading).
     _finalize_no_immediate_pages(doc)
@@ -1565,6 +1569,60 @@ def _drop_empty_pages(doc: fitz.Document) -> None:
         if doc.page_count <= 1:
             break
         doc.delete_page(number)
+
+
+def _drop_removed_failure_pages(doc: fitz.Document, remove_ids: set[str]) -> bool:
+    """Delete whole 415 failure-info / related sample-letter pages when rule L is remove.
+
+    Heading redaction alone can miss wrapped titles and leave the page between
+    Action Required and Year End Recap.
+    """
+    if "L" not in remove_ids:
+        return False
+    drop: list[int] = []
+    for page in doc:
+        if page.number == 0:
+            continue
+        text = page.get_text("text") or ""
+        if _is_415_failure_info_page(text) or _is_415_sample_letter_page(text):
+            drop.append(page.number)
+    if not drop:
+        return False
+    for number in reversed(drop):
+        if doc.page_count <= 1:
+            break
+        doc.delete_page(number)
+    return True
+
+
+def _is_415_failure_info_page(text: str) -> bool:
+    """True when this page is the Annual Additions (IRC 415) Test Failure Information notice."""
+    lines = [re.sub(r"\s+", " ", line).strip() for line in (text or "").splitlines() if line.strip()]
+    if not lines:
+        return False
+    head = " ".join(lines[:6])
+    return bool(
+        re.search(
+            r"annual additions\s*\(irc\s*415\)\s*test failure information|"
+            r"415\s*\(?\s*c\s*\)?.{0,40}test failure information|"
+            r"annual additions.{0,40}test failure information",
+            head,
+            re.I,
+        )
+    )
+
+
+def _is_415_sample_letter_page(text: str) -> bool:
+    """True for the SAMPLE/DRAFT 415 participant letter page."""
+    lines = [re.sub(r"\s+", " ", line).strip() for line in (text or "").splitlines() if line.strip()]
+    if not lines:
+        return False
+    first = lines[0]
+    head = " ".join(lines[:10])
+    if not re.match(r"^sample/draft\b", first, re.I):
+        # Some packets put the exceeded heading first.
+        return bool(re.search(r"annual additions\s*\(irc\s*415\)\s*limit has been exceeded", first, re.I))
+    return bool(re.search(r"annual additions|irc\s*415|\b415\b", head, re.I))
 
 
 _PAGE_NUMBER = re.compile(r"^(?:page\s*)?\d{1,3}$", re.I)

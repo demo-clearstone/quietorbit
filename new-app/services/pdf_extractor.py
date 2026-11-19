@@ -80,8 +80,11 @@ def extract_plan_profile(doc: fitz.Document) -> PlanProfile:
     )
     top_heavy_percent = _money_or_percent(full_text, TEST_PATTERNS["top_heavy_percent"])
 
+    # Prefer Compliance Summary for pass/fail. Never let the 415 Failure Information
+    # notice page itself mark fail_415=True (that would keep the page forever).
+    flag_text = _pass_fail_source_text(doc, full_text)
     flags = {
-        name: _flag_bool(full_text, FAIL_FLAGS[name], PASS_FLAGS.get(name) or [])
+        name: _flag_bool(flag_text, FAIL_FLAGS[name], PASS_FLAGS.get(name) or [])
         for name in FAIL_FLAGS
     }
     testing_failed = _or_bools(flags.get("adp_failed"), flags.get("acp_failed"), flags.get("fail_402g"), flags.get("fail_415"))
@@ -510,32 +513,63 @@ def _flag_present(text: str, patterns: list[str]) -> bool | None:
     return None
 
 
-def _flag_bool(text: str, true_patterns: list[str], false_patterns: list[str]) -> bool | None:
-    """Flag bool.
+def _pass_fail_source_text(doc: fitz.Document, full_text: str) -> str:
+    """Text used for ADP/ACP/402(g)/415 pass-fail flags.
 
-    Purpose:
-        Flag bool.
-
-    Args:
-        text: Text from a page or a file.
-        true_patterns: True patterns. Type: list[str].
-        false_patterns: False patterns. Type: list[str].
-
-    Returns:
-        a bool | None.
-
-    Raises:
-        None.
-
-    Example:
-        _flag_bool("text", [], []) returns a bool | None.
-
-    Side effects:
-        None. This function only reads data and returns a value.
+    Prefer the Compliance Testing Summary block. Otherwise use the package text
+    with failure-notice / sample-letter pages stripped so their titles cannot
+    create false Fail hits.
     """
-    if _flag_present(text, true_patterns):
+    summary = _compliance_summary_slice(full_text)
+    if summary.strip():
+        return summary
+    parts: list[str] = []
+    for page in doc:
+        text = page.get_text("text") or ""
+        if _is_failure_notice_or_letter_page(text):
+            continue
+        parts.append(text)
+    return "\n".join(parts) if parts else full_text
+
+
+def _compliance_summary_slice(text: str) -> str:
+    """Return the Compliance Testing Summary region when present."""
+    match = re.search(r"compliance testing summary of results|result summary|test summary", text or "", re.I)
+    if not match:
+        return ""
+    return (text or "")[match.start() : match.start() + 3500]
+
+
+def _is_failure_notice_or_letter_page(text: str) -> bool:
+    """True for 415 failure-info / sample draft letter pages (not test reports)."""
+    lines = [re.sub(r"\s+", " ", line).strip() for line in (text or "").splitlines() if line.strip()]
+    if not lines:
+        return False
+    first = lines[0]
+    head = " ".join(lines[:8])
+    if re.search(
+        r"annual additions\s*\(irc\s*415\)\s*test failure information|"
+        r"415\s*\(?\s*c\s*\)?.{0,40}test failure information|"
+        r"annual additions.{0,40}test failure information",
+        first,
+        re.I,
+    ):
         return True
-    if _flag_present(text, false_patterns):
+    if re.match(r"^sample/draft\b", first, re.I) and re.search(r"annual additions|415|402\s*\(?\s*g|adp|acp", head, re.I):
+        return True
+    return False
+
+
+def _flag_bool(text: str, true_patterns: list[str], false_patterns: list[str]) -> bool | None:
+    """Resolve Fail/Pass flags. When both appear, prefer an explicit Pass line."""
+    has_fail = _flag_present(text, true_patterns)
+    has_pass = _flag_present(text, false_patterns)
+    if has_fail and has_pass:
+        # Detail rows can say Fail while the summary line says Pass — trust Pass.
+        return False
+    if has_fail:
+        return True
+    if has_pass:
         return False
     return None
 

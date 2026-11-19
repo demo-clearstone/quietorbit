@@ -310,9 +310,10 @@ def _tested_fail(blob: str, name: str) -> bool | None:
     Side effects:
         None. This function only reads data and returns a value.
     """
+    # Require Pass/Fail as a result token — not the word "Failure" in a page title.
     match = re.search(
         r"(?:" + name + r").{0,100}?"
-        r"(?:Test(?:ed)?|Result)?\s*[:=\-]?\s*(Pass|Fail)\b",
+        r"(?:Test(?:ed)?|Result)?\s*[:=\-]?\s*(Pass|Fail)(?!ure)\b",
         blob,
         flags=re.I,
     )
