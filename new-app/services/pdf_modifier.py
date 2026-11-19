@@ -1095,7 +1095,7 @@ def _finalize_no_immediate_pages(doc: fitz.Document) -> None:
     Expected (Annual Valuation all-clear):
     - ACTION REQUIRED (bold, underlined)
     - NO IMMEDIATE ACTION IS REQUIRED AT THIS TIME (green, underlined)
-    - left-aligned under the header divider; green line stays in place when present
+    - both left-aligned to the same Action Required column
     """
     for page in doc:
         text = page.get_text("text") or ""
@@ -1106,12 +1106,14 @@ def _finalize_no_immediate_pages(doc: fitz.Document) -> None:
         # Leave pages that still have other action blocks; only pack the all-clear page.
         if re.search(r"IMMEDIATE ACTION REQUIRED|ATTENTION REQUIRED", text, re.I):
             continue
+        action = None
         green = None
         for block in _text_blocks(page):
             joined = " ".join(span["text"] for span in block["spans"]).strip()
-            if re.match(r"NO IMMEDIATE ACTION IS REQUIRED AT THIS TIME", joined, re.I):
+            if action is None and re.fullmatch(r"ACTION REQUIRED", joined, re.I):
+                action = block
+            if green is None and re.match(r"NO IMMEDIATE ACTION IS REQUIRED AT THIS TIME", joined, re.I):
                 green = block
-                break
         if green is None:
             continue
         # Clear orphan rules that cut through ACTION / green ink (leftover from removals).
@@ -1127,9 +1129,16 @@ def _finalize_no_immediate_pages(doc: fitz.Document) -> None:
                     float(block["bbox"].x0),
                     float(block["bbox"].x1),
                 )
-        has_heading = bool(re.search(r"(?m)^\s*ACTION REQUIRED\s*$", text))
+        # Shared left column: prefer existing ACTION REQUIRED, else body column / green.
+        if action is not None:
+            column_x = float(action["bbox"].x0)
+        else:
+            column_x = min(float(green["bbox"].x0), _action_column_x(page))
+            # Typical OPS left margin when green drifted right after packing.
+            if column_x > 70:
+                column_x = 54.0
+        has_heading = action is not None
         if not has_heading:
-            column_x = float(green["bbox"].x0)
             green_top = float(green["bbox"].y0)
             header_rule_y = _top_header_rule_y(page)
             # Prefer Kaagaz packing under the header, but never drop ACTION into the
@@ -1143,8 +1152,32 @@ def _finalize_no_immediate_pages(doc: fitz.Document) -> None:
             else:
                 heading_baseline = green_top - 14.0
             _write_action_heading(page, heading_baseline, x=column_x)
+        # Force green (and ACTION if present) onto the same left edge.
+        _left_align_action_phrases(page, column_x)
         # Kaagaz p2: both ACTION and the green line are underlined to phrase width.
         _redraw_action_rules(page, only_failure=False)
+
+
+def _left_align_action_phrases(page: fitz.Page, column_x: float) -> None:
+    """Shift ACTION REQUIRED / NO IMMEDIATE lines so their left edges share ``column_x``."""
+    targets = []
+    for block in _text_blocks(page):
+        joined = " ".join(span["text"] for span in block["spans"]).strip()
+        if re.fullmatch(r"ACTION REQUIRED", joined, re.I) or re.match(
+            r"NO IMMEDIATE ACTION IS REQUIRED AT THIS TIME", joined, re.I
+        ):
+            targets.append(block)
+    for block in targets:
+        dx = float(column_x) - float(block["bbox"].x0)
+        if abs(dx) < 0.75:
+            continue
+        _apply_redact_boxes(page, [block["bbox"]], cover=False)
+        for span in block["spans"]:
+            moved = {
+                **span,
+                "origin": fitz.Point(float(span["origin"].x) + dx, float(span["origin"].y)),
+            }
+            _write_span(page, moved, 0)
 
 
 def _pack_action_across_pages(doc: fitz.Document) -> None:

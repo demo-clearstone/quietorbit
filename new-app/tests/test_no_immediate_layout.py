@@ -97,3 +97,37 @@ def test_finalize_keeps_single_action_heading_with_both_underlines() -> None:
     widths = sorted(right - left for _y, left, right, _c in shorts)
     assert any(95 <= w <= 120 for w in widths)
     assert any(w >= 250 for w in widths)
+
+
+def test_no_immediate_line_left_aligns_with_action_required() -> None:
+    """Green NO IMMEDIATE line must share ACTION REQUIRED's left edge."""
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((200, 60), "Annual Valuation Report", fontsize=16, fontname="hebo")
+    page.insert_text((200, 80), "January 1, 2025 - December 31, 2025", fontsize=11)
+    page.insert_text((180, 100), "TEST PLAN 401(K)", fontsize=12, fontname="hebo")
+    page.insert_text((270, 120), "555001", fontsize=12, fontname="hebo")
+    page.draw_line(fitz.Point(48, 130), fitz.Point(page.rect.width - 48, 130), width=1)
+    page.insert_text((54, 160), "ACTION REQUIRED", fontsize=11, fontname="hebo")
+    # Intentionally indented too far right (post-pack drift).
+    page.insert_text(
+        (120, 190),
+        "NO IMMEDIATE ACTION IS REQUIRED AT THIS TIME",
+        fontsize=11,
+        fontname="hebo",
+        color=(0, 0.45, 0.15),
+    )
+
+    _finalize_no_immediate_pages(doc)
+
+    action_x = green_x = None
+    for block in page.get_text("dict")["blocks"]:
+        for line in block.get("lines", []):
+            line_text = "".join(span["text"] for span in line["spans"]).strip()
+            if line_text == "ACTION REQUIRED":
+                action_x = line["bbox"][0]
+            if line_text == "NO IMMEDIATE ACTION IS REQUIRED AT THIS TIME":
+                green_x = line["bbox"][0]
+    assert action_x is not None and green_x is not None
+    assert abs(action_x - green_x) < 2.0
+    assert green_x < 70
