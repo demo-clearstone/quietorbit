@@ -7,5 +7,5 @@ python -m PyInstaller --noconfirm --clean --onedir --console --name MOAValuation
 -r requirements-run.txt
 pyinstaller>=6.0
 
-python -m PyInstaller --noconfirm --clean --onedir --console --name MOAValuationPackage --distpath "dist\windows\publish" --workpath "$env:TEMP\MOAValuationPackage-build" --specpath "$env:TEMP\MOAValuationPackage-spec" --add-data "config;config" --add-data "templates;templates" --add-data "logs-updation.xlsx;." --collect-all pymupdf --collect-all uvicorn --hidden-import uvicorn.protocols.http.h11_impl --hidden-import uvicorn.lifespan.on main.py
+python -m PyInstaller --noconfirm --clean --onedir --console --name MOAValuationPackage --distpath "dist\windows\publish" --workpath "%TEMP%\MOAValuationPackage-build" --specpath "%TEMP%\MOAValuationPackage-spec" --add-data "config;config" --add-data "templates;templates" --add-data "logs-updation.xlsx;." --collect-all pymupdf --collect-all uvicorn --hidden-import uvicorn.protocols.http.h11_impl --hidden-import uvicorn.lifespan.on main.py
 
