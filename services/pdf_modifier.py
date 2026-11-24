@@ -108,6 +108,7 @@ def apply_decisions(
     # Always run: all-clear pages can lack ACTION REQUIRED even when nothing was
     # removed on that page (green already alone, or pulled forward without a heading).
     _finalize_no_immediate_pages(doc)
+    _normalize_action_page_layout(doc)
     return removed
 
 
@@ -1119,6 +1120,57 @@ def _finalize_no_immediate_pages(doc: fitz.Document) -> None:
                 heading_baseline = green_top - 14.0
             _write_action_heading(page, heading_baseline, x=column_x)
         # Kaagaz p2: both ACTION and the green line are underlined to phrase width.
+        _redraw_action_rules(page, only_failure=False)
+
+
+def _normalize_action_page_layout(doc: fitz.Document) -> None:
+    """Normalize Action Required headings after keep/remove reflow."""
+    for page in doc:
+        text = page.get_text("text") or ""
+        if not re.search(r"annual valuation report", text, re.I):
+            continue
+        if not re.search(
+            r"action required|no immediate action|immediate action|attention required",
+            text,
+            re.I,
+        ):
+            continue
+
+        heading_xs: list[float] = []
+        heading_blocks: list[dict] = []
+        for block in _text_blocks(page):
+            joined = " ".join(span["text"] for span in block["spans"]).strip()
+            if re.match(
+                r"^(ACTION REQUIRED|IMMEDIATE ACTION REQUIRED|ATTENTION REQUIRED|"
+                r"NO IMMEDIATE ACTION IS REQUIRED)",
+                joined,
+                re.I,
+            ):
+                heading_xs.append(float(block["bbox"].x0))
+                heading_blocks.append(block)
+        if not heading_xs:
+            continue
+
+        heading_xs.sort()
+        column_x = heading_xs[len(heading_xs) // 2]
+        if column_x < 38 or column_x > 72:
+            column_x = 54.0
+
+        for block in heading_blocks:
+            dx = column_x - float(block["bbox"].x0)
+            if abs(dx) < 0.75:
+                continue
+            _apply_redact_boxes(page, [block["bbox"]], cover=False)
+            for span in block["spans"]:
+                moved = {
+                    **span,
+                    "origin": fitz.Point(
+                        float(span["origin"].x) + dx,
+                        float(span["origin"].y),
+                    ),
+                }
+                _write_span(page, moved, 0)
+
         _redraw_action_rules(page, only_failure=False)
 
 
@@ -2911,4 +2963,3 @@ def _redact_recap_paragraphs(page: fitz.Page, paragraphs: list[str]) -> bool:
         return False
     _apply_redact_boxes(page, boxes)
     return True
-

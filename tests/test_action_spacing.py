@@ -3,7 +3,12 @@ from __future__ import annotations
 import fitz
 
 from models.review import RuleDecision
-from services.pdf_modifier import apply_decisions, _restack_pages, _top_header_rule_y
+from services.pdf_modifier import (
+    apply_decisions,
+    _normalize_action_page_layout,
+    _restack_pages,
+    _top_header_rule_y,
+)
 
 
 def _text_top(page: fitz.Page, text: str) -> float:
@@ -182,3 +187,45 @@ def test_apply_decisions_packs_no_immediate_under_action_heading() -> None:
     assert action_y - rule_y < 55
     assert 15 < green_y - action_y < 45
     assert "IMMEDIATE ACTION REQUIRED" not in page.get_text()
+
+
+def test_normalize_action_layout_shares_heading_column_after_reflow() -> None:
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((54, 80), "Annual Valuation Report", fontsize=16, fontname="hebo")
+    page.insert_text((54, 130), "PLAN NAME", fontsize=11)
+    page.draw_line(fitz.Point(48, 140), fitz.Point(page.rect.width - 48, 140), width=1)
+    page.insert_text((54, 170), "ACTION REQUIRED", fontsize=11, fontname="hebo")
+    page.insert_text((54, 210), "IMMEDIATE ACTION REQUIRED - ACP TEST FAILURE", fontsize=11, fontname="hebo")
+    page.insert_text(
+        (120, 240),
+        "NO IMMEDIATE ACTION IS REQUIRED AT THIS TIME",
+        fontsize=11,
+        fontname="hebo",
+        color=(0, 0.45, 0.15),
+    )
+
+    _normalize_action_page_layout(doc)
+
+    positions = {}
+    for block in page.get_text("dict")["blocks"]:
+        if block.get("type") != 0:
+            continue
+        line_text = " ".join(
+            "".join(span["text"] for span in line.get("spans", [])).strip()
+            for line in block.get("lines", [])
+        )
+        for expected in (
+            "ACTION REQUIRED",
+            "IMMEDIATE ACTION REQUIRED - ACP TEST FAILURE",
+            "NO IMMEDIATE ACTION IS REQUIRED AT THIS TIME",
+        ):
+            if expected in line_text:
+                positions[expected] = block["bbox"][0]
+
+    assert set(positions) == {
+        "ACTION REQUIRED",
+        "IMMEDIATE ACTION REQUIRED - ACP TEST FAILURE",
+        "NO IMMEDIATE ACTION IS REQUIRED AT THIS TIME",
+    }
+    assert all(abs(x - 54) < 2 for x in positions.values())
