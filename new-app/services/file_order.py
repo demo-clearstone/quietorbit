@@ -541,6 +541,8 @@ def page_label_from_text(text: str, fallback: str) -> str:
     # action notices often mention the summary, testing failures, or reports.
     first = lines[0]
     head = " ".join(lines[:7])
+    # Notice titles often sit several lines under the Annual Valuation Report header.
+    deeper = " ".join(lines[:16])
     if (
         re.search(r"mutual of america|financial group", head, re.I)
         and re.search(r"\bRE\s*:|period ending|valuation package", head, re.I)
@@ -556,21 +558,28 @@ def page_label_from_text(text: str, fallback: str) -> str:
         r"^annual additions.{0,40}test failure information",
         first,
         re.I,
+    ) or re.search(
+        r"annual additions\s*\(irc\s*415\)\s*test failure information|"
+        r"415\s*\(?\s*c\s*\)?.{0,40}test failure information",
+        deeper,
+        re.I,
     ):
         return "415 Failure information"
-    if re.search(r"\b(?:failed compliance testing|excess return notice)\b", head, re.I):
-        if re.search(r"after\s+12[- ]months?", head, re.I):
-            if re.search(r"prior method testing", head, re.I):
+    if re.search(r"\b(?:failed compliance testing|excess return notice|excess return summary)\b", deeper, re.I):
+        if re.search(r"after\s+12[- ]months?", deeper, re.I):
+            if re.search(r"prior method testing", deeper, re.I):
                 return "ADP/ACP Failure excess page after 12 months (Prior year Testing Method)"
-            if re.search(r"current method testing", head, re.I):
+            if re.search(r"current method testing", deeper, re.I):
                 return "ADP/ACP Failure excess page after 12 months (Current year Testing Method)"
         return "ADP/ACP Failure excess page Current year"
-    if re.match(r"^sample/draft communication", first, re.I):
-        if re.search(r"402\s*\(\s*g\s*\)|402\s*g deferral", head, re.I):
+    if re.match(r"^sample/draft communication", first, re.I) or re.search(
+        r"(?m)^sample/draft communication", "\n".join(lines[:16]), re.I
+    ):
+        if re.search(r"402\s*\(\s*g\s*\)|402\s*g deferral", deeper, re.I):
             return "402g Failure letter"
-        if re.search(r"annual additions|415", head, re.I):
+        if re.search(r"annual additions|415", deeper, re.I):
             return "415 Failure letter"
-        if re.search(r"adp|acp", head, re.I):
+        if re.search(r"adp|acp", deeper, re.I):
             return "ADP/ACP Failure letter"
     if re.match(r"^year[- ]end recap\b", first, re.I) or re.fullmatch(r"important information", first, re.I):
         return "Year End Recap"
@@ -595,8 +604,42 @@ def page_label_from_text(text: str, fallback: str) -> str:
         re.I,
     ):
         return "410(b)"
+    # Variance / Annual Allocation sheets (must not fall through as Action).
+    if re.search(
+        r"^(?:annual\s+allocation\s+)?(?:variance|allocation)\s+report\b|"
+        r"^(?:ps|shne)\s*variance\b|"
+        r"^ma\s*var\b",
+        first,
+        re.I,
+    ) or re.search(
+        r"\b(?:annual\s+allocation\s+)?variance\s+report\b|\bps\s*variance\b|\bshne\s*variance\b",
+        deeper,
+        re.I,
+    ):
+        if re.search(r"\bps\s*variance\b", deeper, re.I):
+            return "PS Variance"
+        if re.search(r"\bshne\s*variance\b", deeper, re.I):
+            return "SHNE Variance"
+        return "Variance"
+    if re.search(r"^contribution analysis(?:\s+by\s+source)?(?:\s+report)?\b", first, re.I):
+        return "Contribution Analysis"
+    # AV header alone is Action Required only when the page is not a notice/variance.
     if re.fullmatch(r"annual valuation report", first, re.I):
-        return "Action required"
+        if re.search(
+            r"failed compliance testing|excess return notice|excess return summary|"
+            r"sample/draft communication|variance\s+report",
+            deeper,
+            re.I,
+        ):
+            # Already classified above when markers were present; otherwise keep fallback.
+            pass
+        elif re.search(
+            r"(?m)^\s*(?:ACTION REQUIRED|IMMEDIATE ACTION REQUIRED|ATTENTION REQUIRED|"
+            r"NO IMMEDIATE ACTION)",
+            "\n".join(lines[:16]),
+            re.I,
+        ) or not re.search(r"year[- ]end recap|compliance and administrative", deeper, re.I):
+            return "Action required"
     return fallback
 
 

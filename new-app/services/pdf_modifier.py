@@ -1335,6 +1335,25 @@ def _pack_action_across_pages(doc: fitz.Document) -> None:
             break
 
 
+def _is_notice_or_excess_page(text: str) -> bool:
+    """True for Excess / Failed / sample-letter pages that share the AV header.
+
+    These must stay on their own SOP pages and must never pack onto Action Required.
+    """
+    lines = [line.strip() for line in (text or "").splitlines() if line.strip()][:16]
+    head = "\n".join(lines)
+    return bool(
+        re.search(
+            r"^(?:failed compliance testing|excess return notice|excess return summary)\b|"
+            r"^sample/draft communication|"
+            r"^annual additions\s*\(\s*irc\s*415\s*\)\s*test failure|"
+            r"^415\s*\(\s*c\s*\)?.{0,40}test failure information",
+            head,
+            re.I | re.M,
+        )
+    )
+
+
 def _is_action_flow_page(page: fitz.Page) -> bool:
     """Pages that participate in Action Required reflow (not cover; recap only if it holds action)."""
     text = page.get_text("text") or ""
@@ -1344,6 +1363,10 @@ def _is_action_flow_page(page: fitz.Page) -> bool:
     ):
         return False
     if _is_recap_text(text) and not _KEPT_ACTION.search(text):
+        return False
+    # Excess / Failed / sample letters use the same AV header — exclude from reflow
+    # so whitespace on ACTION cannot pull those notices onto the prior page.
+    if _is_notice_or_excess_page(text):
         return False
     return bool(
         re.search(
@@ -1389,6 +1412,14 @@ def _movable_action_overflow(page: fitz.Page) -> list[dict]:
             # Keep the section label with its page; move body paragraphs only.
             continue
         if _is_recap_text(text):
+            break
+        # Never pull Excess / Failed notice bodies onto a prior ACTION page.
+        if re.search(
+            r"failed compliance testing|excess return notice|excess return summary|"
+            r"sample/draft communication",
+            text,
+            re.I,
+        ):
             break
         if re.fullmatch(r"\d{5,7}", text) and block["bbox"].y0 < (header_rule_y or 200):
             continue
@@ -1471,6 +1502,9 @@ def _pull_kept_action_forward(doc: fitz.Document) -> None:
         if page.number == 0:
             continue
         text = page.get_text("text") or ""
+        # Skip Excess / Failed pages — they share the AV header but are not Action.
+        if _is_notice_or_excess_page(text):
+            continue
         if anchor is None and re.search(r"annual valuation report", text, re.I):
             anchor = page
             continue

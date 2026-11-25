@@ -121,7 +121,14 @@ expected_order:
   - name: "410(b)"
     aliases: ["410(b)", "410b", "410B", "410"]
   - name: Variance
-    aliases: ["Variance Report", "Variance", "MaVar"]
+    aliases:
+      - "Variance Report"
+      - "Variance"
+      - "MaVar"
+      - "Annual Allocation"
+      - "Annual Allocation Variance"
+      - "AllocVar"
+      - "Allocation Variance"
   - name: Compensation Limit Failure Summary
     aliases: ["Compensation Limit Failure", "SHMaVar", "SHMa"]
   - name: PS Variance
@@ -131,7 +138,12 @@ expected_order:
   - name: "402(g)"
     aliases: ["402(g)", "402g", "402G", "402"]
   - name: Contribution Analysis
-    aliases: ["Contribution Analysis", "ContriAnalysis", "Contri"]
+    aliases:
+      - "Contribution Analysis"
+      - "Contribution Analysis By Source"
+      - "ContriAnalysis"
+      - "Contri"
+      - "ContribAnalysis"
   - name: Top Heavy
     aliases: ["Top Heavy", "Top-Heavy", "TH"]
   - name: "415"

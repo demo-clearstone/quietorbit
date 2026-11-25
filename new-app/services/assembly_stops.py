@@ -79,7 +79,7 @@ _REPORTS: list[tuple[str, str, str]] = [
     ("Future HCE Report", r"future\s*hce|fyhce", r"future\s*hce|fyhce"),
     ("Top Heavy Report", r"top\s*-?\s*heavy|(^|[^a-z])th([^a-z]|$)", r"top\s*-?\s*heavy"),
     ("Census Report", r"census", r"\bcensus\b"),
-    ("Contribution Analysis Report", r"contri", r"contribution analysis"),
+    ("Contribution Analysis Report", r"contri", r"contribution analysis(?:\s+by\s+source)?"),
 ]
 _REAL_REPORT_HEADS = tuple(
     re.compile(pattern, re.I)
@@ -92,11 +92,16 @@ _REAL_REPORT_HEADS = tuple(
         r"^(?:future\s+hce|future highly compensated employees?)\b",
         r"^top\s*[- ]?heavy(?:\s+test|\s+determination)?\b",
         r"^(?:employee\s+)?census(?:\s+report)?\b",
-        r"^contribution analysis(?:\s+report)?\b",
+        r"^contribution analysis(?:\s+by\s+source)?(?:\s+report)?\b",
     )
 )
 _EXTRA_REPORTS: list[tuple[str, str, str, str]] = [
-    ("Variance Client Copy", r"variance", r"variance", r"\bvariance\b"),
+    (
+        "Variance Client Copy",
+        r"variance|annual\s*allocation|allocvar",
+        r"variance|annual\s*allocation|allocvar",
+        r"\bvariance\b|\bannual\s+allocation\b|\ballocation\s+variance\b",
+    ),
     ("414(s) Test Report", r"414\s*\(?s\)?", r"414\s*\(?s\)?", r"414\s*\(?s\)?"),
     ("401(a)(4) Test Report", r"401\s*\(?a\)?\s*\(?4\)?|401a4", r"401\s*\(?a\)?\s*\(?4\)?", r"401\s*\(?a\)?\s*\(?4\)?|401a4"),
     ("ABP Test Report", r"average benefit|abpt", r"average benefit|abpt", r"average benefit|\babpt\b"),
@@ -1019,9 +1024,25 @@ def _missing_report_reasons(
         required = []
     missing = [label for label in required if label not in present]
     summary = _summary_text(doc)
+    # 401(k): when Result Summary mentions both ADP and ACP, require both reports
+    # (a lone ACP upload must not satisfy the combined ADP/ACP bucket).
+    if (
+        "ADP/ACP Test Report" in required
+        and "ADP/ACP Test Report" in present
+        and not package_flags(profile.plan_type).get("ignore_adp_results")
+        and summary
+        and re.search(r"\badp\b", summary, re.I)
+        and re.search(r"\bacp\b", summary, re.I)
+    ):
+        if not _has_separate_adp_and_acp(doc, source_files):
+            missing.append("ADP Test Report and ACP Test Report (both required)")
     for label, summary_pattern, _file_pattern, _head_pattern in _EXTRA_REPORTS:
         mentioned = bool(summary and re.search(summary_pattern, summary, re.I))
-        if label == "Variance Client Copy" and (profile.variance_report is True or profile.true_up is True):
+        if label == "Variance Client Copy" and (
+            profile.variance_report is True
+            or profile.true_up is True
+            or profile.annual_allocation is True
+        ):
             mentioned = True
         if mentioned and label not in present:
             missing.append(label)
@@ -1106,6 +1127,43 @@ def _report_filename_present(label: str, source_files: list[str], pattern: str) 
             continue
         return True
     return False
+
+
+def _has_separate_adp_and_acp(doc: fitz.Document, source_files: list[str]) -> bool:
+    """True when the package has both ADP and ACP coverage (combined or separate files).
+
+    A lone ACP (or ADP) upload must not satisfy 401(k) packages whose Result Summary
+    lists both tests — UAT 800949.
+    """
+    combined_file = False
+    adp_file = False
+    acp_file = False
+    for filename in source_files:
+        if re.search(r"failure|failed|letter|notice|sample|excess|correction", filename, re.I):
+            continue
+        if re.search(r"adp\s*[/_\- ]?\s*acp|adpacp", filename, re.I):
+            combined_file = True
+        elif re.search(r"\badp\b", filename, re.I):
+            adp_file = True
+        elif re.search(r"\bacp\b", filename, re.I):
+            acp_file = True
+    if combined_file or (adp_file and acp_file):
+        return True
+
+    adp_page = False
+    acp_page = False
+    both_page = False
+    for page in doc:
+        text = page.get_text("text") or ""
+        lines = [line.strip() for line in text.splitlines() if line.strip()][:4]
+        head = "\n".join(lines)
+        if re.search(r"(?im)^\s*adp\s*/\s*acp\s+", head):
+            both_page = True
+        elif re.search(r"(?im)^\s*adp\s+(?:nondiscrimination\s+)?(?:test|summary|tests?)\b", head):
+            adp_page = True
+        elif re.search(r"(?im)^\s*acp\s+(?:nondiscrimination\s+)?(?:test|summary|tests?)\b", head):
+            acp_page = True
+    return both_page or (adp_page and acp_page)
 
 
 def _summary_text(doc: fitz.Document) -> str:

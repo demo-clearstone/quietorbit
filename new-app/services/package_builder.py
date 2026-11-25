@@ -1425,7 +1425,19 @@ def write_recap_page(
         if re.fullmatch(r"\d{5,7}", line):
             _center(page, line, RECAP_NUMBER_Y, RECAP_NUMBER_SIZE, "helv")
             continue
-        is_plan_name = bool(re.search(r"\b(?:401\s*\(?k\)?|403\s*\(?b\)?|457)\b.*\bplan\b", line, re.I))
+        is_plan_name = bool(
+            re.search(r"\b(?:401\s*\(?k\)?|403\s*\(?b\)?|457)\b.*\bplan\b", line, re.I)
+            or re.search(r"\bplan\b", line, re.I)
+            and len(line) >= 12
+            and not re.search(
+                r"year[- ]end recap|important information|plan year|period ending|"
+                r"january|february|march|april|may|june|july|august|september|"
+                r"october|november|december|\d{1,2}/\d{1,2}/\d{2,4}",
+                line,
+                re.I,
+            )
+            and not re.fullmatch(r"\d{5,7}", line)
+        )
         if is_plan_name:
             # Client expected packages keep the plan name regular weight.
             _center(page, line, RECAP_PLAN_Y, RECAP_PLAN_SIZE, "helv")

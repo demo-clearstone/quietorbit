@@ -46,7 +46,8 @@ _SECTION_HEADINGS: dict[str, re.Pattern[str]] = {
     "Cover Letter": re.compile(r"^(?:cover letter|cover page)$", re.I),
     "Test Summary": re.compile(r"^(?:compliance testing summary of results|compliance summary|test summary)$", re.I),
     "Contribution Analysis": re.compile(
-        rf"^contribution analysis(?:\s+report)?(?:\s+loc(?:ation)?\s*\d+)?{_HEADING_TAIL}",
+        rf"^contribution analysis(?:\s+by\s+source)?(?:\s+report)?"
+        rf"(?:\s+loc(?:ation)?\s*\d+)?{_HEADING_TAIL}",
         re.I,
     ),
     "HCE/Key": re.compile(

@@ -179,7 +179,13 @@ def has_variance_client_copy(filenames: list[str], doc: fitz.Document) -> bool:
         text = page.get_text("text") or ""
         if re.search(r"action required", text, re.I):
             continue
-        if re.search(r"(?<!no )variance report|\bps\s*variance\b|\bshne\s*variance\b", text, re.I):
+        if re.search(
+            r"(?<!no )variance report|\bps\s*variance\b|\bshne\s*variance\b|"
+            r"\bannual\s+allocation\s+(?:variance\s+)?report\b|"
+            r"\ballocation\s+variance\b",
+            text,
+            re.I,
+        ):
             return True
     return False
 
@@ -984,7 +990,21 @@ def _assembly_order_check(doc: fitz.Document, profile: "PlanProfile") -> Validat
             recognized.append((page_index + 1, "Top Heavy", order["Top Heavy"]))
             continue
         action_head = any(re.search(r"(?:immediate action required|no immediate action is required)", line, re.I) for line in head_lines)
-        if action_head or (head_lines and re.fullmatch(r"annual valuation report", head_lines[0], re.I)):
+        # Excess / Failed / sample letters share the AV header — do not classify as Action.
+        notice_head = any(
+            re.search(
+                r"failed compliance testing|excess return notice|excess return summary|"
+                r"sample/draft communication|variance\s+report|annual\s+allocation",
+                line,
+                re.I,
+            )
+            for line in lines[:10]
+        )
+        if action_head or (
+            head_lines
+            and re.fullmatch(r"annual valuation report", head_lines[0], re.I)
+            and not notice_head
+        ):
             recognized.append((page_index + 1, "Action Required", order["Action Required"]))
             continue
         if any(re.search(r"combined testing report", line, re.I) for line in head_lines):
