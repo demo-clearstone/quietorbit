@@ -40,6 +40,8 @@ _PURPOSE = {
     "services/package_polish.py:exclude_brf_uploads": "Removing a 401(k) BRF file from the uploads",
     "services/file_order.py:order_uploads": "Ordering the PDFs into report sequence",
     "services/midyear.py:order_uploads": "Ordering the mid-year letter files",
+    "services/upload_dedupe.py:exclude_finished_packages": "Skipping finished valuation PDFs when source files are present",
+    "services/upload_dedupe.py:dedupe_ordered_pages": "Removing duplicate pages before the merge",
     "services/pdf_assembler.py:merge_pdfs": "Merging the ordered PDFs into one package",
     "services/midyear.py:reorder_pages": "Reordering pages in the mid-year letter",
     "services/package_polish.py:reorder_inner_pages": "Ordering location pages inside each section",

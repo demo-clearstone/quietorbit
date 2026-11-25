@@ -6,18 +6,30 @@ from services.pdf_modifier import _redraw_action_rules, _strip_im_fragments
 
 
 def _underline_spans(page: fitz.Page) -> list[tuple[float, float, float]]:
+    """Collect short underlines from stroked lines or filled thin rects."""
     spans: list[tuple[float, float, float]] = []
     for drawing in page.get_drawings():
-        if drawing.get("color") in {(1, 1, 1), (1.0, 1.0, 1.0)}:
-            continue
+        stroke = drawing.get("color")
+        fill = drawing.get("fill")
+        white = {(1, 1, 1), (1.0, 1.0, 1.0)}
         for item in drawing.get("items", []):
-            if not item or item[0] != "l":
+            if not item:
                 continue
-            start, end = fitz.Point(item[1]), fitz.Point(item[2])
-            if abs(start.y - end.y) >= 1:
-                continue
-            left, right = sorted((start.x, end.x))
-            spans.append((left, right, start.y))
+            if item[0] == "l" and len(item) >= 3:
+                if stroke in white:
+                    continue
+                start, end = fitz.Point(item[1]), fitz.Point(item[2])
+                if abs(start.y - end.y) >= 1:
+                    continue
+                left, right = sorted((start.x, end.x))
+                spans.append((left, right, start.y))
+            elif item[0] == "re" and len(item) >= 2:
+                if fill in white or fill is None:
+                    continue
+                rect = fitz.Rect(item[1])
+                if rect.height > 3.5 or rect.width < 20:
+                    continue
+                spans.append((rect.x0, rect.x1, (rect.y0 + rect.y1) / 2.0))
     return spans
 
 
@@ -39,12 +51,22 @@ def test_action_heading_rule_replaces_wrong_length_source_line() -> None:
     assert any(abs(left - 54) <= 1 and 95 <= right - left <= 120 for left, right, _y in spans)
 
 
-def test_action_heading_rule_is_drawn_when_source_line_is_missing() -> None:
+def test_action_heading_rule_is_not_invented_when_source_line_is_missing() -> None:
     doc = fitz.open()
     page = doc.new_page()
     page.insert_text((54, 100), "ACTION REQUIRED", fontsize=11, fontname="hebo")
 
     _redraw_action_rules(page)
+
+    assert _underline_count(page) == 0
+
+
+def test_action_heading_rule_can_be_invented_when_requested() -> None:
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((54, 100), "ACTION REQUIRED", fontsize=11, fontname="hebo")
+
+    _redraw_action_rules(page, invent=True)
 
     assert _underline_count(page) == 1
 

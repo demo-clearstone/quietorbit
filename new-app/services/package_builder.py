@@ -1327,10 +1327,14 @@ def _write_ua_recap_section(
         color=_BLACK,
     )
     y += leading + 2
-    width = max(320.0, page.rect.width - RECAP_UA_BODY_X - 36)
+    # Wrap at the recap header-rule right edge (≈504), not the page margin —
+    # otherwise UA lines run past the source/expected right column.
+    width = max(320.0, RECAP_HEADER_RULE_X1 - RECAP_UA_BODY_X)
+    ua_size = RECAP_UA_NEST_SIZE
+    ua_leading = max(leading, ua_size + 1.5)
     if intro:
-        y = _write_recap_bullet_body(page, intro, RECAP_UA_BODY_X, y, size, leading, width)
-    nest_width = max(280.0, page.rect.width - RECAP_UA_NEST_TEXT_X - 36)
+        y = _write_recap_bullet_body(page, intro, RECAP_UA_BODY_X, y, ua_size, ua_leading, width)
+    nest_width = max(280.0, RECAP_HEADER_RULE_X1 - RECAP_UA_NEST_TEXT_X)
     nest_size = RECAP_UA_NEST_SIZE
     nest_leading = max(leading, nest_size + 1.5)
     for item in exclusions:

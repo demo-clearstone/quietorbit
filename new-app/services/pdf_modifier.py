@@ -540,12 +540,12 @@ def _merged_vertical_bands(boxes: list[fitz.Rect]) -> list[tuple[float, float]]:
     return merged
 
 
-def _top_header_rule_y(page: fitz.Page) -> float | None:
-    """Find the full-width header divider near the top of an Annual Valuation Report page."""
+def _top_header_rule(page: fitz.Page) -> tuple[float, float] | None:
+    """Return ``(y, x0)`` for the full-width AV header divider, or ``None``."""
     text = page.get_text("text") or ""
     if not re.search(r"annual valuation report", text, re.I):
         return None
-    found: list[float] = []
+    found: list[tuple[float, float]] = []
     for drawing in page.get_drawings():
         for item in drawing.get("items", []):
             if not item or item[0] != "l" or len(item) < 3:
@@ -555,8 +555,51 @@ def _top_header_rule_y(page: fitz.Page) -> float | None:
                 continue
             left, right = sorted((start.x, end.x))
             if left <= 52 and right >= page.rect.width - 52 and start.y < page.rect.height * 0.4:
-                found.append(start.y)
-    return max(found) if found else None
+                found.append((start.y, left))
+    if not found:
+        return None
+    # Prefer the lowest (main) header rule when several full-width strokes exist.
+    found.sort(key=lambda item: item[0])
+    return found[-1]
+
+
+def _top_header_rule_y(page: fitz.Page) -> float | None:
+    """Find the full-width header divider near the top of an Annual Valuation Report page."""
+    found = _top_header_rule(page)
+    return found[0] if found else None
+
+
+def _top_header_rule_x0(page: fitz.Page) -> float | None:
+    """Left edge of the AV header divider (ACTION column is inset from this)."""
+    found = _top_header_rule(page)
+    return found[1] if found else None
+
+
+# OPS client packages inset ACTION / NO IMMEDIATE slightly past the header rule
+# (rule at 36 → column ≈ 38). Source Valuation Pkgs often sit flush on the rule.
+_ACTION_RULE_INSET = 2.0
+
+
+def _ops_action_column_x(page: fitz.Page, preferred: float | None = None) -> float:
+    """Resolve the Action Required left column for all-clear pages.
+
+    When source headings sit flush on the header rule, nudge to the OPS inset
+    (rule + 2 ≈ 38). Keep an already-inset source column as-is.
+    """
+    rule_x = _top_header_rule_x0(page)
+    if rule_x is not None:
+        ops = float(rule_x) + _ACTION_RULE_INSET
+        if preferred is None:
+            return ops
+        preferred = float(preferred)
+        if abs(preferred - ops) <= 1.0:
+            return preferred
+        if abs(preferred - float(rule_x)) <= 1.0:
+            return ops
+        return preferred
+    if preferred is not None:
+        return float(preferred)
+    return _action_column_x(page)
 
 
 def _is_page_number_block(page: fitz.Page, block: dict) -> bool:
@@ -625,6 +668,7 @@ def _text_blocks(page: fitz.Page) -> list[dict]:
                         "font": str(span.get("font") or ""),
                         "flags": int(span.get("flags") or 0),
                         "color": span.get("color") or 0,
+                        "bbox": fitz.Rect(span["bbox"]),
                     }
                 )
         if not spans:
@@ -695,10 +739,27 @@ def _write_span(page: fitz.Page, span: dict, delta: float) -> None:
     """
     point = fitz.Point(span["origin"].x, span["origin"].y + delta)
     fontname = _base_font(span["font"], span["flags"])
+    # Built-in Helvetica lacks many typographic glyphs; map smart quotes so
+    # restack/pack does not substitute middle-dots for apostrophes.
+    text = str(span.get("text") or "")
+    text = (
+        text.replace("\u2018", "'")
+        .replace("\u2019", "'")
+        .replace("\u201c", '"')
+        .replace("\u201d", '"')
+        .replace("\u2013", "-")
+        .replace("\u2014", "-")
+    )
+    # Recap bullets come from embedded TrueType Symbol. Rewriting with the
+    # built-in Type1 Symbol + WinAnsiEncoding turns · into a "<"-like glyph in
+    # many viewers — draw a filled disc matching the source ink size instead.
+    if _is_bullet_glyph_text(text):
+        _draw_bullet_disc_for_span(page, span, delta)
+        return
     try:
         page.insert_text(
             point,
-            span["text"],
+            text,
             fontsize=span["size"],
             fontname=fontname,
             color=_rgb(span["color"]),
@@ -707,12 +768,58 @@ def _write_span(page: fitz.Page, span: dict, delta: float) -> None:
     except Exception:
         page.insert_text(
             point,
-            span["text"],
+            text,
             fontsize=span["size"],
             fontname="helv",
             color=_rgb(span["color"]),
             overlay=True,
         )
+
+
+def _draw_bullet_disc_for_span(page: fitz.Page, span: dict, delta: float = 0.0) -> None:
+    """Draw a filled disc matching a source Symbol bullet glyph.
+
+    Position from origin (+delta) so packed/restacked spans stay aligned even
+    when a stale source bbox is still attached to the span dict.
+    """
+    size = float(span.get("size") or 7.35)
+    origin = span["origin"]
+    ox = float(origin.x if hasattr(origin, "x") else origin[0])
+    oy = float(origin.y if hasattr(origin, "y") else origin[1]) + float(delta)
+    bbox = span.get("bbox")
+    if bbox is not None:
+        rect = fitz.Rect(bbox)
+        # Ink diameter ≈ half the glyph box (TrueType · ≈ 3.38 @ 7.35).
+        diam = max(2.8, min(4.2, (rect.width + rect.height) / 2.0 * 0.55))
+    else:
+        # TrueType Symbol · width ≈ 0.46 × fontsize (7.35→3.38, 8.15→3.75).
+        diam = max(2.8, min(4.2, size * 0.46))
+    cx = ox + diam / 2.0
+    cy = oy - size * 0.35
+    page.draw_oval(
+        fitz.Rect(cx - diam / 2.0, cy - diam / 2.0, cx + diam / 2.0, cy + diam / 2.0),
+        color=(0, 0, 0),
+        fill=(0, 0, 0),
+        width=0,
+    )
+
+
+def _is_bullet_glyph_text(text: str) -> bool:
+    """True for a lone list-bullet glyph (Recap · / • marks)."""
+    value = (text or "").strip()
+    if len(value) != 1:
+        return False
+    return value in {"·", "•", "●", "∙", "▪", "▫", "■", "□"} or ord(value) in {
+        0x00B7,
+        0x2022,
+        0x25CF,
+        0x2219,
+        0xF0B7,
+        0x25AA,
+        0x25AB,
+        0x25A0,
+        0x25A1,
+    }
 
 
 def _base_font(font: str, flags: int) -> str:
@@ -738,6 +845,10 @@ def _base_font(font: str, flags: int) -> str:
         None. This function only reads data and returns a value.
     """
     name = (font or "").lower()
+    if "symbol" in name or name == "symb":
+        return "symb"
+    if "zapf" in name or "dingbat" in name or name == "zadb":
+        return "zadb"
     bold = bool(flags & 16) or "bold" in name
     italic = bool(flags & 2) or "italic" in name or "oblique" in name
     serif = any(token in name for token in ("times", "roman", "georgia", "cambria", "garamond", "palatino"))
@@ -1090,12 +1201,12 @@ def _cover_or_redact_rules(page: fitz.Page, boxes: list[fitz.Rect], *, redact: b
 
 
 def _finalize_no_immediate_pages(doc: fitz.Document) -> None:
-    """Ensure all-clear AV pages match Kaagaz ACTION layout.
+    """Ensure all-clear AV pages match OPS ACTION column geometry.
 
-    Expected (Annual Valuation all-clear):
-    - ACTION REQUIRED (bold, underlined)
-    - NO IMMEDIATE ACTION IS REQUIRED AT THIS TIME (green, underlined)
-    - both left-aligned to the same Action Required column
+    - ACTION REQUIRED present (insert only when missing)
+    - ACTION / NO IMMEDIATE share the OPS column (header-rule inset ≈ 38)
+    - Do not invent underlines — many OPS packages have none on all-clear pages
+    - Never leave duplicate green glyphs after a left-shift rewrite
     """
     for page in doc:
         text = page.get_text("text") or ""
@@ -1129,20 +1240,18 @@ def _finalize_no_immediate_pages(doc: fitz.Document) -> None:
                     float(block["bbox"].x0),
                     float(block["bbox"].x1),
                 )
-        # Shared left column: prefer existing ACTION REQUIRED, else body column / green.
-        if action is not None:
-            column_x = float(action["bbox"].x0)
-        else:
-            column_x = min(float(green["bbox"].x0), _action_column_x(page))
-            # Typical OPS left margin when green drifted right after packing.
+        # OPS column: inset from the AV header rule when source sits flush on it.
+        preferred = float(action["bbox"].x0) if action is not None else float(green["bbox"].x0)
+        column_x = _ops_action_column_x(page, preferred)
+        if column_x > 70:
+            column_x = min(column_x, _action_column_x(page))
             if column_x > 70:
                 column_x = 54.0
         has_heading = action is not None
         if not has_heading:
             green_top = float(green["bbox"].y0)
             header_rule_y = _top_header_rule_y(page)
-            # Prefer Kaagaz packing under the header, but never drop ACTION into the
-            # green line (that made underline redaction eat both phrases).
+            # Prefer packing under the header, but never drop ACTION into the green line.
             if header_rule_y is not None:
                 heading_baseline = header_rule_y + 28.0
                 if heading_baseline + 4.0 >= green_top:
@@ -1152,10 +1261,13 @@ def _finalize_no_immediate_pages(doc: fitz.Document) -> None:
             else:
                 heading_baseline = green_top - 14.0
             _write_action_heading(page, heading_baseline, x=column_x)
-        # Force green (and ACTION if present) onto the same left edge.
+        # Force green (and ACTION if present) onto the same OPS left edge.
         _left_align_action_phrases(page, column_x)
-        # Kaagaz p2: both ACTION and the green line are underlined to phrase width.
-        _redraw_action_rules(page, only_failure=False)
+        # Pull green closer under ACTION when packing left a large gap.
+        _tighten_no_immediate_under_action(page)
+        # Always restore OPS filled underlines under ACTION / NO IMMEDIATE.
+        # Restack often wipes the source bars; expected all-clear pages keep both.
+        _redraw_action_rules(page, only_failure=False, invent=True)
 
 
 def _left_align_action_phrases(page: fitz.Page, column_x: float) -> None:
@@ -1171,13 +1283,43 @@ def _left_align_action_phrases(page: fitz.Page, column_x: float) -> None:
         dx = float(column_x) - float(block["bbox"].x0)
         if abs(dx) < 0.75:
             continue
-        _apply_redact_boxes(page, [block["bbox"]], cover=False)
+        # cover=True so the original glyphs are gone — otherwise green appears twice.
+        _apply_redact_boxes(page, [block["bbox"]], cover=True)
         for span in block["spans"]:
             moved = {
                 **span,
                 "origin": fitz.Point(float(span["origin"].x) + dx, float(span["origin"].y)),
             }
             _write_span(page, moved, 0)
+
+
+def _tighten_no_immediate_under_action(page: fitz.Page) -> None:
+    """Reduce vertical gap between ACTION REQUIRED and the green NO IMMEDIATE line."""
+    action = None
+    green = None
+    for block in _text_blocks(page):
+        joined = " ".join(span["text"] for span in block["spans"]).strip()
+        if action is None and re.fullmatch(r"ACTION REQUIRED", joined, re.I):
+            action = block
+        if green is None and re.match(r"NO IMMEDIATE ACTION IS REQUIRED AT THIS TIME", joined, re.I):
+            green = block
+    if action is None or green is None:
+        return
+    # Target ~12pt from ACTION baseline band to green top (source/Kaagaz packing).
+    target_top = float(action["bbox"].y1) + 10.0
+    gap = float(green["bbox"].y0) - float(action["bbox"].y1)
+    if gap <= 14.0:
+        return
+    dy = target_top - float(green["bbox"].y0)
+    if abs(dy) < 0.75:
+        return
+    _apply_redact_boxes(page, [green["bbox"]], cover=True)
+    for span in green["spans"]:
+        moved = {
+            **span,
+            "origin": fitz.Point(float(span["origin"].x), float(span["origin"].y) + dy),
+        }
+        _write_span(page, moved, 0)
 
 
 def _pack_action_across_pages(doc: fitz.Document) -> None:
@@ -1431,40 +1573,77 @@ def _action_heading_lines(page: fitz.Page) -> list[dict]:
     return found
 
 
-def _short_rules_near_heading(page: fitz.Page, top: float, bottom: float, x0: float, x1: float) -> list[fitz.Rect]:
-    """Short horizontal rules near a heading, including ones that are too long or too short."""
+def _underline_shape_rects(page: fitz.Page) -> list[fitz.Rect]:
+    """Collect short heading underlines — both stroked lines and filled thin rects.
+
+    OPS / Valuation Pkg PDFs often draw ACTION underlines as filled rectangles
+    (not ``l`` strokes), so line-only detection misses them.
+    """
     boxes: list[fitz.Rect] = []
     for drawing in page.get_drawings():
-        if drawing.get("color") in {(1, 1, 1), (1.0, 1.0, 1.0)}:
+        stroke = drawing.get("color")
+        fill = drawing.get("fill")
+        white = {(1, 1, 1), (1.0, 1.0, 1.0)}
+        if stroke in white and (fill is None or fill in white):
             continue
         for item in drawing.get("items") or []:
-            if not item or item[0] != "l" or len(item) < 3:
+            if not item:
                 continue
-            start, end = fitz.Point(item[1]), fitz.Point(item[2])
-            if abs(start.y - end.y) > 1.5:
-                continue
-            y = start.y
-            if y < top - 1.0 or y > bottom + 4.0:
-                continue
-            if abs(end.x - start.x) >= page.rect.width * 0.7:
-                continue
-            left, right = sorted((start.x, end.x))
-            if right < x0 - 8 or left > x1 + 40:
-                continue
-            boxes.append(fitz.Rect(left - 1, y - 1.5, right + 1, y + 1.5))
+            if item[0] == "l" and len(item) >= 3:
+                if stroke in white:
+                    continue
+                start, end = fitz.Point(item[1]), fitz.Point(item[2])
+                if abs(start.y - end.y) > 1.5:
+                    continue
+                width = abs(end.x - start.x)
+                if width < 20 or width >= page.rect.width * 0.7:
+                    continue
+                left, right = sorted((start.x, end.x))
+                y = start.y
+                boxes.append(fitz.Rect(left, y - 0.75, right, y + 0.75))
+            elif item[0] == "re" and len(item) >= 2:
+                # Filled thin bars used as underlines in source/expected packages.
+                if fill in white or fill is None:
+                    continue
+                rect = fitz.Rect(item[1])
+                if rect.height > 3.5 or rect.height < 0.2:
+                    continue
+                if rect.width < 20 or rect.width >= page.rect.width * 0.7:
+                    continue
+                boxes.append(fitz.Rect(rect))
     return boxes
 
 
-def _redraw_action_rules(page: fitz.Page, *, only_failure: bool = False) -> None:
+def _short_rules_near_heading(page: fitz.Page, top: float, bottom: float, x0: float, x1: float) -> list[fitz.Rect]:
+    """Short horizontal rules near a heading, including ones that are too long or too short."""
+    boxes: list[fitz.Rect] = []
+    for rect in _underline_shape_rects(page):
+        y = (rect.y0 + rect.y1) / 2.0
+        if y < top - 1.0 or y > bottom + 4.0:
+            continue
+        if rect.x1 < x0 - 8 or rect.x0 > x1 + 40:
+            continue
+        boxes.append(fitz.Rect(rect.x0 - 1, rect.y0 - 0.5, rect.x1 + 1, rect.y1 + 0.5))
+    return boxes
+
+
+def _redraw_action_rules(
+    page: fitz.Page,
+    *,
+    only_failure: bool = False,
+    invent: bool = False,
+) -> None:
     """Put Action Required underlines back after packing, matching each phrase width.
 
     Purpose:
-        Put Action Required underlines back after packing, matching each phrase width.
+        Restore or correct underlines after packing. By default does not invent
+        plain ACTION / NO IMMEDIATE underlines when the source had none.
 
     Args:
         page: One PDF page.
         only_failure: When True, only IMMEDIATE/ATTENTION headings get underlines.
-            Plain ACTION / NO IMMEDIATE source underlines are left untouched.
+        invent: When True, draw missing plain ACTION / NO IMMEDIATE underlines.
+            Default False keeps source-faithful all-clear pages (often no rules).
 
     Returns:
         None.
@@ -1491,38 +1670,45 @@ def _redraw_action_rules(page: fitz.Page, *, only_failure: bool = False) -> None
         x1 = float(heading["x1"])
         top = float(heading["y0"])
         bottom = float(heading["y1"])
-        y = bottom + 2.0
+        # OPS places the bar at the bottom of the glyph bbox (slightly overlapping).
         upper = text.upper()
         is_failure = upper.startswith("IMMEDIATE ACTION") or upper.startswith("ATTENTION REQUIRED")
+        thickness = 1.0 if upper.startswith("NO IMMEDIATE") else 1.4
+        y = bottom - thickness
         if only_failure and not is_failure:
             continue
+        near = _short_rules_near_heading(page, bottom - 3.0, bottom + 2.5, x0, x1)
+        if not is_failure and not invent and not near:
+            # Source-faithful: do not invent underlines on all-clear pages.
+            continue
         # Only rules at/below the baseline band — never the ink itself.
-        wipe.extend(_short_rules_near_heading(page, bottom - 0.5, y, x0, x1))
+        wipe.extend(near)
         color = (0, 0.45, 0.15) if upper.startswith("NO IMMEDIATE") else (0, 0, 0)
         if upper.startswith("IMMEDIATE ACTION"):
             color = (0.8, 0, 0)
-        planned.append((x0, x1, y, color))
+        planned.append((x0, x1, y, color, thickness))
     # White-cover leftover rules. Never apply_redactions here — a rule that still
     # clips glyph ink would delete ACTION / NO IMMEDIATE characters.
     _cover_or_redact_rules(page, wipe, redact=False)
-    for x0, x1, y, color in planned:
-        page.draw_line(fitz.Point(x0, y), fitz.Point(x1, y), color=color, width=0.8)
+    for x0, x1, y, color, thickness in planned:
+        # OPS packages use a thin filled bar (not only a stroked line).
+        page.draw_rect(
+            fitz.Rect(x0, y, x1, y + thickness),
+            color=color,
+            fill=color,
+            width=0,
+            overlay=True,
+        )
 
 
 def _has_horizontal_rule(page: fitz.Page, y: float, x0: float, x1: float) -> bool:
     """Check whether a horizontal vector rule already underlines this heading."""
-    for drawing in page.get_drawings():
-        if drawing.get("color") in {(1, 1, 1), (1.0, 1.0, 1.0)}:
+    for rect in _underline_shape_rects(page):
+        mid = (rect.y0 + rect.y1) / 2.0
+        if abs(mid - y) > 4:
             continue
-        for item in drawing.get("items", []):
-            if not item or item[0] != "l" or len(item) < 3:
-                continue
-            start, end = fitz.Point(item[1]), fitz.Point(item[2])
-            if abs(start.y - end.y) > 1.5 or abs(start.y - y) > 4:
-                continue
-            left, right = sorted((start.x, end.x))
-            if right >= x0 - 2 and left <= x1 + 2:
-                return True
+        if rect.x1 >= x0 - 2 and rect.x0 <= x1 + 2:
+            return True
     return False
 
 
@@ -1534,30 +1720,19 @@ def _cover_rules_through_band(
     x1: float,
 ) -> None:
     """White-out short horizontal rules that cut through a heading band."""
-    for drawing in page.get_drawings():
-        if drawing.get("color") in {(1, 1, 1), (1.0, 1.0, 1.0)}:
+    for rect in _underline_shape_rects(page):
+        mid = (rect.y0 + rect.y1) / 2.0
+        if mid < top - 0.5 or mid > bottom + 0.5:
             continue
-        for item in drawing.get("items") or []:
-            if not item or item[0] != "l" or len(item) < 3:
-                continue
-            start, end = fitz.Point(item[1]), fitz.Point(item[2])
-            if abs(start.y - end.y) > 1.5:
-                continue
-            y = start.y
-            if y < top - 0.5 or y > bottom + 0.5:
-                continue
-            if abs(end.x - start.x) >= page.rect.width * 0.7:
-                continue
-            left, right = sorted((start.x, end.x))
-            if right < x0 - 4 or left > x1 + 4:
-                continue
-            page.draw_line(
-                fitz.Point(left - 1, y),
-                fitz.Point(right + 1, y),
-                color=(1, 1, 1),
-                width=2.4,
-                overlay=True,
-            )
+        if rect.x1 < x0 - 4 or rect.x0 > x1 + 4:
+            continue
+        page.draw_rect(
+            fitz.Rect(rect.x0 - 1, rect.y0 - 1, rect.x1 + 1, rect.y1 + 1),
+            color=(1, 1, 1),
+            fill=(1, 1, 1),
+            width=0,
+            overlay=True,
+        )
 
 
 def _drop_empty_pages(doc: fitz.Document) -> None:
@@ -2100,12 +2275,12 @@ def apply_recap_bullets(
         wording_changed = False
         have_exclusive = False
         for bullet in bullets:
-            # Normalize only for rule matching; do not treat spacing as a rewrite.
-            bullet = _normalize_recap_bullet_spaces(bullet)
-            spec = _matching_recap(bullet, specs)
+            # Normalize only for rule matching; keep source spacing/quotes on kept text.
+            normalized = _normalize_recap_bullet_spaces(bullet)
+            spec = _matching_recap(normalized, specs)
             rule_id = str(spec["id"]) if spec else None
-            exclusive_like = rule_id in _EXCLUSIVE_RECAP or _looks_like_exclusive_hce(bullet)
-            if spec is None and re.search(r"(?:^|\s)%(?:\s|$)", bullet):
+            exclusive_like = rule_id in _EXCLUSIVE_RECAP or _looks_like_exclusive_hce(normalized)
+            if spec is None and re.search(r"(?:^|\s)%(?:\s|$)", normalized):
                 dropped.append(bullet)
                 continue
             if rule_id and rule_id in remove_ids:
@@ -2155,7 +2330,7 @@ def apply_recap_bullets(
                 filled = _fill_prior_rates(bullet, nhce)
                 if filled != bullet:
                     wording_changed = True
-                bullet = filled
+                    bullet = filled
             kept.append(bullet)
         if wanted_exclusive and wanted_exclusive not in remove_ids and not have_exclusive:
             # Exclusive keep-rule matched, but the page never had Future-HCE wording.
@@ -2168,6 +2343,15 @@ def apply_recap_bullets(
         # No content change → leave source Recap alone, unless clipped fragments
         # remain from a prior partial keep/remove (Kaagaz expects a clean page).
         if not dropped and not wording_changed and not _recap_has_clip_fragments(page):
+            continue
+        # Drop-only edits: pack source glyphs in place so wrap endings/spacing match
+        # the uploaded package (and OPS expected). Full rebuild changes fonts/wraps.
+        if (
+            dropped
+            and not wording_changed
+            and not _recap_has_clip_fragments(page)
+            and _pack_recap_drops_inplace(page, dropped)
+        ):
             continue
         header_lines = [
             line.strip()
@@ -2184,15 +2368,150 @@ def apply_recap_bullets(
             if _is_viable_recap_bullet(_bullet)
         ]
         kept = _merge_universal_availability_bullets(kept)
-        # Always rebuild after keep/remove so bullets pack under Important Information
-        # (Kaagaz p4). In-place white-out left holes and clipped fragments like
-        # "employee can defer in 2026 cannot ex".
+        # Fallback rebuild when wording changed or in-place pack could not run.
         _wipe_page_contents(page)
         from services.package_builder import write_recap_page
 
         number = _recap_page_number(original)
         write_recap_page(page, header_lines, kept, number=number, plan_type=plan_type)
     return removed
+
+
+def _recap_body_top(page: fitz.Page) -> float:
+    """Y just below 'Important Information' where body bullets begin."""
+    top = 120.0
+    for block in _text_blocks(page):
+        text = " ".join(span["text"] for span in block["spans"]).strip()
+        if re.fullmatch(r"Important Information", text, re.I):
+            top = max(top, float(block["bbox"].y1) + 4.0)
+    return top
+
+
+def _recap_bullet_bands(page: fitz.Page) -> list[tuple[float, float, str]]:
+    """Return ``(y0, y1, start_text)`` for each Important Information bullet band."""
+    body_top = _recap_body_top(page)
+    footer = page.rect.y1 - 48.0
+    starts: list[tuple[float, str]] = []
+    for block in _text_blocks(page):
+        if float(block["bbox"].y0) < body_top - 1:
+            continue
+        if float(block["bbox"].y0) > footer:
+            continue
+        text = " ".join(span["text"] for span in block["spans"]).strip()
+        if not text or re.fullmatch(r"[\u2022•\u00b7\u25cf\u25e6\u2219\uf0b7╖■□▪▫*\-·●]+", text):
+            continue
+        if float(block["bbox"].x0) > 110:
+            continue
+        clean = _strip_recap_mark(text)
+        if _recap_paragraph_start(clean) or re.fullmatch(r"UNIVERSAL AVAILABILITY RULE", clean, re.I):
+            starts.append((float(block["bbox"].y0), clean))
+    if not starts:
+        return []
+    starts.sort(key=lambda item: item[0])
+    # Merge UA title with the following body start into one band.
+    merged_starts: list[tuple[float, str]] = []
+    index = 0
+    while index < len(starts):
+        y0, text = starts[index]
+        if re.fullmatch(r"UNIVERSAL AVAILABILITY RULE", text, re.I) and index + 1 < len(starts):
+            merged_starts.append((y0, f"UNIVERSAL AVAILABILITY RULE {starts[index + 1][1]}"))
+            index += 2
+            continue
+        merged_starts.append((y0, text))
+        index += 1
+    bands: list[tuple[float, float, str]] = []
+    for index, (y0, text) in enumerate(merged_starts):
+        y1 = merged_starts[index + 1][0] - 1.0 if index + 1 < len(merged_starts) else footer
+        # Include a little padding so bullet discs above the first line are covered.
+        bands.append((max(body_top, y0 - 4.0), max(y0 + 8.0, y1), text))
+    return bands
+
+
+def _pack_recap_drops_inplace(page: fitz.Page, dropped: list[str]) -> bool:
+    """Remove dropped Recap bullets and restack kept source bands — no rewrap.
+
+    Each kept bullet band is moved as a unit (same internal line breaks, x, and
+    fonts as the upload). Bands are packed under Important Information with the
+    source inter-band gap preserved between survivors.
+    """
+    if not dropped:
+        return False
+    bands = _recap_bullet_bands(page)
+    if len(bands) < 2:
+        return False
+    drop_norms = [_normalize_recap_bullet_spaces(item).lower()[:72] for item in dropped if item]
+    kept_bands: list[tuple[float, float, str]] = []
+    drop_ranges: list[tuple[float, float]] = []
+    for y0, y1, start in bands:
+        start_norm = _normalize_recap_bullet_spaces(start).lower()[:72]
+        if any(
+            start_norm.startswith(drop[:48]) or drop.startswith(start_norm[:48])
+            for drop in drop_norms
+            if drop
+        ):
+            drop_ranges.append((y0, y1))
+        else:
+            kept_bands.append((y0, y1, start))
+    if not drop_ranges or not kept_bands:
+        return False
+
+    body_top = _recap_body_top(page)
+    # Snapshot spans/discs per kept band before clearing the body.
+    band_spans: list[list[dict]] = []
+    band_discs: list[list[fitz.Rect]] = []
+    for y0, y1, _start in kept_bands:
+        spans: list[dict] = []
+        for block in _text_blocks(page):
+            mid = (float(block["bbox"].y0) + float(block["bbox"].y1)) / 2.0
+            if mid < y0 - 0.5 or mid > y1 + 0.5:
+                continue
+            for span in block["spans"]:
+                spans.append(dict(span))
+        discs: list[fitz.Rect] = []
+        for drawing in page.get_drawings():
+            fill = drawing.get("fill")
+            if fill not in {(0, 0, 0), (0.0, 0.0, 0.0)}:
+                continue
+            rect = fitz.Rect(drawing.get("rect") or (0, 0, 0, 0))
+            if not (2.5 <= rect.width <= 6 and 2.5 <= rect.height <= 6 and 50 <= rect.x0 <= 110):
+                continue
+            mid = (rect.y0 + rect.y1) / 2.0
+            if y0 - 0.5 <= mid <= y1 + 0.5:
+                discs.append(fitz.Rect(rect))
+        if not spans:
+            return False
+        band_spans.append(spans)
+        band_discs.append(discs)
+
+    # Source gap between consecutive original bands (for packing survivors).
+    source_gaps: list[float] = []
+    for index in range(len(bands) - 1):
+        source_gaps.append(max(6.0, bands[index + 1][0] - bands[index][1]))
+    default_gap = sorted(source_gaps)[len(source_gaps) // 2] if source_gaps else 10.0
+
+    body_rect = fitz.Rect(36, body_top - 2, page.rect.x1 - 28, page.rect.y1 - 36)
+    page.add_redact_annot(body_rect, fill=(1, 1, 1))
+    page.apply_redactions(images=0, graphics=1)
+    page.draw_rect(body_rect, color=(1, 1, 1), fill=(1, 1, 1), width=0, overlay=True)
+
+    cursor = body_top + 6.0
+    for index, (y0, y1, _start) in enumerate(kept_bands):
+        dy = y0 - cursor
+        content_bottom = y0 + 12.0
+        for span in band_spans[index]:
+            origin = span["origin"]
+            ox = float(origin.x if hasattr(origin, "x") else origin[0])
+            oy = float(origin.y if hasattr(origin, "y") else origin[1])
+            size = float(span.get("size") or 8.0)
+            content_bottom = max(content_bottom, oy + size * 0.25)
+            _write_span(page, {**span, "origin": fitz.Point(ox, oy - dy)}, 0)
+        for rect in band_discs[index]:
+            shifted = fitz.Rect(rect.x0, rect.y0 - dy, rect.x1, rect.y1 - dy)
+            page.draw_oval(shifted, color=(0, 0, 0), fill=(0, 0, 0), width=0)
+            content_bottom = max(content_bottom, rect.y1)
+        band_height = max(12.0, content_bottom - y0)
+        cursor = cursor + band_height + default_gap
+    return True
 
 
 def _wipe_page_contents(page: fitz.Page) -> None:
@@ -2861,7 +3180,8 @@ _RECAP_START = re.compile(
     r"based on the definition of highly compensated|"
     r"your plan is designed to allow participants|"
     r"your plan may also permit participants with over 15|"
-    r"participants with fifteen or more years of service|"
+    # Do NOT treat "Participants with fifteen…" as a new bullet — it continues
+    # the over-15 catch-up paragraph in source packages.
     r"universal availability rule|"
     r"the ['\u2018\u2019`\"\u201c\u201d]?universal availability|"
     r"based on the top heavy|"

@@ -93,6 +93,21 @@ def _format_percent(value: float) -> str:
     return f"{value:g}%"
 
 
+def _cover_letter_page_index(doc: fitz.Document) -> int:
+    """First page that looks like the cover letter (not ACTION / reports)."""
+    for index, page in enumerate(doc):
+        text = page.get_text("text") or ""
+        if re.search(r"annual valuation report|compliance testing summary", text, re.I):
+            continue
+        if re.search(r"we are pleased to provide|dear plan sponsor", text, re.I) and re.search(
+            r"\bRE\s*:",
+            text,
+            re.I,
+        ):
+            return index
+    return 0
+
+
 def apply_cover_date(doc: fitz.Document, marks: list[dict] | None = None) -> list[str]:
     """Set the cover letter date to today. This runs on every Process.
 
@@ -117,10 +132,12 @@ def apply_cover_date(doc: fitz.Document, marks: list[dict] | None = None) -> lis
     """
     if not doc.page_count:
         return []
-    changed = _rewrite_cover_day(doc[0], marks)
+    cover_index = _cover_letter_page_index(doc)
+    changed = _rewrite_cover_day(doc[cover_index], marks)
     today = cover_date_text()
     if changed:
-        return [f"Cover letter date set to {today} ({changed} place(s)). Check the letterhead spacing."]
+        where = f"page {cover_index + 1}" if cover_index else "cover"
+        return [f"Cover letter date set to {today} ({changed} place(s) on {where}). Check the letterhead spacing."]
     return [f"Cover letter date left as printed (already {today}, or no letter date was found)."]
 
 
@@ -545,10 +562,14 @@ def apply_source_rewrites(
     """
     notes: list[str] = []
     if doc.page_count:
-        changed = _rewrite_cover_day(doc[0], marks)
+        cover_index = _cover_letter_page_index(doc)
+        changed = _rewrite_cover_day(doc[cover_index], marks)
         today = cover_date_text()
         if changed:
-            notes.append(f"Cover letter date set to {today} ({changed} place(s)). Check the letterhead spacing.")
+            where = f"page {cover_index + 1}" if cover_index else "cover"
+            notes.append(
+                f"Cover letter date set to {today} ({changed} place(s) on {where}). Check the letterhead spacing."
+            )
         else:
             notes.append(f"Cover letter date left as printed (already {today}, or no letter date was found).")
     notes.extend(_rewrite_402g_dates(doc, profile, marks))

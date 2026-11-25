@@ -226,6 +226,14 @@ def _best_section(filename: str) -> tuple[int, dict] | None:
                 0,
             )
             return _rank(spec, index), spec
+    # Finished NNNN_YYYY-Valuation.pdf is not a Cover Letter / Valuation Pkg packet.
+    try:
+        from services.upload_dedupe import is_finished_valuation_filename
+
+        if is_finished_valuation_filename(filename):
+            return None
+    except Exception:
+        pass
     name = _norm(filename)
     specs = load_section_specs()
     paged = re.search(r"_p0*(\d+)(?:\.[^.]+)?$", filename, re.I)
@@ -405,6 +413,14 @@ def should_split_pages(filename: str, pages: int) -> bool:
     """
     if not filename.lower().endswith(".pdf") or pages <= 1:
         return False
+    # Finished OPS outputs are not cover packets — do not invent packet page labels.
+    try:
+        from services.upload_dedupe import is_finished_valuation_filename
+
+        if is_finished_valuation_filename(filename):
+            return False
+    except Exception:
+        pass
     spec = matched_spec(filename)
     return bool(spec and spec.get("split_pages"))
 
@@ -558,8 +574,27 @@ def page_label_from_text(text: str, fallback: str) -> str:
             return "ADP/ACP Failure letter"
     if re.match(r"^year[- ]end recap\b", first, re.I) or re.fullmatch(r"important information", first, re.I):
         return "Year End Recap"
-    if re.search(r"^(?:compliance and administrative reports|overview and descriptions|compliance reports)$", " ".join(lines[:2]), re.I):
+    # Overview title may span two lines ("COMPLIANCE AND ADMINISTRATIVE REPORTS" /
+    # "OVERVIEW AND DESCRIPTIONS") — match on the head, not a single-line fullmatch.
+    if re.search(
+        r"compliance and administrative reports|overview and descriptions|"
+        r"^compliance reports\b",
+        head,
+        re.I,
+    ):
         return "Compliance Reports"
+    if re.match(r"^administrative reports\b", first, re.I) and re.search(
+        r"hce\s*/?\s*key|highly compensated",
+        head,
+        re.I,
+    ):
+        return "Compliance Reports"
+    if re.match(r"^410\s*\(\s*b\s*\)", first, re.I) or re.search(
+        r"^410\s*\(\s*b\s*\)\s+coverage",
+        first,
+        re.I,
+    ):
+        return "410(b)"
     if re.fullmatch(r"annual valuation report", first, re.I):
         return "Action required"
     return fallback

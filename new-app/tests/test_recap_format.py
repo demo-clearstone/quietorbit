@@ -288,6 +288,39 @@ def test_recap_rebuild_drops_match_bullet_when_rule_says_remove() -> None:
     assert "Your plan is designed to allow participants" in text
 
 
+def test_recap_bullet_rewrite_draws_disc_not_type1_symbol() -> None:
+    """Symbol · rewritten via Type1 symb+WinAnsi looks like '<' — use filled discs."""
+    from services.pdf_modifier import _write_span
+
+    doc = fitz.open()
+    page = doc.new_page()
+    _write_span(
+        page,
+        {
+            "text": "·",
+            "origin": fitz.Point(67.1, 140.0),
+            "size": 7.35,
+            "font": "AAAAAF+Symbol",
+            "flags": 0,
+            "color": 0,
+            "bbox": fitz.Rect(67.1, 129.96, 70.48, 139.54),
+        },
+        0,
+    )
+    assert "·" not in (page.get_text("text") or "")
+    assert not any(font[3] == "Symbol" for font in page.get_fonts(full=True))
+    discs = [
+        drawing
+        for drawing in page.get_drawings()
+        if drawing.get("fill") in {(0, 0, 0), (0.0, 0.0, 0.0)}
+        and (rect := drawing.get("rect")) is not None
+        and 2.5 <= rect.width <= 4.5
+        and 2.5 <= rect.height <= 4.5
+    ]
+    assert len(discs) == 1
+    assert abs(discs[0]["rect"].width - 3.4) < 0.4
+
+
 def test_recap_remove_packs_remaining_bullets_under_important_information() -> None:
     """After keep/remove, rebuild packs kept bullets (Kaagaz p4) — no holes/fragments."""
     doc = fitz.open()

@@ -45,6 +45,7 @@ from services import (
     source_profile,
     source_rewrite,
     ssn_scan,
+    upload_dedupe,
 )
 from services import package_builder
 from services import midyear, plan_457
@@ -115,10 +116,23 @@ def process_uploads(
             status_code=400,
             detail="BRF reports are not included, and no other PDF was uploaded.",
         )
+    # Drop a prior finished OPS PDF when Valuation Pkg / report sources are present
+    # so packages are not doubled for any plan. Then SOP-order and content-dedupe.
+    valuation, finished_notes = upload_dedupe.exclude_finished_packages(valuation)
+    warnings.extend(finished_notes)
+    if not valuation:
+        raise HTTPException(
+            status_code=400,
+            detail="No source PDFs left after removing finished valuation packages.",
+        )
     if is_midyear:
         ordered = midyear.order_uploads(valuation) if auto_order else list(valuation)
     else:
         ordered = file_order.order_uploads(valuation) if auto_order else list(valuation)
+    ordered, dedupe_notes = upload_dedupe.dedupe_ordered_pages(ordered)
+    warnings.extend(dedupe_notes)
+    if not ordered:
+        raise HTTPException(status_code=400, detail="No PDF pages left after duplicate removal.")
     doc = pdf_assembler.merge_pdfs(ordered)
     email_path = ""
     log_file = ""

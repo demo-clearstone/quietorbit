@@ -42,7 +42,7 @@ expected_order:
       - "Cover Page"
       - "Valuation Pkg"
       - "Valuation Package"
-      - "Valuation"
+      # Do not alias bare "Valuation" — that matches finished NNNN_YYYY-Valuation.pdf outputs.
     label: Cover Letter
     split_pages: true
     split_page_labels:
