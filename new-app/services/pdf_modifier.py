@@ -106,16 +106,16 @@ def apply_decisions(
                 text,
                 re.I,
             ):
-                # Restore underlines only for kept failure headings after restack.
-                # Never invent/wipe plain ACTION / NO IMMEDIATE underlines.
+                # Temporary: failure underlines only. Full ACTION/green/failure
+                # underline + column normalize runs in _finalize_action_page_layout.
                 _redraw_action_rules(page, only_failure=True)
     # Standalone failure-info / letter pages: delete the whole page when removed
     # (heading-only redaction can miss wrapped titles and leave the sheet in place).
     if _drop_removed_failure_pages(doc, remove_ids) and "L" not in removed and "L" in remove_ids:
         removed.append("L")
-    # Always run: all-clear pages can lack ACTION REQUIRED even when nothing was
-    # removed on that page (green already alone, or pulled forward without a heading).
-    _finalize_no_immediate_pages(doc)
+    # Always run: normalize column, underlines, and all-clear ACTION packing on
+    # every Action page (not only NO IMMEDIATE pages — UAT fails on mixed layouts).
+    _finalize_action_page_layout(doc)
     return removed
 
 
@@ -581,25 +581,30 @@ _ACTION_RULE_INSET = 2.0
 
 
 def _ops_action_column_x(page: fitz.Page, preferred: float | None = None) -> float:
-    """Resolve the Action Required left column for all-clear pages.
+    """Resolve the Action Required left column for every AV / Action page.
 
-    When source headings sit flush on the header rule, nudge to the OPS inset
-    (rule + 2 ≈ 38). Keep an already-inset source column as-is.
+    OPS expected packages inset headings slightly past the AV header rule
+    (rule at 36 → column ≈ 38). Always prefer that inset when a header rule
+    exists so flush (36) and drifted (54+) source columns both normalize.
     """
     rule_x = _top_header_rule_x0(page)
     if rule_x is not None:
-        ops = float(rule_x) + _ACTION_RULE_INSET
-        if preferred is None:
-            return ops
-        preferred = float(preferred)
-        if abs(preferred - ops) <= 1.0:
-            return preferred
-        if abs(preferred - float(rule_x)) <= 1.0:
-            return ops
-        return preferred
-    if preferred is not None:
+        return float(rule_x) + _ACTION_RULE_INSET
+    if preferred is not None and 30.0 <= float(preferred) <= 60.0:
         return float(preferred)
-    return _action_column_x(page)
+    median = _action_column_x(page)
+    if 30.0 <= median <= 60.0:
+        return median
+    return 54.0
+
+
+_ACTION_PHRASE_RE = re.compile(
+    r"^(?:ACTION REQUIRED\s*$|"
+    r"IMMEDIATE ACTION REQUIRED\b.*|"
+    r"ATTENTION REQUIRED\b.*|"
+    r"NO IMMEDIATE ACTION IS REQUIRED(?: AT THIS TIME)?\s*$)",
+    re.I,
+)
 
 
 def _is_page_number_block(page: fitz.Page, block: dict) -> bool:
@@ -1201,57 +1206,69 @@ def _cover_or_redact_rules(page: fitz.Page, boxes: list[fitz.Rect], *, redact: b
 
 
 def _finalize_no_immediate_pages(doc: fitz.Document) -> None:
-    """Ensure all-clear AV pages match OPS ACTION column geometry.
+    """Backward-compatible alias — full layout runs in ``_finalize_action_page_layout``."""
+    _finalize_action_page_layout(doc)
 
-    - ACTION REQUIRED present (insert only when missing)
-    - ACTION / NO IMMEDIATE share the OPS column (header-rule inset ≈ 38)
-    - Do not invent underlines — many OPS packages have none on all-clear pages
-    - Never leave duplicate green glyphs after a left-shift rewrite
+
+def _finalize_action_page_layout(doc: fitz.Document) -> None:
+    """Normalize Action Required column, underlines, and all-clear packing on every AV page.
+
+    UAT fails when only NO-IMMEDIATE pages are fixed: failure / mixed pages also
+    need a shared OPS column (rule + 2) and restored underlines after restack.
     """
     for page in doc:
         text = page.get_text("text") or ""
-        if not re.search(r"no immediate action is required at this time", text, re.I):
+        if _is_notice_or_excess_page(text):
             continue
-        if not re.search(r"annual valuation report", text, re.I):
+        if not _is_action_flow_page(page):
             continue
-        # Leave pages that still have other action blocks; only pack the all-clear page.
-        if re.search(r"IMMEDIATE ACTION REQUIRED|ATTENTION REQUIRED", text, re.I):
+        if _is_recap_text(text) and not re.search(
+            r"ACTION REQUIRED|IMMEDIATE ACTION|NO IMMEDIATE ACTION", text, re.I
+        ):
             continue
+
         action = None
         green = None
         for block in _text_blocks(page):
             joined = " ".join(span["text"] for span in block["spans"]).strip()
             if action is None and re.fullmatch(r"ACTION REQUIRED", joined, re.I):
                 action = block
-            if green is None and re.match(r"NO IMMEDIATE ACTION IS REQUIRED AT THIS TIME", joined, re.I):
-                green = block
-        if green is None:
-            continue
-        # Clear orphan rules that cut through ACTION / green ink (leftover from removals).
-        for block in _text_blocks(page):
-            joined = " ".join(span["text"] for span in block["spans"]).strip()
-            if re.fullmatch(r"ACTION REQUIRED", joined, re.I) or re.match(
+            if green is None and re.match(
                 r"NO IMMEDIATE ACTION IS REQUIRED AT THIS TIME", joined, re.I
             ):
-                _cover_rules_through_band(
-                    page,
-                    float(block["bbox"].y0),
-                    float(block["bbox"].y1),
-                    float(block["bbox"].x0),
-                    float(block["bbox"].x1),
-                )
-        # OPS column: inset from the AV header rule when source sits flush on it.
-        preferred = float(action["bbox"].x0) if action is not None else float(green["bbox"].x0)
+                green = block
+
+        # Clear orphan rules that cut through heading ink (leftover from removals).
+        for block in _text_blocks(page):
+            joined = " ".join(span["text"] for span in block["spans"]).strip()
+            if not _ACTION_PHRASE_RE.match(joined):
+                continue
+            _cover_rules_through_band(
+                page,
+                float(block["bbox"].y0),
+                float(block["bbox"].y1),
+                float(block["bbox"].x0),
+                float(block["bbox"].x1),
+            )
+
+        preferred = None
+        if action is not None:
+            preferred = float(action["bbox"].x0)
+        elif green is not None:
+            preferred = float(green["bbox"].x0)
+        else:
+            preferred = _action_column_x(page)
         column_x = _ops_action_column_x(page, preferred)
-        if column_x > 70:
-            column_x = min(column_x, _action_column_x(page))
-            if column_x > 70:
-                column_x = 54.0
-        has_heading = action is not None
-        if not has_heading:
+
+        # All-clear: insert missing ACTION REQUIRED above the green line.
+        only_green = (
+            green is not None
+            and action is None
+            and not re.search(r"IMMEDIATE ACTION REQUIRED|ATTENTION REQUIRED", text, re.I)
+        )
+        if only_green:
             green_top = float(green["bbox"].y0)
             header_rule_y = _top_header_rule_y(page)
-            # Prefer packing under the header, but never drop ACTION into the green line.
             if header_rule_y is not None:
                 heading_baseline = header_rule_y + 28.0
                 if heading_baseline + 4.0 >= green_top:
@@ -1261,29 +1278,30 @@ def _finalize_no_immediate_pages(doc: fitz.Document) -> None:
             else:
                 heading_baseline = green_top - 14.0
             _write_action_heading(page, heading_baseline, x=column_x)
-        # Force green (and ACTION if present) onto the same OPS left edge.
+
+        # Force every action phrase onto the same OPS left edge.
         _left_align_action_phrases(page, column_x)
-        # Pull green closer under ACTION when packing left a large gap.
+        # Pull green closer under ACTION when nothing sits between them.
         _tighten_no_immediate_under_action(page)
-        # Always restore OPS filled underlines under ACTION / NO IMMEDIATE.
-        # Restack often wipes the source bars; expected all-clear pages keep both.
+        # Restore filled underlines for ACTION / green / failure headings.
         _redraw_action_rules(page, only_failure=False, invent=True)
 
 
 def _left_align_action_phrases(page: fitz.Page, column_x: float) -> None:
-    """Shift ACTION REQUIRED / NO IMMEDIATE lines so their left edges share ``column_x``."""
+    """Shift all Action Required phrases so their left edges share ``column_x``."""
     targets = []
     for block in _text_blocks(page):
         joined = " ".join(span["text"] for span in block["spans"]).strip()
-        if re.fullmatch(r"ACTION REQUIRED", joined, re.I) or re.match(
-            r"NO IMMEDIATE ACTION IS REQUIRED AT THIS TIME", joined, re.I
-        ):
+        if _ACTION_PHRASE_RE.match(joined):
             targets.append(block)
+    # Top-to-bottom so redactions do not disturb yet-to-move lower phrases' geometry
+    # more than necessary; each target still uses its own captured bbox.
+    targets.sort(key=lambda block: float(block["bbox"].y0))
     for block in targets:
         dx = float(column_x) - float(block["bbox"].x0)
         if abs(dx) < 0.75:
             continue
-        # cover=True so the original glyphs are gone — otherwise green appears twice.
+        # cover=True so the original glyphs are gone — otherwise phrases duplicate.
         _apply_redact_boxes(page, [block["bbox"]], cover=True)
         for span in block["spans"]:
             moved = {
@@ -1294,7 +1312,10 @@ def _left_align_action_phrases(page: fitz.Page, column_x: float) -> None:
 
 
 def _tighten_no_immediate_under_action(page: fitz.Page) -> None:
-    """Reduce vertical gap between ACTION REQUIRED and the green NO IMMEDIATE line."""
+    """Reduce vertical gap between ACTION REQUIRED and the green NO IMMEDIATE line.
+
+    Only when nothing else sits between them (failure pages keep their spacing).
+    """
     action = None
     green = None
     for block in _text_blocks(page):
@@ -1305,12 +1326,25 @@ def _tighten_no_immediate_under_action(page: fitz.Page) -> None:
             green = block
     if action is None or green is None:
         return
+    action_bottom = float(action["bbox"].y1)
+    green_top = float(green["bbox"].y0)
+    if green_top <= action_bottom:
+        return
+    # Bail if another action heading or body line sits between ACTION and green.
+    for block in _text_blocks(page):
+        mid = (float(block["bbox"].y0) + float(block["bbox"].y1)) / 2.0
+        if mid <= action_bottom + 1.0 or mid >= green_top - 1.0:
+            continue
+        joined = " ".join(span["text"] for span in block["spans"]).strip()
+        if not joined or _is_noise_text(joined):
+            continue
+        return
     # Target ~12pt from ACTION baseline band to green top (source/Kaagaz packing).
-    target_top = float(action["bbox"].y1) + 10.0
-    gap = float(green["bbox"].y0) - float(action["bbox"].y1)
+    target_top = action_bottom + 10.0
+    gap = green_top - action_bottom
     if gap <= 14.0:
         return
-    dy = target_top - float(green["bbox"].y0)
+    dy = target_top - green_top
     if abs(dy) < 0.75:
         return
     _apply_redact_boxes(page, [green["bbox"]], cover=True)
