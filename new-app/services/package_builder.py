@@ -463,23 +463,24 @@ def _wrapped_text(
     return y
 
 
-# Year End Recap layout — match client expected compare_pdfs metrics.
+# Year End Recap layout — match client expected OPS metrics (800643 Kaagaz p4).
+# Baselines are insert_text Y values; source packs header lines ~13pt apart.
 RECAP_TITLE_SIZE = 10.5
-RECAP_TITLE_Y = 48.0
+RECAP_TITLE_Y = 29.0
 RECAP_DATE_SIZE = 9.9
-RECAP_DATE_Y = 66.0
+RECAP_DATE_Y = 42.0
 RECAP_PLAN_SIZE = 9.9
-RECAP_PLAN_Y = 79.0
+RECAP_PLAN_Y = 54.7
 RECAP_NUMBER_SIZE = 9.9
-# Plan name at baseline 79 occupies ~y68–82; number must sit fully below it.
-RECAP_NUMBER_Y = 95.0
-RECAP_HEADER_RULE_Y = 102.0
+# Source Arial uses 67.4; Helvetica bbox is slightly taller so keep a 1pt cushion.
+RECAP_NUMBER_Y = 68.5
+RECAP_HEADER_RULE_Y = 92.8
 RECAP_HEADER_RULE_X0 = 42.0
 RECAP_HEADER_RULE_X1 = 504.0
 RECAP_IMPORTANT_X = 42.0
 RECAP_IMPORTANT_SIZE = 9.6
-RECAP_IMPORTANT_Y = 123.0
-RECAP_BODY_START_Y = 141.0
+RECAP_IMPORTANT_Y = 113.7
+RECAP_BODY_START_Y = 137.0
 RECAP_BODY_SIZE = 8.1
 RECAP_BODY_LEADING = 10.0
 RECAP_BODY_X = 78.0
@@ -1445,7 +1446,8 @@ def write_recap_page(
             continue
         font = "helv"
         _center(page, line, y if y > RECAP_TITLE_Y else RECAP_DATE_Y, RECAP_DATE_SIZE, font)
-        y = RECAP_PLAN_Y if abs(y - RECAP_DATE_Y) < 1 else y + 12.0
+        # Keep ~13pt baseline steps like the source OPS header stack.
+        y = RECAP_PLAN_Y if abs(y - RECAP_DATE_Y) < 1 else y + 12.7
     if not header_rule_drawn:
         _draw_recap_header_rule(page)
         if y < RECAP_BODY_START_Y:
