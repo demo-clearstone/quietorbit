@@ -1100,13 +1100,17 @@ def _present_reports(doc: fitz.Document, source_files: list[str]) -> set[str]:
         lines = [line.strip() for line in text.splitlines() if line.strip()]
         if not lines:
             continue
-        head = " ".join(lines[:3])
+        # Landscape reports often put the plan name above the report title.
+        head = " ".join(lines[:8])
         if _SKIP_HEAD.search(head):
             if _SUMMARY_HEAD.search(head):
                 present.add("Result Summary")
             continue
+        real_heading = any(
+            pattern.search(line) for line in lines[:10] for pattern in _REAL_REPORT_HEADS
+        )
         for label, _file_pattern, head_pattern in _REPORTS:
-            if not any(pattern.search(head) for pattern in _REAL_REPORT_HEADS):
+            if not real_heading:
                 continue
             if re.search(head_pattern, head, re.I):
                 present.add(label)

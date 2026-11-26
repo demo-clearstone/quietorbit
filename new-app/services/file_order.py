@@ -621,7 +621,16 @@ def page_label_from_text(text: str, fallback: str) -> str:
         if re.search(r"\bshne\s*variance\b", deeper, re.I):
             return "SHNE Variance"
         return "Variance"
-    if re.search(r"^contribution analysis(?:\s+by\s+source)?(?:\s+report)?\b", first, re.I):
+    # Landscape CA pages often lead with the plan name; title is a few lines down.
+    if re.search(
+        r"^contribution analysis(?:\s+by\s+source)?(?:\s+report)?\b",
+        first,
+        re.I,
+    ) or re.search(
+        r"(?m)^contribution analysis(?:\s+by\s+source)?(?:\s+report)?\b",
+        "\n".join(lines[:12]),
+        re.I,
+    ):
         return "Contribution Analysis"
     # AV header alone is Action Required only when the page is not a notice/variance.
     if re.fullmatch(r"annual valuation report", first, re.I):

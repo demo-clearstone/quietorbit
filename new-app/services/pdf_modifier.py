@@ -575,23 +575,35 @@ def _top_header_rule_x0(page: fitz.Page) -> float | None:
     return found[1] if found else None
 
 
-# OPS client packages inset ACTION / NO IMMEDIATE slightly past the header rule
-# (rule at 36 → column ≈ 38). Source Valuation Pkgs often sit flush on the rule.
-_ACTION_RULE_INSET = 2.0
+# OPS / Kaagaz packages inset ACTION past the header rule (rule at 36 → column ≈ 40).
+# Source Valuation Pkgs often sit flush on the rule; finished packages use ~40.
+_ACTION_RULE_INSET = 4.0
 
 
 def _ops_action_column_x(page: fitz.Page, preferred: float | None = None) -> float:
     """Resolve the Action Required left column for every AV / Action page.
 
-    OPS expected packages inset headings slightly past the AV header rule
-    (rule at 36 → column ≈ 38). Always prefer that inset when a header rule
-    exists so flush (36) and drifted (54+) source columns both normalize.
+    When a header rule exists (often x≈36):
+    - flush on the rule → nudge to rule+4 (≈40, matches Kaagaz compare)
+    - already inset in the normal band (≈38–46) → keep source/expected column
+    - drifted far right after restack (≈54+) → snap back to rule+4
     """
     rule_x = _top_header_rule_x0(page)
-    if rule_x is not None:
-        return float(rule_x) + _ACTION_RULE_INSET
-    if preferred is not None and 30.0 <= float(preferred) <= 60.0:
-        return float(preferred)
+    ops = float(rule_x) + _ACTION_RULE_INSET if rule_x is not None else None
+    if preferred is not None:
+        preferred = float(preferred)
+        if rule_x is not None and ops is not None:
+            if abs(preferred - float(rule_x)) <= 1.0:
+                return ops
+            if float(rule_x) + 1.5 <= preferred <= float(rule_x) + 10.0:
+                return preferred
+            if preferred > float(rule_x) + 10.0:
+                return ops
+            return preferred
+        if 30.0 <= preferred <= 60.0:
+            return preferred
+    if ops is not None:
+        return ops
     median = _action_column_x(page)
     if 30.0 <= median <= 60.0:
         return median
@@ -2342,6 +2354,8 @@ def apply_recap_bullets(
         # Wording replacement (exclusive swap / rate fill / inject) — not space tidy.
         wording_changed = False
         have_exclusive = False
+        # (old_source_bullet, new_exclusive_text) when Future-HCE wording is swapped.
+        exclusive_swaps: list[tuple[str, str]] = []
         for bullet in bullets:
             # Normalize only for rule matching; keep source spacing/quotes on kept text.
             normalized = _normalize_recap_bullet_spaces(bullet)
@@ -2366,6 +2380,7 @@ def apply_recap_bullets(
                     if wanted_exclusive == "Y2":
                         swapped = _fill_prior_rates(swapped, nhce)
                     kept.append(swapped)
+                    exclusive_swaps.append((bullet, swapped))
                     have_exclusive = True
                     wording_changed = True
                 dropped.append(bullet)
@@ -2383,6 +2398,7 @@ def apply_recap_bullets(
                     if wanted_exclusive == "Y2":
                         swapped = _fill_prior_rates(swapped, nhce)
                     kept.append(swapped)
+                    exclusive_swaps.append((bullet, swapped))
                     have_exclusive = True
                     wording_changed = True
                 if rule_id and rule_id not in removed:
@@ -2398,6 +2414,7 @@ def apply_recap_bullets(
                 filled = _fill_prior_rates(bullet, nhce)
                 if filled != bullet:
                     wording_changed = True
+                    exclusive_swaps.append((bullet, filled))
                     bullet = filled
             kept.append(bullet)
         if wanted_exclusive and wanted_exclusive not in remove_ids and not have_exclusive:
@@ -2412,15 +2429,32 @@ def apply_recap_bullets(
         # remain from a prior partial keep/remove (Kaagaz expects a clean page).
         if not dropped and not wording_changed and not _recap_has_clip_fragments(page):
             continue
-        # Drop-only edits: pack source glyphs in place so wrap endings/spacing match
-        # the uploaded package (and OPS expected). Full rebuild changes fonts/wraps.
-        if (
-            dropped
-            and not wording_changed
-            and not _recap_has_clip_fragments(page)
-            and _pack_recap_drops_inplace(page, dropped)
+        # Prefer in-place edits: pack drops and/or rewrite exclusive bands without
+        # wiping the page (full rebuild invents borders and rewraps catch-up quotes).
+        if not _recap_has_clip_fragments(page) and (
+            exclusive_swaps
+            or (dropped and not wording_changed)
         ):
-            continue
+            other_drops = [
+                item
+                for item in dropped
+                if not any(
+                    _normalize_recap_bullet_spaces(item).lower()[:48]
+                    == _normalize_recap_bullet_spaces(old).lower()[:48]
+                    for old, _new in exclusive_swaps
+                )
+            ]
+            if (exclusive_swaps or other_drops) and _pack_recap_edits_inplace(
+                page, other_drops, exclusive_swaps
+            ):
+                continue
+            if (
+                dropped
+                and not wording_changed
+                and not exclusive_swaps
+                and _pack_recap_drops_inplace(page, dropped)
+            ):
+                continue
         header_lines = [
             line.strip()
             for line in header.splitlines()
@@ -2495,63 +2529,109 @@ def _recap_bullet_bands(page: fitz.Page) -> list[tuple[float, float, str]]:
     return bands
 
 
-def _pack_recap_drops_inplace(page: fitz.Page, dropped: list[str]) -> bool:
-    """Remove dropped Recap bullets and restack kept source bands — no rewrap.
+def _recap_band_matches(start: str, candidate: str) -> bool:
+    """True when a Recap band start matches a dropped/swapped bullet prefix."""
+    start_norm = _normalize_recap_bullet_spaces(start).lower()[:72]
+    cand_norm = _normalize_recap_bullet_spaces(candidate).lower()[:72]
+    if not start_norm or not cand_norm:
+        return False
+    return start_norm.startswith(cand_norm[:48]) or cand_norm.startswith(start_norm[:48])
 
-    Each kept bullet band is moved as a unit (same internal line breaks, x, and
-    fonts as the upload). Bands are packed under Important Information with the
-    source inter-band gap preserved between survivors.
+
+def _snapshot_recap_band(
+    page: fitz.Page, y0: float, y1: float
+) -> tuple[list[dict], list[fitz.Rect]] | None:
+    """Capture source spans and bullet discs for one Recap band."""
+    spans: list[dict] = []
+    for block in _text_blocks(page):
+        mid = (float(block["bbox"].y0) + float(block["bbox"].y1)) / 2.0
+        if mid < y0 - 0.5 or mid > y1 + 0.5:
+            continue
+        for span in block["spans"]:
+            spans.append(dict(span))
+    discs: list[fitz.Rect] = []
+    for drawing in page.get_drawings():
+        fill = drawing.get("fill")
+        if fill not in {(0, 0, 0), (0.0, 0.0, 0.0)}:
+            continue
+        rect = fitz.Rect(drawing.get("rect") or (0, 0, 0, 0))
+        if not (2.5 <= rect.width <= 6 and 2.5 <= rect.height <= 6 and 50 <= rect.x0 <= 110):
+            continue
+        mid = (rect.y0 + rect.y1) / 2.0
+        if y0 - 0.5 <= mid <= y1 + 0.5:
+            discs.append(fitz.Rect(rect))
+    if not spans:
+        return None
+    return spans, discs
+
+
+def _pack_recap_edits_inplace(
+    page: fitz.Page,
+    dropped: list[str],
+    replacements: list[tuple[str, str]],
+) -> bool:
+    """Drop and/or rewrite Recap bands while replaying other source glyphs.
+
+    Exclusive Future-HCE swaps rewrite only that band (ASCII Helvetica text);
+    every other survivor keeps its original wrap, fonts, and quotes. Avoids the
+    full-page wipe that invents header borders and corrupts catch-up glyphs.
     """
-    if not dropped:
+    if not dropped and not replacements:
         return False
     bands = _recap_bullet_bands(page)
-    if len(bands) < 2:
+    if len(bands) < 1:
         return False
-    drop_norms = [_normalize_recap_bullet_spaces(item).lower()[:72] for item in dropped if item]
-    kept_bands: list[tuple[float, float, str]] = []
-    drop_ranges: list[tuple[float, float]] = []
+
+    from services.package_builder import (
+        RECAP_BODY_LEADING,
+        RECAP_BODY_SIZE,
+        RECAP_BODY_X,
+        RECAP_BULLET_X,
+        RECAP_HEADER_RULE_X1,
+        _draw_recap_bullet_mark,
+        _write_recap_bullet_body,
+    )
+
+    # Classify each band: drop | replace(new_text) | keep
+    plan: list[tuple[str, float, float, str | None]] = []
+    used_replace = 0
     for y0, y1, start in bands:
-        start_norm = _normalize_recap_bullet_spaces(start).lower()[:72]
-        if any(
-            start_norm.startswith(drop[:48]) or drop.startswith(start_norm[:48])
-            for drop in drop_norms
-            if drop
-        ):
-            drop_ranges.append((y0, y1))
-        else:
-            kept_bands.append((y0, y1, start))
-    if not drop_ranges or not kept_bands:
+        matched_replace = next(
+            (
+                new_text
+                for old_text, new_text in replacements
+                if _recap_band_matches(start, old_text)
+            ),
+            None,
+        )
+        if matched_replace is not None:
+            plan.append(("replace", y0, y1, matched_replace))
+            used_replace += 1
+            continue
+        if any(_recap_band_matches(start, item) for item in dropped if item):
+            plan.append(("drop", y0, y1, None))
+            continue
+        plan.append(("keep", y0, y1, None))
+
+    survivors = [item for item in plan if item[0] != "drop"]
+    if not survivors:
+        return False
+    if used_replace == 0 and not any(item[0] == "drop" for item in plan):
+        return False
+    if replacements and used_replace == 0:
         return False
 
     body_top = _recap_body_top(page)
-    # Snapshot spans/discs per kept band before clearing the body.
-    band_spans: list[list[dict]] = []
-    band_discs: list[list[fitz.Rect]] = []
-    for y0, y1, _start in kept_bands:
-        spans: list[dict] = []
-        for block in _text_blocks(page):
-            mid = (float(block["bbox"].y0) + float(block["bbox"].y1)) / 2.0
-            if mid < y0 - 0.5 or mid > y1 + 0.5:
-                continue
-            for span in block["spans"]:
-                spans.append(dict(span))
-        discs: list[fitz.Rect] = []
-        for drawing in page.get_drawings():
-            fill = drawing.get("fill")
-            if fill not in {(0, 0, 0), (0.0, 0.0, 0.0)}:
-                continue
-            rect = fitz.Rect(drawing.get("rect") or (0, 0, 0, 0))
-            if not (2.5 <= rect.width <= 6 and 2.5 <= rect.height <= 6 and 50 <= rect.x0 <= 110):
-                continue
-            mid = (rect.y0 + rect.y1) / 2.0
-            if y0 - 0.5 <= mid <= y1 + 0.5:
-                discs.append(fitz.Rect(rect))
-        if not spans:
-            return False
-        band_spans.append(spans)
-        band_discs.append(discs)
+    snapshots: list[tuple[list[dict], list[fitz.Rect]] | None] = []
+    for kind, y0, y1, _payload in survivors:
+        if kind == "keep":
+            snap = _snapshot_recap_band(page, y0, y1)
+            if snap is None:
+                return False
+            snapshots.append(snap)
+        else:
+            snapshots.append(None)
 
-    # Source gap between consecutive original bands (for packing survivors).
     source_gaps: list[float] = []
     for index in range(len(bands) - 1):
         source_gaps.append(max(6.0, bands[index + 1][0] - bands[index][1]))
@@ -2562,24 +2642,68 @@ def _pack_recap_drops_inplace(page: fitz.Page, dropped: list[str]) -> bool:
     page.apply_redactions(images=0, graphics=1)
     page.draw_rect(body_rect, color=(1, 1, 1), fill=(1, 1, 1), width=0, overlay=True)
 
+    hang_x = RECAP_BODY_X
+    width = max(360.0, RECAP_HEADER_RULE_X1 - hang_x)
+    size = RECAP_BODY_SIZE
+    leading = RECAP_BODY_LEADING
+    bullet_prefix = re.compile(r"^(?:[\u2022•\u00b7\u25cf\u25e6\u2219\uf0b7╖■□▪▫*?\-]\s*)+")
+
     cursor = body_top + 6.0
-    for index, (y0, y1, _start) in enumerate(kept_bands):
+    for index, (kind, y0, y1, payload) in enumerate(survivors):
+        if kind == "replace":
+            body = bullet_prefix.sub("", (payload or "").strip()).strip()
+            body = _ascii_pdf_text(body)
+            _draw_recap_bullet_mark(page, RECAP_BULLET_X, cursor, body_size=size)
+            end_y = _write_recap_bullet_body(
+                page, body, hang_x, cursor, size, leading, width
+            )
+            cursor = end_y + default_gap
+            continue
+        spans, discs = snapshots[index] or ([], [])
         dy = y0 - cursor
         content_bottom = y0 + 12.0
-        for span in band_spans[index]:
+        for span in spans:
             origin = span["origin"]
             ox = float(origin.x if hasattr(origin, "x") else origin[0])
             oy = float(origin.y if hasattr(origin, "y") else origin[1])
-            size = float(span.get("size") or 8.0)
-            content_bottom = max(content_bottom, oy + size * 0.25)
+            span_size = float(span.get("size") or 8.0)
+            content_bottom = max(content_bottom, oy + span_size * 0.25)
             _write_span(page, {**span, "origin": fitz.Point(ox, oy - dy)}, 0)
-        for rect in band_discs[index]:
+        for rect in discs:
             shifted = fitz.Rect(rect.x0, rect.y0 - dy, rect.x1, rect.y1 - dy)
             page.draw_oval(shifted, color=(0, 0, 0), fill=(0, 0, 0), width=0)
             content_bottom = max(content_bottom, rect.y1)
         band_height = max(12.0, content_bottom - y0)
         cursor = cursor + band_height + default_gap
     return True
+
+
+def _ascii_pdf_text(value: str) -> str:
+    """Map smart quotes/dashes so Helvetica does not substitute middle-dots."""
+    text = str(value or "")
+    return (
+        text.replace("\u2018", "'")
+        .replace("\u2019", "'")
+        .replace("\u201c", '"')
+        .replace("\u201d", '"')
+        .replace("\u2013", "-")
+        .replace("\u2014", "-")
+        .replace("╖", '"')
+        .replace("ô", '"')
+        .replace("ö", '"')
+    )
+
+
+def _pack_recap_drops_inplace(page: fitz.Page, dropped: list[str]) -> bool:
+    """Remove dropped Recap bullets and restack kept source bands — no rewrap.
+
+    Each kept bullet band is moved as a unit (same internal line breaks, x, and
+    fonts as the upload). Bands are packed under Important Information with the
+    source inter-band gap preserved between survivors.
+    """
+    if not dropped:
+        return False
+    return _pack_recap_edits_inplace(page, dropped, [])
 
 
 def _wipe_page_contents(page: fitz.Page) -> None:

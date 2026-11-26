@@ -1204,6 +1204,19 @@ def _write_recap_bullet_body(
     width: float,
 ) -> float:
     """Draw one hanging-indent recap bullet with bold max-rate and italic Note runs."""
+    # Helvetica lacks curly-quote glyphs; map them or compare shows ╖catch-up╖.
+    body = (
+        str(body or "")
+        .replace("\u2018", "'")
+        .replace("\u2019", "'")
+        .replace("\u201c", '"')
+        .replace("\u201d", '"')
+        .replace("\u2013", "-")
+        .replace("\u2014", "-")
+        .replace("╖", '"')
+        .replace("ô", '"')
+        .replace("ö", '"')
+    )
     segments = _recap_body_segments(body)
     words: list[tuple[str, str]] = []
     for seg_index, (font, segment) in enumerate(segments):
