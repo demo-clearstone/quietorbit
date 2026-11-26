@@ -293,7 +293,7 @@ def normalize_cover_address_spacing(doc: fitz.Document) -> list[str]:
     """Compact oversized gaps in the cover address block and pull RE:/body up with it."""
     if not doc.page_count:
         return []
-    page = doc[0]
+    page = doc[_cover_letter_page_index(doc)]
     blocks = page.get_text("dict").get("blocks", [])
     lines: list[dict] = []
     for block in blocks:
@@ -305,20 +305,34 @@ def normalize_cover_address_spacing(doc: fitz.Document) -> list[str]:
             if text:
                 lines.append({"line": line, "spans": spans, "text": text})
     lines.sort(key=lambda item: (item["line"]["bbox"][1], item["line"]["bbox"][0]))
-    date_index = next(
-        (index for index, item in enumerate(lines) if _LETTER_DATE.search(item["text"])),
-        None,
-    )
-    if date_index is None:
-        return []
     re_index = next(
-        (index for index in range(date_index + 1, len(lines)) if re.match(r"^RE:\s*", lines[index]["text"], re.I)),
+        (index for index, item in enumerate(lines) if re.match(r"^RE:\s*", item["text"], re.I)),
         None,
     )
-    if re_index is None:
+    if re_index is None or re_index == 0:
         return []
-
-    address_lines = lines[date_index + 1 : re_index]
+    # Prefer the letter date above RE:; otherwise pack the short block immediately
+    # above RE: (company / street / city-state-ZIP) when the date is missing or
+    # printed elsewhere on the page.
+    date_index = next(
+        (
+            index
+            for index in range(re_index)
+            if _LETTER_DATE.search(lines[index]["text"]) and index < re_index
+        ),
+        None,
+    )
+    if date_index is not None:
+        address_lines = lines[date_index + 1 : re_index]
+    else:
+        # Take up to 4 non-greeting lines directly above RE:.
+        start = max(0, re_index - 4)
+        address_lines = [
+            item
+            for item in lines[start:re_index]
+            if not re.match(r"^dear\b", item["text"], re.I)
+            and not _LETTER_DATE.search(item["text"])
+        ]
     if not address_lines:
         return []
 
