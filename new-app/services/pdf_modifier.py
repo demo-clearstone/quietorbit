@@ -575,33 +575,29 @@ def _top_header_rule_x0(page: fitz.Page) -> float | None:
     return found[1] if found else None
 
 
-# OPS / Kaagaz packages inset ACTION past the header rule (rule at 36 → column ≈ 40).
-# Source Valuation Pkgs often sit flush on the rule; finished packages use ~40.
-_ACTION_RULE_INSET = 4.0
+# Only nudge when ACTION sits flush on the AV header rule (rule at 36 → ≈38).
+# Never pull an already-inset source column left (e.g. 40 or 54 → 38/40).
+_ACTION_RULE_INSET = 2.0
 
 
 def _ops_action_column_x(page: fitz.Page, preferred: float | None = None) -> float:
     """Resolve the Action Required left column for every AV / Action page.
 
     When a header rule exists (often x≈36):
-    - flush on the rule → nudge to rule+4 (≈40, matches Kaagaz compare)
-    - already inset in the normal band (≈38–46) → keep source/expected column
-    - drifted far right after restack (≈54+) → snap back to rule+4
+    - flush on the rule → nudge slightly to rule+2 (≈38)
+    - already in the normal band (≈38–60, including source x≈40 or ≈54) → keep it
+    - do not snap a right-hand source column left to the rule inset
     """
     rule_x = _top_header_rule_x0(page)
     ops = float(rule_x) + _ACTION_RULE_INSET if rule_x is not None else None
     if preferred is not None:
         preferred = float(preferred)
-        if rule_x is not None and ops is not None:
-            if abs(preferred - float(rule_x)) <= 1.0:
-                return ops
-            if float(rule_x) + 1.5 <= preferred <= float(rule_x) + 10.0:
-                return preferred
-            if preferred > float(rule_x) + 10.0:
-                return ops
-            return preferred
+        if rule_x is not None and abs(preferred - float(rule_x)) <= 1.0:
+            return ops if ops is not None else preferred
+        # Keep source/expected column — forcing ops was shifting ACTION left.
         if 30.0 <= preferred <= 60.0:
             return preferred
+        return preferred
     if ops is not None:
         return ops
     median = _action_column_x(page)
